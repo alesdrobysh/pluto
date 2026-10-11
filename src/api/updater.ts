@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { UpdateInfo } from '../../electron/updateChecker';
+import type {
+  UpdateApplyResult,
+  UpdateInfo,
+} from '../../electron/updateChecker';
 
 export type { UpdateInfo };
 
@@ -20,8 +23,15 @@ export const getUpdateStatus = (): Promise<UpdateInfo> =>
 export const checkForUpdates = (): Promise<UpdateInfo> =>
   invoke<UpdateInfo>('PLUTO_UPDATER_CHECK_NOW');
 
-export const applyUpdate = (): Promise<void> =>
-  invoke<void>('PLUTO_UPDATER_APPLY_UPDATE');
+export const applyUpdate = (): Promise<UpdateApplyResult> => {
+  if (typeof window === 'undefined' || !window.ipcRenderer) {
+    return Promise.resolve({
+      started: false,
+      error: 'Update controls are unavailable. Restart Pluto and try again.',
+    });
+  }
+  return invoke<UpdateApplyResult>('PLUTO_UPDATER_APPLY_UPDATE');
+};
 
 export const openReleaseUrl = (url?: string): Promise<void> =>
   invoke<void>('PLUTO_UPDATER_OPEN_RELEASE_URL', url);
@@ -51,6 +61,7 @@ export const useAppUpdate = () => {
   });
   const [isChecking, setIsChecking] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -81,9 +92,13 @@ export const useAppUpdate = () => {
   };
 
   const handleApplyUpdate = async () => {
+    setUpdateError(null);
     setIsUpdating(true);
     try {
-      await applyUpdate();
+      const result = await applyUpdate();
+      if (!result.started) setUpdateError(result.error);
+    } catch (error) {
+      setUpdateError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsUpdating(false);
     }
@@ -93,6 +108,7 @@ export const useAppUpdate = () => {
     status,
     isChecking,
     isUpdating,
+    updateError,
     checkNow: handleCheckNow,
     applyUpdate: handleApplyUpdate,
     openReleaseUrl,

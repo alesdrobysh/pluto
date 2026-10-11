@@ -33,14 +33,14 @@ test(
       mkdirSync(dir, { recursive: true });
     const info = {
       CFBundleIdentifier: 'com.pluto.app',
-      CFBundleShortVersionString: '1.0.0-rc.6',
+      CFBundleShortVersionString: '1.0.0-rc.15',
     };
     writeFileSync(
       join(asset, 'Pluto.app', 'Contents', 'Info.plist'),
       JSON.stringify(info),
     );
     writeFileSync(join(asset, 'Pluto.app', 'new'), 'new app');
-    const filename = 'Pluto-Mac-1.0.0-rc.6-Installer.dmg';
+    const filename = 'Pluto-Mac-1.0.0-rc.15-Installer.dmg';
     writeFileSync(join(asset, filename), 'neutral installer fixture');
     const digest = createHash('sha256')
       .update('neutral installer fixture')
@@ -74,18 +74,18 @@ while [[ $# -gt 0 ]]; do
  esac
 done
 case "$url" in
- *api.github.com*) printf '[{"tag_name":"%s"}]' "\${TEST_LATEST_TAG:-v1.0.0-rc.6}" > "$target" ;;
+ *api.github.com*) printf '[{"tag_name":"%s"}]' "\${TEST_LATEST_TAG:-v1.0.0-rc.15}" > "$target" ;;
  *) cp "$TEST_ASSET/\${url##*/}" "$target" ;;
 esac`,
     );
     stub(
       'gh',
-      `if [[ "$1 $2" == 'release list' ]]; then echo v1.0.0-rc.6; exit; fi
+      `if [[ "$1 $2" == 'release list' ]]; then echo v1.0.0-rc.15; exit; fi
 while [[ $# -gt 0 ]]; do
  if [[ $1 == --dir ]]; then target=$2; break; fi
  shift
 done
-cp "$TEST_ASSET/Pluto-Mac-1.0.0-rc.6-Installer.dmg" "$TEST_ASSET/SHA256SUMS.txt" "$target/"`,
+cp "$TEST_ASSET/Pluto-Mac-1.0.0-rc.15-Installer.dmg" "$TEST_ASSET/SHA256SUMS.txt" "$target/"`,
     );
     stub(
       'hdiutil',
@@ -156,6 +156,10 @@ exec /bin/mv "$@"`,
       assert.match(readFileSync(log, 'utf8'), /xattr -dr com.apple.quarantine/);
       assert.match(readFileSync(log, 'utf8'), /open .*Applications\/Pluto.app/);
       writeFileSync(join(app, 'old'), 'previous app');
+      writeFileSync(
+        join(app, 'Contents', 'Info.plist'),
+        JSON.stringify({ ...info, CFBundleShortVersionString: '1.0.0-rc.14' }),
+      );
       result = run({ TEST_SWAP_FAIL: '1', TEST_PUBLIC: '1' });
       assert.notEqual(result.status, 0);
       assert.equal(readFileSync(join(app, 'old'), 'utf8'), 'previous app');
@@ -174,10 +178,15 @@ exec /bin/mv "$@"`,
           TEST_PUBLIC: '1',
           TEST_LATEST_TAG: 'v1.0.0-rc.99',
         },
-        ['--tag', 'v1.0.0-rc.6'],
+        ['--tag', 'v1.0.0-rc.15'],
       );
       assert.equal(result.status, 0, result.stderr);
       assert.equal(existsSync(join(app, 'old')), false);
+      assert.equal(
+        JSON.parse(readFileSync(join(app, 'Contents', 'Info.plist'), 'utf8'))
+          .CFBundleShortVersionString,
+        '1.0.0-rc.15',
+      );
       assert.match(
         readFileSync(log, 'utf8'),
         /tccutil reset All com\.pluto\.app/,

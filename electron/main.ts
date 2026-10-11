@@ -387,7 +387,16 @@ const checkForUpdatesFromMenu = async (): Promise<void> => {
       ? await dialog.showMessageBox(owner, options)
       : await dialog.showMessageBox(options);
     if (status.hasUpdate && result.response === 0) {
-      await updateChecker.applyUpdate();
+      const update = await updateChecker.applyUpdate();
+      if (!update.started) {
+        await dialog.showMessageBox({
+          type: 'error',
+          title: 'Pluto Update',
+          message: 'Pluto could not start the update.',
+          detail: update.error,
+          buttons: ['OK'],
+        });
+      }
     }
   } catch (error) {
     plutoLog.warn('Native update check failed:', error);

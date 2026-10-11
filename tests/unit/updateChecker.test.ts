@@ -24,10 +24,12 @@ const mocks = vi.hoisted(() => ({
   spawn: vi.fn(),
   userData: '',
   packaged: true,
+  version: '1.0.0-rc.8',
 }));
 vi.mock('electron', () => ({
   app: {
-    getVersion: () => '1.0.0-rc.8',
+    getVersion: () => mocks.version,
+    getAppPath: () => join(mocks.userData, 'app.asar'),
     get isPackaged() {
       return mocks.packaged;
     },
@@ -113,6 +115,9 @@ describe('UpdateChecker', () => {
     root = mkdtempSync(join(tmpdir(), 'pluto-updater-test-'));
     mocks.userData = root;
     mocks.packaged = true;
+    mocks.version = '1.0.0-rc.8';
+    mkdirSync(join(root, 'installer'));
+    writeFileSync(join(root, 'installer', 'install-macos.sh'), validInstaller);
     vi.clearAllMocks();
     spawned = undefined;
     mocks.spawn.mockImplementation((_cmd, args, options) => {
@@ -151,61 +156,66 @@ describe('UpdateChecker', () => {
       expect.anything(),
     );
   });
-  it('does not quit during recording or when installer download fails', async () => {
+  it('does not quit during recording or when the packaged installer is missing', async () => {
     const blocked = new UpdateChecker(
       () => null,
       () => false,
     );
     await check(blocked);
-    await blocked.applyUpdate();
-    expect(mocks.dialog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        detail: expect.stringContaining('Stop your recording'),
-      }),
-    );
+    expect(await blocked.applyUpdate()).toMatchObject({
+      started: false,
+      error: expect.stringContaining('Stop your recording'),
+    });
     expect(mocks.spawn).not.toHaveBeenCalled();
     expect(mocks.quit).not.toHaveBeenCalled();
     const checker = new UpdateChecker(() => null);
     await check(checker);
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 });
-    await checker.applyUpdate();
-    expect(mocks.dialog).toHaveBeenLastCalledWith(
-      expect.objectContaining({ detail: expect.stringContaining('404') }),
-    );
+    rmSync(join(root, 'installer', 'install-macos.sh'));
+    const result = await checker.applyUpdate();
+    expect(result).toMatchObject({ started: false });
+    if (!result.started) expect(result.error).toContain('Reinstall Pluto');
     expect(mocks.quit).not.toHaveBeenCalled();
   });
-  it('rejects a truncated installer and rechecks capture after downloading', async () => {
+  it('rejects a truncated installer and rechecks capture after loading it', async () => {
     let recording = false;
     const checker = new UpdateChecker(
       () => null,
       () => !recording,
     );
     await check(checker);
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      text: async () => '#!/bin/bash\nmain() {',
+    writeFileSync(
+      join(root, 'installer', 'install-macos.sh'),
+      '#!/bin/bash\nmain() {',
+    );
+    expect(await checker.applyUpdate()).toMatchObject({
+      started: false,
+      error: expect.stringContaining('incomplete'),
     });
-    await checker.applyUpdate();
     expect(mocks.spawn).not.toHaveBeenCalled();
-    globalThis.fetch = vi.fn().mockImplementation(async () => {
+    writeFileSync(join(root, 'installer', 'install-macos.sh'), validInstaller);
+    mocks.spawn.mockImplementationOnce((_cmd, args, options) => {
       recording = true;
-      return { ok: true, text: async () => validInstaller };
+      spawned = { args, env: options.env };
+      const child = Object.assign(new EventEmitter(), {
+        unref: vi.fn(),
+        kill: vi.fn(),
+      });
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
     });
-    await checker.applyUpdate();
-    expect(mocks.spawn).not.toHaveBeenCalled();
+    const result = await checker.applyUpdate();
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      started: false,
+      error: expect.stringContaining('Stop your recording'),
+    });
     expect(mocks.quit).not.toHaveBeenCalled();
   });
   it('pins the shown release, keeps the installed directory and quits only after helper launch', async () => {
     const checker = new UpdateChecker(() => null);
     await check(checker);
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, text: async () => validInstaller });
     await checker.applyUpdate();
-    expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/master/scripts/install-macos.sh'),
-      expect.anything(),
-    );
+    expect(fetch).toHaveBeenCalledOnce();
     expect(spawned?.env).toMatchObject({
       PLUTO_UPDATE_TAG: 'v1.0.0-rc.9',
       PLUTO_UPDATE_DIRECTORY: '/Applications',
@@ -219,19 +229,35 @@ describe('UpdateChecker', () => {
   it('keeps Pluto open if the update helper cannot spawn', async () => {
     const checker = new UpdateChecker(() => null);
     await check(checker);
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue({ ok: true, text: async () => validInstaller });
     mocks.spawn.mockImplementation(() => {
       const child = new EventEmitter();
       queueMicrotask(() => child.emit('error', new Error('spawn failed')));
       return child;
     });
-    await checker.applyUpdate();
+    const result = await checker.applyUpdate();
     expect(mocks.quit).not.toHaveBeenCalled();
-    expect(mocks.dialog).toHaveBeenCalledWith(
-      expect.objectContaining({ detail: 'spawn failed' }),
-    );
+    expect(result).toMatchObject({
+      started: false,
+      error: 'spawn failed',
+    });
+  });
+  it('starts an rc.14 to rc.15 update when the remote installer script is unavailable', async () => {
+    mocks.version = '1.0.0-rc.14';
+    const checker = new UpdateChecker(() => null);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [release('v1.0.0-rc.15')],
+    });
+    expect(await checker.checkForUpdates()).toMatchObject({
+      hasUpdate: true,
+      latestVersion: 'v1.0.0-rc.15',
+    });
+    await checker.applyUpdate();
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(spawned?.env.PLUTO_UPDATE_TAG).toBe('v1.0.0-rc.15');
+    expect(mocks.quit).toHaveBeenCalledOnce();
   });
   it('shows a persisted failure once after relaunch', async () => {
     writeFileSync(join(root, 'update-failure.txt'), 'Update failed (exit 42).');
@@ -294,7 +320,7 @@ it.each([
           PLUTO_UPDATE_SCRATCH: scratch,
           PLUTO_UPDATE_PARENT_PID:
             mode === 'shutdown timeout' ? String(process.pid) : '99999999',
-          PLUTO_UPDATE_TAG: 'v1.0.0-rc.9',
+          PLUTO_UPDATE_TAG: 'v1.0.0-rc.15',
         },
       });
       expect(run.status).toBe(exit);
@@ -308,7 +334,7 @@ it.each([
           '--directory',
           '/fixture Applications',
           '--tag',
-          'v1.0.0-rc.9',
+          'v1.0.0-rc.15',
         ]);
       }
       if (exit !== 0) {
