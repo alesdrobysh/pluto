@@ -150,6 +150,74 @@ describe('one-time database storage setup', () => {
     },
   );
 
+  it.each(['standard', 'encrypted'] as const)(
+    'upgrades a legacy %s profile in place and never asks for storage setup again',
+    (mode) => {
+      const oldMigrations = path.join(root, 'old-migrations');
+      fs.mkdirSync(path.join(oldMigrations, 'meta'), { recursive: true });
+      const journal = JSON.parse(
+        fs.readFileSync(
+          path.join(process.cwd(), 'drizzle/meta/_journal.json'),
+          'utf8',
+        ),
+      );
+      journal.entries = journal.entries.slice(0, 18);
+      fs.writeFileSync(
+        path.join(oldMigrations, 'meta/_journal.json'),
+        JSON.stringify(journal),
+      );
+      for (const entry of journal.entries) {
+        fs.copyFileSync(
+          path.join(process.cwd(), 'drizzle', `${entry.tag}.sql`),
+          path.join(oldMigrations, `${entry.tag}.sql`),
+        );
+      }
+      const old = createApplicationDatabase({
+        databasePath,
+        migrationsFolder: oldMigrations,
+        keyStore: mode === 'encrypted' ? keyStore() : undefined,
+      });
+      owners.push(old);
+      old
+        .initialize()
+        .prepare(
+          "INSERT INTO meetings (id, title) VALUES ('upgrade-example', 'Existing notes')",
+        )
+        .run();
+      owners.pop()!.close();
+      const envelopePath = path.join(root, 'app-key-envelope.json');
+      const envelope =
+        mode === 'encrypted' ? fs.readFileSync(envelopePath) : null;
+      const choose = vi.fn(() => {
+        throw new Error('Updates must not ask for storage setup');
+      });
+      expect(setup(choose)).toBe(mode);
+      expect(choose).not.toHaveBeenCalled();
+      const upgraded = owners[0].getConnection();
+      expect(
+        upgraded
+          .prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations')
+          .get(),
+      ).toEqual({ count: 20 });
+      expect(
+        upgraded
+          .prepare("SELECT title FROM meetings WHERE id = 'upgrade-example'")
+          .get(),
+      ).toEqual({ title: 'Existing notes' });
+      expect(
+        JSON.parse(
+          fs.readFileSync(path.join(root, 'database-storage.json'), 'utf8'),
+        ),
+      ).toEqual({ version: 1, mode, initialized: true });
+      owners.pop()!.close();
+      expect(setup(choose)).toBe(mode);
+      expect(choose).not.toHaveBeenCalled();
+      expect(isPlaintextSqliteDatabase(databasePath)).toBe(mode === 'standard');
+      if (envelope) expect(fs.readFileSync(envelopePath)).toEqual(envelope);
+      else expect(fs.existsSync(envelopePath)).toBe(false);
+    },
+  );
+
   it('preserves an existing encrypted database when its key is missing', () => {
     open('encrypted');
     owners.pop()!.close();

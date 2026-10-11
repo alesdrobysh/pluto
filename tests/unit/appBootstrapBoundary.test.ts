@@ -37,8 +37,7 @@ describe('Electron bootstrap boundary', () => {
 
     expect(source).toContain("bootstrap: 'electron/bootstrap.ts'");
     expect(source).toContain('resolveSourceUserDataDir');
-    expect(source).toContain("process.env.npm_lifecycle_event === 'start'");
-    expect(source).toContain('`--pluto-source-mode=${sourceMode}`');
+    expect(source).not.toContain('npm_lifecycle_event');
     expect(source).toContain('`--user-data-dir=${userDataDir}`');
     expect(packageJson.main).toBe('dist-electron/bootstrap.js');
     expect(packageJson.scripts.start).toBe(packageJson.scripts.dev);

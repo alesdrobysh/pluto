@@ -24,6 +24,22 @@ const packaged = [
 ];
 
 describe('database migration history', () => {
+  it('keeps established migration hashes, order, and timestamps immutable', () => {
+    const established = JSON.parse(
+      fs.readFileSync(
+        path.join(
+          process.cwd(),
+          'tests/fixtures/databaseMigrationHistory.json',
+        ),
+        'utf8',
+      ),
+    );
+    const current = readPackagedMigrationHistory(
+      path.join(process.cwd(), 'drizzle'),
+    );
+    expect(current.slice(0, established.length)).toEqual(established);
+  });
+
   it('accepts blank and exact packaged prefixes', () => {
     expect(() => assertSupportedMigrationHistory([], packaged)).not.toThrow();
     expect(() =>
@@ -58,6 +74,58 @@ describe('database migration history', () => {
         assertSupportedMigrationHistory(applied, packaged),
       ).toThrowError(
         expect.objectContaining({ code: 'database_version_unsupported' }),
+      );
+    }
+  });
+
+  it('explains when the database is ahead of an otherwise matching build', () => {
+    const applied = [
+      { createdAt: 100, hash: 'hash-0' },
+      { createdAt: 200, hash: 'hash-1' },
+      { createdAt: 300, hash: 'future' },
+    ];
+    let failure: unknown;
+    try {
+      assertSupportedMigrationHistory(applied, packaged);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      code: 'database_version_unsupported',
+      details: { migrationHistoryReason: 'newer_build_required' },
+    });
+    expect(describeDatabaseStartupError(failure)).toContain(
+      'Install a Pluto build that supports this database',
+    );
+    expect(describeDatabaseStartupError(failure)).toContain(
+      'Retrying this build will not resolve',
+    );
+  });
+
+  it('does not describe a longer divergent history as a simple outdated build', () => {
+    for (const first of [
+      { createdAt: 100, hash: 'changed' },
+      { createdAt: 99, hash: 'hash-0' },
+    ]) {
+      let failure: unknown;
+      try {
+        assertSupportedMigrationHistory(
+          [
+            first,
+            { createdAt: 200, hash: 'hash-1' },
+            { createdAt: 300, hash: 'future' },
+          ],
+          packaged,
+        );
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toMatchObject({
+        code: 'database_version_unsupported',
+        details: {},
+      });
+      expect(describeDatabaseStartupError(failure)).toBe(
+        'Database version is not supported by this Pluto build.',
       );
     }
   });

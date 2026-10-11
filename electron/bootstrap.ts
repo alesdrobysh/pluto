@@ -4,10 +4,10 @@ import { app, dialog, shell } from 'electron';
 
 import {
   PLUTO_BUNDLE_IDENTIFIER,
+  PLUTO_DEVELOPMENT_PRODUCT_NAME,
   PLUTO_PRODUCT_NAME,
   canOpenProductionDatabase,
   resolveProductionUserDataDir,
-  resolveSourceProfileMode,
   resolveSourceUserDataDir,
   resolveUserDataArgument,
 } from './appRuntimePolicy';
@@ -42,7 +42,6 @@ const userDataDir = app.isPackaged
   : resolveSourceUserDataDir({
       explicit: explicitUserDataDir,
       tempDir: os.tmpdir(),
-      mode: resolveSourceProfileMode(process.argv),
       productionDir:
         resolveProductionUserDataDir({
           platform: process.platform,
@@ -53,7 +52,9 @@ if (userDataDir) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   app.setPath('userData', userDataDir);
 }
-app.setName(PLUTO_PRODUCT_NAME);
+app.setName(
+  app.isPackaged ? PLUTO_PRODUCT_NAME : PLUTO_DEVELOPMENT_PRODUCT_NAME,
+);
 initializeElectronLogging({ isPackaged: app.isPackaged });
 const log = createLogger('Bootstrap');
 const productionSignature = app.isPackaged
@@ -169,6 +170,9 @@ if (!canOpenDatabase) {
         const isSetupKeyUnavailable =
           error instanceof DatabaseLifecycleError &&
           error.code === 'database_setup_key_unavailable';
+        const needsNewerBuild =
+          error instanceof DatabaseLifecycleError &&
+          error.details.migrationHistoryReason === 'newer_build_required';
 
         const title = isSetupKeyUnavailable
           ? 'Encrypted setup needs permission'
@@ -188,8 +192,8 @@ if (!canOpenDatabase) {
             ? ['Choose setup again', 'Quit Pluto']
             : isIdentityMismatch
               ? ['Open Data Folder', 'Quit Pluto']
-              : isKeyLocked
-                ? ['Retry', 'Open Data Folder', 'Quit Pluto']
+              : needsNewerBuild
+                ? ['Get compatible Pluto', 'Open Data Folder', 'Quit Pluto']
                 : ['Retry', 'Open Data Folder', 'Quit Pluto'],
           defaultId: isIdentityMismatch ? 1 : 0,
           cancelId: isSetupKeyUnavailable || isIdentityMismatch ? 1 : 2,
@@ -206,6 +210,13 @@ if (!canOpenDatabase) {
           break;
         }
         if (choice === 0) {
+          if (needsNewerBuild) {
+            void shell.openExternal(
+              'https://github.com/metagrover/pluto/releases',
+            );
+            app.quit();
+            break;
+          }
           continue;
         }
         if (choice === 1) {

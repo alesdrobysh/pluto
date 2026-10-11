@@ -19,6 +19,7 @@ export type DatabaseErrorCode =
 
 export interface DatabaseErrorDetails {
   migrationId?: string;
+  migrationHistoryReason?: 'newer_build_required';
   sqliteCode?: string;
   keyAccessStage?:
     | 'keychain_unavailable'
@@ -59,6 +60,9 @@ export const describeDatabaseStartupError = (error: unknown): string => {
     case 'database_configuration_failed':
       return 'Database configuration failed.';
     case 'database_version_unsupported':
+      if (error.details.migrationHistoryReason === 'newer_build_required') {
+        return 'This database was opened by a newer Pluto build. Install a Pluto build that supports this database before opening it again. Retrying this build will not resolve the version mismatch.';
+      }
       return 'Database version is not supported by this Pluto build.';
     case 'database_migration_failed': {
       const migration = migrationId ? ` ${migrationId}` : '';

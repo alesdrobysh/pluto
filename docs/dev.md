@@ -8,19 +8,19 @@ commands, not user-facing settings or routine setup requirements.
 
 ## Source startup and local profiles
 
-`pnpm start` and `pnpm dev` both prepare the native runtimes and launch source
-Pluto with hot reload. On macOS, `pnpm dev` uses
-`~/Library/Application Support/pluto-development`, while `pnpm start` uses the
-same `~/Library/Application Support/pluto` profile as the installed app. This
-lets `pnpm start` reproduce issues with production data. The single-instance
-lock prevents both processes from writing that profile at once. `pnpm dev`
-cannot select the production profile, even through `PLUTO_USER_DATA_DIR`. No installed
-app, signing certificate, or exported recovery key is required. A fresh profile
+`pnpm start` and `pnpm dev` (or the equivalent npm commands) prepare the native
+runtimes and launch Pluto Development with hot reload. Both use the persistent
+`~/Library/Application Support/pluto-development` profile on macOS. The installed
+Pluto app alone uses `~/Library/Application Support/pluto`. Source startup rejects
+production paths and their subdirectories, including symlink aliases, before
+opening the database or accessing its keys. Development also has a separate app
+name and bundle identifier (`com.pluto.app.development`). No installed app,
+signing certificate, or exported recovery key is required. A fresh profile
 first shows a native welcome step with a one-time Standard or Encrypted database
 choice, before the usual setup wizard. Standard setup does not create or access
 a database key. Encrypted setup obtains key-storage permission before creating
 the database; denied permission permits retrying or choosing Standard setup.
-Existing databases retain their format and skip this choice. Encrypted profiles
+Existing databases retain their format and skip this choice. App updates relaunch the same profile and keep its original storage choice; they never rerun storage setup. Legacy profiles record their existing format after successful startup. Encrypted profiles
 reuse their original keys, and macOS may request Keychain access.
 
 The choice is shown read-only in Advanced settings and is recorded in
@@ -30,13 +30,12 @@ without resetting data. Saved cloud-provider keys use secure storage with either
 setup. Empty credential checks do not request Keychain access, but saving or
 reading a credential may do so.
 
-Development startup uses a cached `Pluto.app` copy of Electron under ignored
-`node_modules` so the macOS menu bar shows Pluto. It leaves the installed Electron
+Development startup uses a cached `Pluto Development.app` copy of Electron under
+ignored `node_modules` so the macOS menu bar identifies the development build. It leaves the installed Electron
 dependency untouched and recreates the copy when the Electron binary changes.
 
 For another isolated profile, set `PLUTO_USER_DATA_DIR` to a separate absolute
-directory before either command. `pnpm start` can also use an explicit isolated
-profile for testing. Previously isolated meetings at
+directory outside the production profile before either command. Previously isolated meetings at
 `/tmp/pluto-development-profile` stay there; use that explicit override to reopen
 them. Startup does not move, merge, or delete existing profiles.
 
