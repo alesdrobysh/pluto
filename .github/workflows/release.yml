@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact master commit to verify before tagging
+        required: true
+        type: string
   pull_request:
     types: [opened, reopened, synchronize, labeled, unlabeled]
   push:
@@ -9,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -17,7 +24,7 @@ concurrency:
 jobs:
   build-macos:
     name: Build & Verify macOS DMG
-    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'release-test')
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'release-test')
     runs-on: macos-26 # Apple Silicon (arm64) runner with Swift 6.4
     timeout-minutes: 30
 
@@ -26,6 +33,22 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Require installer verification before tagged builds
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          VERIFIED="$(gh run list --workflow release.yml --commit "$RELEASE_SHA" --event workflow_dispatch --status success --json databaseId --jq 'length')"
+          test "$VERIFIED" -gt 0 || { echo "No successful installer verification for this commit. Run pnpm release publish before tagging." >&2; exit 1; }
+
+      - name: Verify requested commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
       - name: Verify release toolchain and version
         run: |
@@ -81,8 +104,12 @@ jobs:
           APP="release/${PACKAGE_VERSION}/mac-arm64/Pluto.app"
           DMG="release/${PACKAGE_VERSION}/Pluto-Mac-${PACKAGE_VERSION}-Installer.dmg"
           pnpm run package:verify-runtime -- "$APP"
-          pnpm run package:verify-setup -- "$APP"
           test -s "$DMG"
+          MOUNT="$(mktemp -d)"
+          trap 'hdiutil detach "$MOUNT" -quiet || true; rmdir "$MOUNT" || true' EXIT
+          hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT"
+          pnpm run package:verify-runtime -- "$MOUNT/Pluto.app"
+          pnpm run package:verify-setup -- "$MOUNT/Pluto.app"
           mkdir -p dist-release
           cp "$DMG" dist-release/
           NOTES="docs/releases/${GITHUB_REF_NAME}.md"
@@ -112,6 +139,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
       - name: Download verified installer
         uses: actions/download-artifact@v7
         with:
@@ -126,28 +154,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          RELEASE_TAG="${GITHUB_REF_NAME}"
-          RELEASE_VERSION="${RELEASE_TAG#v}"
-          RELEASE_FLAGS=()
-          if [[ "${RELEASE_VERSION}" == *-* || "${RELEASE_VERSION}" == *.rc.* ]]; then
-            RELEASE_FLAGS+=(--prerelease --latest=false)
-          fi
-          if [[ -s dist-release/release-notes.md ]]; then
-            RELEASE_FLAGS+=(--notes-file dist-release/release-notes.md)
-          else
-            # Compatibility for historical tags created before pnpm release.
-            RELEASE_FLAGS+=(--generate-notes)
-          fi
-          if gh release view "${RELEASE_TAG}" --json isDraft >/dev/null 2>&1; then
-            if [[ "$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)" == false ]]; then
-              echo "Release ${RELEASE_TAG} is already published."
-              exit 0
-            fi
-            gh release upload "${RELEASE_TAG}" dist-release/*.dmg dist-release/SHA256SUMS.txt --clobber
-            gh release edit "${RELEASE_TAG}" --draft=false
-            exit 0
-          fi
-          gh release create "${RELEASE_TAG}" dist-release/*.dmg dist-release/SHA256SUMS.txt \
-            --verify-tag \
-            --title "Pluto ${RELEASE_TAG}" \
-            "${RELEASE_FLAGS[@]}"
+          bash scripts/publish-release.sh "${GITHUB_REF_NAME}" dist-release

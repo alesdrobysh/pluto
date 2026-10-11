@@ -1723,3 +1723,12 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Supersedes:** The three-item cap in “2026-08-25 - Make Today's focus the dashboard's only daily priority surface” and “2026-09-16 - Show all open personal action items in Today’s focus.”
 - **Decision:** Show at most five items in Today's focus. Creation, backlog prioritization, and persisted daily ordering use the same limit; remaining items stay in the backlog. Existing review, ordering, and completion rules remain in force.
 - **Consequence:** Two additional existing items can be shown and prioritized. No additional queries, model calls, or background work are introduced.
+
+
+## 2026-10-11 - Require PR tests and installer verification before release tags
+
+- **Status:** Accepted by direct owner request; no replacement release authorized.
+- **Decision:** Require Biome Lint and Full Tests for up-to-date PRs into master. Full Tests includes TypeScript, release and installer regressions, and the complete Vitest suite on Apple Silicon macOS. A dedicated required-check ruleset has no administrator bypass; existing review requirements remain separate.
+- **Release flow:** `pnpm release` prepares a metadata PR without tagging. After merge, `pnpm release publish` verifies the exact master revision through an untagged CI build, including the app inside the mounted installer and cold/cached runtime preparation, before tagging. Changed master or failed verification blocks the tag. Tagged builds independently require that prior verification and repeat packaging checks.
+- **Publication:** Create or resume a draft, upload assets, then publish. API errors fail closed. Deleted immutable-release names are permanently reserved: rc.16 cannot be republished under its existing name. A new version requires separate release authorization; do not delete, move, or automatically bump tags to evade this protection.
+- **Limits:** Automated installer validation does not prove recording quality, macOS permission UX, or real-profile upgrade acceptance. Consumer recovery and development/profile isolation remain separate work.
