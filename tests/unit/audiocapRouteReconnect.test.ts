@@ -162,6 +162,7 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
     expect(body).toContain('throw error');
   });
 
+  // Allow a cold Swift compile on macOS CI before checking the filter output.
   it('rejects out-of-band frequencies (executable stopband test) in native AudioStreamer', () => {
     const streamerSource = readFileSync(
       'resources/swift/audiocap/AudioStreamer.swift',
@@ -182,5 +183,5 @@ describe('Native AudioCap dynamic route listener and watchdog contract', () => {
     } finally {
       compiled.cleanup();
     }
-  }, 15_000);
+  }, 120_000);
 });
