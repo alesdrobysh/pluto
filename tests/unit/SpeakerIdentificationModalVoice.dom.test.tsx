@@ -129,6 +129,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
       root.unmount();
     });
     container.remove();
+    vi.useRealTimers();
   });
 
   it('renders voice match suggestion banner with badges and confirm/reject actions', async () => {
@@ -955,6 +956,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
   });
 
   it('falls back to enrollment when voice suggestions wait times out', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     invoke.mockImplementation(async (channel: string, payload: any) => {
       if (channel === 'GET_IDENTITY_STATE') return workspace;
       if (channel === 'GET_MEETING_IDENTITY')
@@ -1023,7 +1025,7 @@ describe('SpeakerIdentificationModal voice profile suggestions and enrollment', 
     );
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await vi.advanceTimersByTimeAsync(30);
     });
 
     expect(invoke).toHaveBeenCalledWith(

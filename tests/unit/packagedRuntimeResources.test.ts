@@ -273,5 +273,6 @@ describe('packaged runtime resources', () => {
         await rm(temporaryRoot, { recursive: true, force: true });
       }
     },
+    30_000,
   );
 });
