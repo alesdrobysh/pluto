@@ -13,6 +13,10 @@ describe('Electron bootstrap boundary', () => {
 
     expect(source).not.toContain("from './db'");
     expect(source).toContain("app.setPath('userData'");
+    expect(source).toContain('resolveSourceUserDataDir({');
+    expect(source.indexOf('resolveSourceUserDataDir({')).toBeLessThan(
+      source.indexOf("app.setPath('userData'"),
+    );
     expect(source).toContain('sourceRuntime: !app.isPackaged');
     expect(source).toContain('database_key_identity_mismatch');
     expect(source.indexOf('requestSingleInstanceLock')).toBeGreaterThan(-1);
@@ -32,7 +36,9 @@ describe('Electron bootstrap boundary', () => {
     ) as { main?: string; scripts: Record<string, string> };
 
     expect(source).toContain("bootstrap: 'electron/bootstrap.ts'");
-    expect(source).toContain('resolveDevelopmentUserDataDir');
+    expect(source).toContain('resolveSourceUserDataDir');
+    expect(source).toContain("process.env.npm_lifecycle_event === 'start'");
+    expect(source).toContain('`--pluto-source-mode=${sourceMode}`');
     expect(source).toContain('`--user-data-dir=${userDataDir}`');
     expect(packageJson.main).toBe('dist-electron/bootstrap.js');
     expect(packageJson.scripts.start).toBe(packageJson.scripts.dev);

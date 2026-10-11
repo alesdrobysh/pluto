@@ -1,9 +1,14 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import { app, dialog, shell } from 'electron';
 
 import {
   PLUTO_BUNDLE_IDENTIFIER,
   PLUTO_PRODUCT_NAME,
   canOpenProductionDatabase,
+  resolveProductionUserDataDir,
+  resolveSourceProfileMode,
+  resolveSourceUserDataDir,
   resolveUserDataArgument,
 } from './appRuntimePolicy';
 import { initializeCommitmentNotificationBridge } from './commitmentReminderNotifications';
@@ -32,8 +37,21 @@ let focusPrimaryWindow: (() => void) | null = null;
 const explicitUserDataDir =
   resolveUserDataArgument(process.argv) ||
   process.env.PLUTO_USER_DATA_DIR?.trim();
-if (explicitUserDataDir) {
-  app.setPath('userData', explicitUserDataDir);
+const userDataDir = app.isPackaged
+  ? explicitUserDataDir
+  : resolveSourceUserDataDir({
+      explicit: explicitUserDataDir,
+      tempDir: os.tmpdir(),
+      mode: resolveSourceProfileMode(process.argv),
+      productionDir:
+        resolveProductionUserDataDir({
+          platform: process.platform,
+          homeDir: os.homedir(),
+        }) ?? undefined,
+    });
+if (userDataDir) {
+  fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
+  app.setPath('userData', userDataDir);
 }
 app.setName(PLUTO_PRODUCT_NAME);
 initializeElectronLogging({ isPackaged: app.isPackaged });

@@ -9,8 +9,12 @@ commands, not user-facing settings or routine setup requirements.
 ## Source startup and local profiles
 
 `pnpm start` and `pnpm dev` both prepare the native runtimes and launch source
-Pluto with hot reload. On macOS both use `~/Library/Application Support/pluto` by
-default, so changing commands does not change the visible meetings. No installed
+Pluto with hot reload. On macOS, `pnpm dev` uses
+`~/Library/Application Support/pluto-development`, while `pnpm start` uses the
+same `~/Library/Application Support/pluto` profile as the installed app. This
+lets `pnpm start` reproduce issues with production data. The single-instance
+lock prevents both processes from writing that profile at once. `pnpm dev`
+cannot select the production profile, even through `PLUTO_USER_DATA_DIR`. No installed
 app, signing certificate, or exported recovery key is required. A fresh profile
 first shows a native welcome step with a one-time Standard or Encrypted database
 choice, before the usual setup wizard. Standard setup does not create or access
@@ -30,8 +34,9 @@ Development startup uses a cached `Pluto.app` copy of Electron under ignored
 `node_modules` so the macOS menu bar shows Pluto. It leaves the installed Electron
 dependency untouched and recreates the copy when the Electron binary changes.
 
-For an isolated profile, set `PLUTO_USER_DATA_DIR` to a separate absolute directory
-before either command. Previously isolated meetings at
+For another isolated profile, set `PLUTO_USER_DATA_DIR` to a separate absolute
+directory before either command. `pnpm start` can also use an explicit isolated
+profile for testing. Previously isolated meetings at
 `/tmp/pluto-development-profile` stay there; use that explicit override to reopen
 them. Startup does not move, merge, or delete existing profiles.
 

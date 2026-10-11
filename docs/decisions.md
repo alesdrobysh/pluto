@@ -1450,6 +1450,12 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Key custody and preservation:** Fresh profiles create their own local Electron safeStorage envelope. Existing source profiles reuse their envelope; source runtime rejects signed v2 bindings before decryption. Missing or rejected encrypted-database keys stop startup without resetting the database or generating a replacement key. Existing recovery files are neither created nor removed automatically. Previously isolated profile data is not moved or merged.
 - **Consequences:** Open-source contributors and source users share one documented startup path, including first use and existing meetings. macOS may request access to the original Electron Keychain entry. This does not establish distribution-signature protection for source-created keys, nor does it bypass signed-envelope identity requirements.
 
+## 2026-10-11 - Separate development from production startup
+
+- **Supersedes:** The shared default for both source commands in “2026-09-30 - Use one persistent profile for source startup.” The one-time Standard or Encrypted choice remains per profile.
+- **Decision:** `pnpm dev` uses a persistent `pluto-development` profile on macOS, and rejects production paths including existing symlink aliases. `pnpm start` uses the same `pluto` profile as the installed app so production data issues can be reproduced locally. Each profile has a single-instance lock. An explicit path may select another profile, but development startup cannot select production.
+- **Preservation:** Existing profiles are not moved or merged. Users can select a previous isolated source profile explicitly.
+
 
 ## 2026-09-30 - Recheck challenged meeting answers against fresh evidence
 
