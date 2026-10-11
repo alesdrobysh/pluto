@@ -8,6 +8,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import { Dashboard } from '../../src/components/features/Dashboard';
+import {
+  persistDashboardCommitmentReview,
+  persistDashboardPriorityOrder,
+} from '../../src/components/features/dashboardActionCompletion';
 import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
 import type { Meeting } from '../../src/types';
 
@@ -111,19 +115,61 @@ const renderDashboard = (
   return { container, root };
 };
 
+const makeEmptyDashboardModel = () =>
+  buildDashboardHomeModel({
+    isRecording: false,
+    meetings: [],
+    overdueActions: [],
+    staleActions: [],
+    activeActions: [],
+    workspace: null,
+    graphStats: null,
+  });
+
 afterEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
 });
 
 describe('Dashboard interactions', () => {
+  it('opens the last saved conversation without changing daily priorities', () => {
+    const setSelectedMeetingId = vi.fn();
+    const handleSetDailyCommitments = vi.fn();
+    const { container, root } = renderDashboard({
+      setSelectedMeetingId,
+      handleSetDailyCommitments,
+    });
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open last conversation: Launch Review"]',
+    );
+
+    expect(button).not.toBeNull();
+    act(() => button?.click());
+    expect(setSelectedMeetingId).toHaveBeenCalledExactlyOnceWith('meeting-1');
+    expect(handleSetDailyCommitments).not.toHaveBeenCalled();
+
+    act(() => root.unmount());
+  });
+
+  it('does not offer conversation continuation during live recording', () => {
+    const { container, root } = renderDashboard({ isRecording: true });
+
+    expect(
+      container.querySelector(
+        '[data-testid="dashboard-conversation-continuation"]',
+      ),
+    ).toBeNull();
+
+    act(() => root.unmount());
+  });
+
   it('lets remaining suggestions show full details, open their source, and persist dismissal', async () => {
     const fullDescription =
       'Share the complete launch checklist with the review group once the final approval is recorded, including every dependency and the agreed delivery conditions';
     const sourceEvidence =
       'I will share the checklist after approval, with dependencies and conditions included.';
     let actions = [
-      ...['first', 'second', 'third'].map((id) =>
+      ...['first', 'second', 'third', 'fourth', 'fifth'].map((id) =>
         makeAction({
           id,
           name: id,
@@ -269,6 +315,120 @@ describe('Dashboard interactions', () => {
     );
     expect(container.querySelector('[role="menu"]')).toBeNull();
 
+    act(() => root.unmount());
+  });
+
+  it('keeps successive approvals in the same five focus slots after refresh and remount', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    let root = createRoot(container);
+    const actions = Array.from({ length: 7 }, (_, index) =>
+      makeAction({
+        id: `action-${index}`,
+        name: `Sample task ${index}`,
+      }),
+    );
+    const buildModel = () =>
+      buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: actions.filter(
+          (action) =>
+            JSON.parse(action.metadata!).commitment_state === 'possible',
+        ),
+        activeActions: actions,
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+        dateKey: '2026-10-10',
+      });
+    let model = buildModel();
+    const initialIds = model.commitments.items.map((item) => item.id);
+    const refreshDashboard = vi.fn(async () => {
+      model = buildModel();
+      render();
+    });
+    const handleReviewCommitment = async (
+      id: string,
+      state: 'confirmed' | 'rejected',
+    ) => {
+      const orderedIds = model.commitments.items.map((item) => item.id);
+      await persistDashboardCommitmentReview(id, state, {
+        preserveFocus: () =>
+          persistDashboardPriorityOrder(
+            { orderedIds, previousIds: orderedIds, dateKey: '2026-10-10' },
+            {
+              getEntity: async (entityId) =>
+                actions.find((action) => action.id === entityId),
+              upsertEntity: async (update) => {
+                const entity = actions.find(
+                  (action) => action.id === update.id,
+                )!;
+                Object.assign(entity, update, {
+                  metadata: JSON.stringify(update.metadata),
+                });
+                return entity;
+              },
+              refreshDashboard: async () => {},
+            },
+          ),
+        updateActionCommitmentState: async () => {
+          const entity = actions.find((action) => action.id === id)!;
+          entity.metadata = JSON.stringify({
+            ...JSON.parse(entity.metadata!),
+            commitment_state: state,
+          });
+          entity.updated_at = '2026-10-10T20:00:00Z';
+        },
+        refreshDashboard,
+      });
+    };
+    const render = () =>
+      root.render(
+        <Dashboard
+          model={model}
+          loading={false}
+          isRecording={false}
+          setSelectedMeetingId={vi.fn()}
+          setActiveTab={vi.fn()}
+          updatingTaskIds={new Set()}
+          actionError={null}
+          handleCompleteTask={vi.fn(async () => {})}
+          handleReviewCommitment={handleReviewCommitment}
+        />,
+      );
+    await act(async () => render());
+    for (const id of initialIds) {
+      const name = actions.find((action) => action.id === id)!.name;
+      await act(async () =>
+        container
+          .querySelector<HTMLButtonElement>(
+            `button[aria-label="Add ${name} to commitments"]`,
+          )!
+          .click(),
+      );
+      expect(model.commitments.items.map((item) => item.id)).toEqual(
+        initialIds,
+      );
+      expect(
+        container.querySelector(`button[aria-label="Mark ${name} complete"]`),
+      ).not.toBeNull();
+      expect(
+        Array.from(
+          container.querySelectorAll('[data-testid="dashboard-backlog-row"]'),
+        ).some((row) => row.textContent?.includes(name)),
+      ).toBe(false);
+    }
+    expect(refreshDashboard).toHaveBeenCalledTimes(5);
+    act(() => root.unmount());
+    root = createRoot(container);
+    model = buildModel();
+    await act(async () => render());
+    expect(model.commitments.items.map((item) => item.id)).toEqual(initialIds);
+    expect(
+      container.querySelectorAll('button[aria-label^="Mark Sample task"]'),
+    ).toHaveLength(5);
     act(() => root.unmount());
   });
 
@@ -1061,7 +1221,9 @@ describe('Dashboard interactions', () => {
       configurable: true,
       value: vi.fn().mockReturnValue({ matches: true }),
     });
-    const { container, root } = renderDashboard();
+    const { container, root } = renderDashboard({
+      model: makeEmptyDashboardModel(),
+    });
 
     const celebrate = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Celebrate with confetti"]',
@@ -1083,7 +1245,9 @@ describe('Dashboard interactions', () => {
       configurable: true,
       value: vi.fn().mockReturnValue({ matches: false }),
     });
-    const { container, root } = renderDashboard();
+    const { container, root } = renderDashboard({
+      model: makeEmptyDashboardModel(),
+    });
 
     await act(async () => {
       container

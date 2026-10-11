@@ -43,7 +43,7 @@ export const buildMeetingRetrievalResult = (
 ): RetrievalResult => {
   const document = buildMeetingNotesEvidenceDocument(meeting);
   const evidence: string[] = [`[${label}]: ${document.title}`];
-  const occurredAt = meeting.started_at || meeting.created_at;
+  const occurredAt = meeting.started_at;
   if (occurredAt) evidence.push(`[Occurred]: ${occurredAt}`);
   if (document.notesText)
     evidence.push(
@@ -1126,7 +1126,7 @@ export const buildAssigneeActionRecall = (
         .join('\n');
       return {
         ...source,
-        evidence_text: `[Meeting]: ${source.meeting_title}\n[Occurred]: ${meeting.started_at || meeting.created_at || 'unknown'}\n[Current saved notes]:\n${noteEvidence}\n[Assignee]: ${person.name}\n[Commitments]:\n${evidence}`,
+        evidence_text: `[Meeting]: ${source.meeting_title}\n[Occurred]: ${meeting.started_at || 'unknown'}\n[Current saved notes]:\n${noteEvidence}\n[Assignee]: ${person.name}\n[Commitments]:\n${evidence}`,
         evidence_kind: 'commitment' as const,
       };
     });
@@ -2310,7 +2310,7 @@ export const buildWorkspaceIntelligenceRecall = (input: {
     result.mid = null;
     result.evidence_text = [
       `[Recent saved meeting notes]: ${document.title}`,
-      `[Occurred]: ${meeting.started_at || meeting.created_at}`,
+      `[Occurred]: ${meeting.started_at || 'unknown'}`,
       `[Notes trust]: ${document.trustStatus}`,
       `[Current notes]:\n${excerpt}`,
     ].join('\n');
@@ -3133,7 +3133,7 @@ export const retrieveContext = async (
         first.meeting,
         'Section match',
       );
-      const occurredAt = first.meeting.started_at || first.meeting.created_at;
+      const occurredAt = first.meeting.started_at;
       const evidence = [
         `[Section match]: ${first.meeting.title || 'Untitled meeting'}`,
         ...(occurredAt ? [`[Occurred]: ${occurredAt}`] : []),
@@ -3491,7 +3491,7 @@ export const retrieveContext = async (
         mid: null,
         evidence_text: [
           `[Meeting]: ${document.title}`,
-          `[Occurred]: ${meeting.started_at || meeting.created_at || 'unknown'}`,
+          `[Occurred]: ${meeting.started_at || 'unknown'}`,
           `[Notes trust]: ${document.trustStatus}`,
           `[Current saved notes]:\n${notes}`,
         ].join('\n'),

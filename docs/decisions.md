@@ -1702,3 +1702,18 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Supersedes:** The all-running-apps browser-closure rule in “2026-10-08 - Preserve recordings through quiet breaks.” Its no-silence-stop rule and shared finalization path remain unchanged.
 - **Decision:** Return a stable source-app identity alongside the provider display name when locking a call. Subsequent auto-end polls inspect that browser or desktop app only. Idle or active unrelated apps cannot suppress its closure or provide exit evidence for it. Failed process inspection is unknown, not an empty process list.
 - **Boundary:** Source identity is app-level, so multiple supported meeting tabs in the same browser remain conservative. Leaving a meeting while its tab stays open still requires manual stopping. Optional Chrome Accessibility departure evidence, two-observation confirmation for Chrome/Zoom, and a non-destructive quiet check-in remain in the [linked departure-detection follow-up](follow-ups/meeting-departure-detection.md); PR #857 does not complete that broader work.
+
+## 2026-10-10 - Use system notifications for dated commitment reminders
+
+- **Supersedes:** The phrase “across all system alerts” in “2026-09-12 - Consistent macOS notification design outside the app for calendar prompts,” only for dated commitment reminders. Call-detection and calendar-start prompts retain their existing alert-window behavior.
+- **Decision:** Dated commitment reminders use the operating system notification channel with native permission and click routing. They do not use the transient call/calendar alert window. Eligibility requires existing confirmed commitment state, an active source-backed extracted obligation or explicit user work, and a valid canonical deadline; notification delivery never confirms ownership or changes completion.
+- **Preview default:** Commitment details are visible by default, as requested by the owner. An explicitly saved private-preview preference remains respected; users can hide details in Settings → Meetings → Commitment reminders.
+- **Delivery boundary:** Delivery requires Pluto's main process to be running, including with its window hidden. Fully quitting Pluto stops delivery. Launch and wake apply bounded catch-up while the deadline remains relevant; no overdue backlog is sent. The encrypted delivery ledger records attempted and OS-submitted states, preserves canonical deadline history, and leaves ambiguous crash attempts unretried to avoid duplicate alerts. OS submission does not prove presentation or user receipt.
+- **Verification boundary:** Deterministic tests cover policy, ledger, lifecycle invalidation and routing contracts. Permission allow/deny, OS presentation, hidden-window delivery, click routing, sleep/wake, and restart behavior require packaged macOS acceptance before release; automated tests do not establish that acceptance.
+
+## 2026-10-10 - Expand Today's focus to five commitments
+
+- **Status:** Accepted by direct owner request.
+- **Supersedes:** The three-item cap in “2026-08-25 - Make Today's focus the dashboard's only daily priority surface” and “2026-09-16 - Show all open personal action items in Today’s focus.”
+- **Decision:** Show at most five items in Today's focus. Creation, backlog prioritization, and persisted daily ordering use the same limit; remaining items stay in the backlog. Existing review, ordering, and completion rules remain in force.
+- **Consequence:** Two additional existing items can be shown and prioritized. No additional queries, model calls, or background work are introduced.

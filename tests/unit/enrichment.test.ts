@@ -75,25 +75,54 @@ describe('Critical Business Logic', () => {
     });
 
     it('should parse "today"', () => {
-      const date = parseDueDate('today');
+      const date = parseDueDate('today', '2023-01-02T12:00:00-08:00');
       expect(date).toBeDefined();
       expect(date?.split('T')[0]).toBe('2023-01-02'); // Monday
     });
 
     it('should parse "tomorrow"', () => {
-      const date = parseDueDate('tomorrow');
+      const date = parseDueDate('tomorrow', '2023-01-02T12:00:00-08:00');
       expect(date).toBeDefined();
       expect(date?.split('T')[0]).toBe('2023-01-03'); // Tuesday
     });
 
-    it('should parse "next week"', () => {
-      const date = parseDueDate('next week');
-      expect(date).toBeDefined();
-      expect(date?.split('T')[0]).toBe('2023-01-09'); // Next Monday
+    it('withholds ambiguous week-only deadlines', () => {
+      expect(parseDueDate('next week', '2023-01-02T12:00:00-08:00')).toBeNull();
+    });
+
+    it('preserves explicit date-only and timestamp deadlines', () => {
+      expect(parseDueDate('2026-10-15')).toBe('2026-10-15');
+      expect(parseDueDate('2026-10-15T09:00:00-07:00')).toBe(
+        '2026-10-15T16:00:00.000Z',
+      );
+      expect(parseDueDate('2026-02-30')).toBeNull();
+      expect(parseDueDate('10/11/2026')).toBeNull();
+    });
+
+    it('anchors relative dates to the meeting offset or supplied timezone despite delayed extraction', () => {
+      expect(parseDueDate('tomorrow', '2026-03-08T23:30:00-07:00')).toBe(
+        '2026-03-09',
+      );
+      expect(
+        parseDueDate('tomorrow', '2026-03-09T06:30:00Z', 'America/Los_Angeles'),
+      ).toBe('2026-03-09');
+      expect(parseDueDate('tomorrow')).toBeNull();
+      expect(
+        parseDueDate('Friday after approval', '2026-03-08T23:30:00-07:00'),
+      ).toBeNull();
+    });
+
+    it('represents a later changed deadline as a new canonical date', () => {
+      expect(parseDueDate('tomorrow', '2026-10-10T09:00:00-07:00')).toBe(
+        '2026-10-11',
+      );
+      expect(parseDueDate('2026-10-14', '2026-10-10T09:00:00-07:00')).toBe(
+        '2026-10-14',
+      );
     });
 
     it('should parse "by Friday"', () => {
-      const date = parseDueDate('by Friday');
+      const date = parseDueDate('by Friday', '2023-01-02T12:00:00-08:00');
       expect(date).toBeDefined();
       expect(date?.split('T')[0]).toBe('2023-01-06'); // This Friday
     });
@@ -101,7 +130,7 @@ describe('Critical Business Logic', () => {
     it('should parse "end of week"', () => {
       // Assuming default logic maps to Friday or Sunday.
       // Current impl is +daysUntilFriday
-      const date = parseDueDate('end of week');
+      const date = parseDueDate('end of week', '2023-01-02T12:00:00-08:00');
       expect(date).toBeDefined();
       expect(date?.split('T')[0]).toBe('2023-01-06'); // Friday
     });

@@ -309,6 +309,7 @@ interface KnowledgeDocStructuredSummary {
 const MAX_MEETING_DETAIL_LENGTH = 180;
 const MAX_ACTION_INSIGHT_ITEMS = 5;
 const MAX_DASHBOARD_BRIEFING_ITEMS = 3;
+export const MAX_DASHBOARD_COMMITMENTS = 5;
 
 export const getDashboardDateKey = (date = new Date()): string => {
   const year = date.getFullYear();
@@ -1181,8 +1182,8 @@ export const buildDashboardCommitments = (
           })
           .map(({ item }) => item)
       : [];
-  const items = openItems.slice(0, MAX_DASHBOARD_BRIEFING_ITEMS);
-  const backlog = openItems.slice(MAX_DASHBOARD_BRIEFING_ITEMS);
+  const items = openItems.slice(0, MAX_DASHBOARD_COMMITMENTS);
+  const backlog = openItems.slice(MAX_DASHBOARD_COMMITMENTS);
 
   if (items.length === 0) {
     return {

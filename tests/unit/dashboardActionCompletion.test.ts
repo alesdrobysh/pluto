@@ -11,6 +11,48 @@ import {
 } from '../../src/components/features/dashboardActionCompletion';
 
 describe('persistDashboardCommitmentReview', () => {
+  it('preserves focus before confirmation changes activity ordering, then refreshes once', async () => {
+    const calls: string[] = [];
+    await persistDashboardCommitmentReview('action-1', 'confirmed', {
+      preserveFocus: async () => {
+        calls.push('focus');
+      },
+      updateActionCommitmentState: async () => {
+        calls.push('confirm');
+      },
+      refreshDashboard: async () => {
+        calls.push('refresh');
+      },
+    });
+    expect(calls).toEqual(['focus', 'confirm', 'refresh']);
+  });
+
+  it('does not confirm or refresh if preserving focus fails', async () => {
+    const updateActionCommitmentState = vi.fn();
+    const refreshDashboard = vi.fn();
+    await expect(
+      persistDashboardCommitmentReview('action-1', 'confirmed', {
+        preserveFocus: async () => {
+          throw new Error('order failed');
+        },
+        updateActionCommitmentState,
+        refreshDashboard,
+      }),
+    ).rejects.toThrow('order failed');
+    expect(updateActionCommitmentState).not.toHaveBeenCalled();
+    expect(refreshDashboard).not.toHaveBeenCalled();
+  });
+
+  it('does not pin the list when dismissing a suggestion', async () => {
+    const preserveFocus = vi.fn();
+    await persistDashboardCommitmentReview('action-1', 'rejected', {
+      preserveFocus,
+      updateActionCommitmentState: vi.fn(),
+      refreshDashboard: vi.fn(),
+    });
+    expect(preserveFocus).not.toHaveBeenCalled();
+  });
+
   it.each(['confirmed', 'rejected'] as const)(
     'persists a %s review before refreshing the dashboard',
     async (commitmentState) => {
@@ -135,6 +177,39 @@ describe('persistDashboardCommitmentCreation', () => {
 });
 
 describe('persistDashboardPriorityOrder', () => {
+  it('persists five ordered priorities and excludes a sixth', async () => {
+    const ids = ['one', 'two', 'three', 'four', 'five', 'six'];
+    const upsertEntity = vi.fn(async () => ({ id: 'saved' }));
+    await persistDashboardPriorityOrder(
+      { orderedIds: ids, previousIds: [], dateKey: '2026-10-10' },
+      {
+        getEntity: vi.fn(
+          async (id: string) =>
+            ({
+              id,
+              type: 'action_item',
+              name: id,
+              status: 'active',
+              due_date: null,
+              assigned_to: null,
+              metadata: '{"commitment_state":"confirmed"}',
+            }) as never,
+        ),
+        upsertEntity: upsertEntity as never,
+        refreshDashboard: vi.fn(async () => {}),
+      },
+    );
+    expect(upsertEntity).toHaveBeenCalledTimes(5);
+    expect(upsertEntity).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: 'five',
+        metadata: expect.objectContaining({
+          dashboard_daily_priority: { date: '2026-10-10', rank: 4 },
+        }),
+      }),
+    );
+  });
+
   it('preserves entity metadata while ranking the daily three and clearing the displaced item', async () => {
     const entities = new Map([
       [

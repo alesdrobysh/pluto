@@ -112,12 +112,20 @@ describe('packaged runtime resources', () => {
       'parakeet-resource-probe',
       'PlutoCalendarHelper.app/Contents/MacOS/PlutoCalendarHelper',
       'NSCalendarsFullAccessUsageDescription',
+      'notification-bridge.node',
     ]) {
       expect(verifier).toContain(runtime);
     }
   });
 
-  it.each(['valid', 'missing', 'unlaunchable', 'intel', 'missing-microphone'])(
+  it.each([
+    'valid',
+    'missing',
+    'unlaunchable',
+    'intel',
+    'missing-microphone',
+    'missing-notifications',
+  ])(
     'checks executable media tools with an explicit app path (tools: %s)',
     async (mediaToolState) => {
       const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'pluto-app-'));
@@ -155,6 +163,13 @@ describe('packaged runtime resources', () => {
         await copyFile('/usr/bin/true', executable);
         await chmod(executable, 0o755);
       }
+      if (mediaToolState !== 'missing-notifications') {
+        // The verifier checks signed Mach-O presence; it does not load native addons.
+        await copyFile(
+          '/usr/bin/true',
+          path.join(binPath, 'notification-bridge.node'),
+        );
+      }
       const helperInfoPath = path.join(
         binPath,
         'PlutoCalendarHelper.app/Contents/Info.plist',
@@ -191,7 +206,8 @@ describe('packaged runtime resources', () => {
           await mkdir(path.dirname(destination), { recursive: true });
           if (
             mediaToolState === 'valid' ||
-            mediaToolState === 'missing-microphone'
+            mediaToolState === 'missing-microphone' ||
+            mediaToolState === 'missing-notifications'
           )
             await copyFile(installed, destination);
           else {
@@ -240,11 +256,15 @@ describe('packaged runtime resources', () => {
         ]);
         if (mediaToolState === 'valid')
           await expect(verification).resolves.toMatchObject({
-            stdout: 'Verified Pluto icon and 6 packaged runtimes.\n',
+            stdout: 'Verified Pluto icon and 7 packaged runtimes.\n',
           });
         else if (mediaToolState === 'missing-microphone')
           await expect(verification).rejects.toThrow(
             'lacks microphone entitlement',
+          );
+        else if (mediaToolState === 'missing-notifications')
+          await expect(verification).rejects.toThrow(
+            'notification-bridge.node',
           );
         else if (mediaToolState === 'intel')
           await expect(verification).rejects.toThrow('architecture mismatch');

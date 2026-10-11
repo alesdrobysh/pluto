@@ -129,7 +129,7 @@ continues on next line.
     expect(blocks).toContainEqual({
       path: 'overview',
       text: 'Overview',
-      sourceKey: 'source-a|0:0:1',
+      sourceKey: 'overview|source-a|0:0:1',
     });
     expect(blocks).toContainEqual({
       path: 'all_action_items:0',

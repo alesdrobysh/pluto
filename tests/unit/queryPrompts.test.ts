@@ -162,9 +162,7 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain('[Context 1] Local artifact');
     expect(prompt).toContain('Provenance is attached by Pluto');
     expect(prompt).not.toContain('CITATION RULES');
-    expect(prompt).toContain(
-      'Do not conclude that the underlying source lacks the information',
-    );
+    expect(prompt).toContain('without claiming the underlying source lacks it');
   });
 
   it('includes bounded conversation and the resolved meeting title', () => {
@@ -228,7 +226,9 @@ describe('getAskPlutoPrompt', () => {
     );
     expect(prompt.length).toBeLessThan(12_000);
     expect(prompt).toContain('Write a rich, readable breakdown');
-    expect(prompt).toContain('Write like a thoughtful colleague');
+    expect(prompt).toContain(
+      'Connect related details in natural, self-contained prose',
+    );
     expect(prompt).toContain('Do not add headings');
     expect(prompt).not.toContain('Topics: None');
     expect(prompt).not.toContain('Decisions: None');
@@ -262,7 +262,9 @@ describe('getAskPlutoPrompt', () => {
     );
 
     expect(prompt).toContain('synthesize and rephrase this healthy context');
-    expect(prompt).toContain('Write like a thoughtful colleague');
+    expect(prompt).toContain(
+      'Connect related details in natural, self-contained prose',
+    );
     expect(prompt).toContain('natural, connected sentences');
     expect(prompt).toContain(
       'Cover the relevant decision, reason, owner, deadline, and next step',
@@ -271,19 +273,18 @@ describe('getAskPlutoPrompt', () => {
       'a broad question should cover its material supported details',
     );
     expect(prompt).toContain('up to 260 words');
-    expect(prompt).toContain('Make every point self-contained');
-    expect(prompt).toContain('Address each distinct part of the user');
+    expect(prompt).toContain('natural, self-contained prose');
+    expect(prompt).toContain('Address each part of the question');
     expect(prompt).toContain(
-      'instead of substituting adjacent project history',
+      'do not replace a missing answer with adjacent project history',
     );
-    expect(prompt).toContain('"an application"');
     expect(prompt).not.toContain('smallest set of directly supporting sources');
     expect(prompt).toContain('Provenance is attached by Pluto');
     expect(prompt).toContain(
       'Never begin with “Based on the meeting evidence provided”',
     );
     expect(prompt).toContain(
-      'If you cannot confirm the answer from what was retrieved',
+      'State which requested part cannot be confirmed by this search',
     );
     expect(prompt).toContain('“My interpretation is…”');
     expect(prompt).toContain(
@@ -358,7 +359,7 @@ describe('getAskPlutoPrompt', () => {
       'analysis',
     );
     expect(analyticalExpansion).toContain(
-      'Provide a thoughtful evidence-grounded analysis',
+      'Connect direct observations to supported conclusions',
     );
     expect(analyticalExpansion).toContain(
       'Never convert participation, discussion, or an unnamed owner into an assignment',
@@ -375,17 +376,62 @@ describe('getAskPlutoPrompt', () => {
       'analysis',
     );
 
-    expect(prompt).toContain(
-      'Separate direct observations from interpretation',
-    );
-    expect(prompt).toContain('only when at least two sources support it');
+    expect(prompt).toContain('keeping interpretations distinct');
+    expect(prompt).toContain('A recurring pattern needs at least two sources');
     expect(prompt).toContain(
       'identify one primary theme only when multiple explicit signals converge',
     );
-    expect(prompt).toContain('strengths as well as opportunities');
+    expect(prompt).not.toContain('Identify strengths as well as opportunities');
     expect(prompt).toContain('Prefix each recommendation with “Suggestion:”');
     expect(prompt).toContain('Never diagnose personality');
     expect(prompt).toContain('Use up to 300 words');
+  });
+
+  it('places one coherent response contract after evidence and before the question', () => {
+    const query = 'Assess Inez’s performance against the recorded target.';
+    const prompt = getAskPlutoPrompt(
+      query,
+      [
+        {
+          meeting_id: 'catalogue-test',
+          meeting_title: 'Catalogue readability test',
+          mid: null,
+          evidence_text:
+            'The target was 90%; the independent test recorded 23 of 25 correct readings.',
+          score: 1,
+          score_breakdown: {
+            fts_rank: 1,
+            graph_proximity: 0,
+            recency_decay: 1,
+            mention_weight: 0,
+          },
+        },
+      ],
+      'factual',
+      [],
+      'None',
+      'analysis',
+    );
+    const contractIndex = prompt.indexOf('RESPONSE CONTRACT:');
+    expect(prompt.match(/RESPONSE CONTRACT:/g)).toHaveLength(1);
+    expect(contractIndex).toBeGreaterThan(
+      prompt.indexOf('23 of 25 correct readings'),
+    );
+    expect(contractIndex).toBeLessThan(prompt.indexOf(`User Query: ${query}`));
+    expect(prompt).toContain(
+      'first establish what result and criterion the notes record',
+    );
+    expect(prompt).toContain(
+      'Where both are recorded, give the bounded result',
+    );
+    expect(prompt).toContain(
+      'do not substitute participation, delivery or discussion for evidence of quality, initiative or ability',
+    );
+    expect(prompt).toContain(
+      'Never diagnose personality, motivation, or performance from thin evidence.',
+    );
+    expect(prompt).not.toContain('lead with the useful judgment');
+    expect(prompt).not.toContain('Identify strengths as well as opportunities');
   });
 
   it('treats omitted draft statements as leads rather than meeting facts', () => {
@@ -412,9 +458,7 @@ describe('getAskPlutoPrompt', () => {
       'A participant list or calendar invitation does not prove who spoke',
     );
     expect(prompt).not.toContain('Prefix each recommendation');
-    expect(prompt).toContain(
-      'Do not conclude that the underlying source lacks the information',
-    );
+    expect(prompt).toContain('without claiming the underlying source lacks it');
   });
 
   it('never places raw transcript passages inside the follow-up prompt budget', () => {

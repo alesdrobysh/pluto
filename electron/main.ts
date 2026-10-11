@@ -88,6 +88,13 @@ import {
   verifySealedCaptureJournalTranscriptEvidence,
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
+import {
+  createCommitmentReminderNavigation,
+  resolveCommitmentReminderTarget,
+} from './commitmentReminderNavigation';
+import { createCommitmentReminderNotifications } from './commitmentReminderNotifications';
+import { createReminderPersistence } from './commitmentReminderPersistence';
+import { createCommitmentReminderScheduler } from './commitmentReminderScheduler';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import { getAudioKeyStore } from './crypto/audioKeyStore';
 import {
@@ -347,6 +354,20 @@ ipcMain.on('PLUTO_NATIVE_MENU_RENDERER_READY', (event) => {
   settingsMenuNavigation.ready(event.sender);
 });
 
+const commitmentReminderNavigation = createCommitmentReminderNavigation({
+  getRenderer: () => (win && !win.isDestroyed() ? win.webContents : null),
+  focusWindow: () => {
+    if (!win || win.isDestroyed()) createWindow();
+    focusPrimaryWindow();
+  },
+  resolve: (entityId) => resolveCommitmentReminderTarget(db, entityId),
+  onError: () =>
+    plutoLog.warn('Could not restore commitment reminder context.'),
+});
+ipcMain.handle('COMMITMENT_REMINDER_RENDERER_READY', (event) => {
+  commitmentReminderNavigation.ready(event.sender);
+});
+
 const openSettingsFromMenu = (): void => {
   settingsMenuNavigation.open();
 };
@@ -480,6 +501,7 @@ function createWindow() {
   });
   const createdWindow = win;
   settingsMenuNavigation.loading(createdWindow.webContents);
+  commitmentReminderNavigation.loading(createdWindow.webContents);
 
   // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
@@ -488,6 +510,7 @@ function createWindow() {
   });
   win.webContents.on('did-start-loading', () => {
     settingsMenuNavigation.loading(createdWindow.webContents);
+    commitmentReminderNavigation.loading(createdWindow.webContents);
   });
   win.webContents.on('will-prevent-unload', () => {
     captureLog.warn('Navigation prevented: capture_active');
@@ -835,6 +858,10 @@ let lastRendererActivityAt = Date.now();
 let scheduleProjectSynthesis: ((delayMs?: number) => void) | null = null;
 let scheduleDreamingRun: ((delayMs?: number) => void) | null = null;
 let backgroundVoiceCandidateActive = false;
+let commitmentReminderScheduler: ReturnType<
+  typeof createCommitmentReminderScheduler
+> | null = null;
+let commitmentRemindersStopping = false;
 let voiceWorkQueue: ReturnType<typeof createVoiceWorkQueue> | null = null;
 
 const notifyForegroundActivity = () => {
@@ -849,6 +876,7 @@ const notifyRendererActivity = () => {
 };
 
 const invalidateDreamingCatalog = () => {
+  void commitmentReminderScheduler?.reconcile();
   scheduleProjectSynthesis?.();
   if (!dreamingEntityQueue) return;
   invalidateDreamingWork(dreamingEntityQueue, () => scheduleDreamingRun?.());
@@ -1191,6 +1219,10 @@ let stopIdentityReconciliation: (() => void) | undefined;
 let stopVoiceCandidateBackfill: (() => void) | undefined;
 let chatgptConnection: ReturnType<typeof createPlutoMcpConnection> | undefined;
 const shutdownMainProcessConsumers = async () => {
+  commitmentRemindersStopping = true;
+  commitmentReminderNavigation.close();
+  await commitmentReminderScheduler?.stop();
+  commitmentReminderScheduler = null;
   await chatgptConnection?.close();
   for (const controller of activeMeetingTasks.values()) controller.abort();
   activeMeetingTasks.clear();
@@ -4689,6 +4721,7 @@ app.whenReady().then(async () => {
       const evidence = buildMeetingNotesEvidenceDocument(
         meeting,
         db.getMeetingNotesIdentityProjection(meeting.id).speakerDisplayNames,
+        { prioritizeOpenQuestions: true },
       );
       if (!evidence.hasUsableNotes) return null;
       return {
@@ -6043,7 +6076,13 @@ app.whenReady().then(async () => {
     if (process.platform !== 'darwin')
       throw new Error('chatgpt_desktop_requires_macos');
     try {
-      await openChatGptDesktop();
+      const status = chatgptConnection?.getStatus();
+      if (!status?.pluginName || !status.marketplaceName || !status.pluginReady)
+        throw new Error('chatgpt_plugin_not_ready');
+      await openChatGptDesktop({
+        pluginName: status.pluginName,
+        marketplaceName: status.marketplaceName,
+      });
     } catch {
       throw new Error('chatgpt_desktop_unavailable');
     }
@@ -6060,6 +6099,12 @@ app.whenReady().then(async () => {
     }
     const result = db.setSetting(key, String(value));
     invalidateProviderCache();
+    if (
+      key === 'automaticCommitmentReminders' ||
+      key === 'commitmentReminderPreviews' ||
+      key === 'setup_complete'
+    )
+      void commitmentReminderScheduler?.reconcile();
     return result;
   });
   const getMeetingNotesTemplateSettings = () =>
@@ -6613,6 +6658,7 @@ app.whenReady().then(async () => {
               .then((alerts) => {
                 try {
                   syncActionTrackerAttentionQueue();
+                  void commitmentReminderScheduler?.reconcile();
                 } catch (error) {
                   console.warn(
                     '[AttentionSync] Failed to refresh action-tracker signals:',
@@ -9201,13 +9247,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('intelligence:alerts:clear', (_event, meetingId: string) => {
     clearAlertsForMeeting(meetingId);
+    void commitmentReminderScheduler?.reconcile();
     return true;
   });
 
   ipcMain.handle(
     'intelligence:alerts:update-status',
     (_event, id: string, status: AttentionItemStatus) => {
-      return updateAlertStatus(id, status);
+      const result = updateAlertStatus(id, status);
+      void commitmentReminderScheduler?.reconcile();
+      return result;
     },
   );
 
@@ -9305,6 +9354,26 @@ app.whenReady().then(async () => {
         error,
       );
     });
+  commitmentReminderScheduler = createCommitmentReminderScheduler({
+    persistence: createReminderPersistence(db),
+    adapter: createCommitmentReminderNotifications({
+      getSetting: db.getSetting,
+      setSetting: db.setSetting,
+      onClick: (entityId) => {
+        if (!commitmentRemindersStopping)
+          commitmentReminderNavigation.click(entityId);
+      },
+    }),
+    enabled: () => db.getSetting('automaticCommitmentReminders') !== 'false',
+    ready: () =>
+      !commitmentRemindersStopping &&
+      db.getSetting('setup_complete') === 'true',
+    onError: () => plutoLog.warn('Could not reconcile commitment reminders.'),
+  });
+  powerMonitor.on('resume', () => {
+    void commitmentReminderScheduler?.reconcile();
+  });
+  void commitmentReminderScheduler.reconcile();
   createWindow();
   installMacApplicationMenu();
   await prepareFinalTranscriptionBeforeRecovery({
@@ -9318,6 +9387,7 @@ app.whenReady().then(async () => {
 
   try {
     syncActionTrackerAttentionQueue();
+    void commitmentReminderScheduler?.reconcile();
   } catch (error) {
     console.warn(
       '[AttentionSync] Failed to bootstrap action-tracker signals:',

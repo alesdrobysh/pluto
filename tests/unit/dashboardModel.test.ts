@@ -185,7 +185,7 @@ const makeWorkingMemorySnapshot = (
 });
 
 describe('buildDashboardHomeModel', () => {
-  it('caps top of mind and confirmed commitments at three items', () => {
+  it('caps top of mind at three and commitments at five items', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -194,6 +194,8 @@ describe('buildDashboardHomeModel', () => {
         makeAction({ id: 'action-2', name: 'Confirm launch owner' }),
         makeAction({ id: 'action-3', name: 'Close privacy review' }),
         makeAction({ id: 'action-4', name: 'Publish launch notes' }),
+        makeAction({ id: 'action-5', name: 'Review sample outline' }),
+        makeAction({ id: 'action-6', name: 'Send sample estimate' }),
       ],
       staleActions: [],
       activeActions: [],
@@ -205,7 +207,7 @@ describe('buildDashboardHomeModel', () => {
     expect(model.topOfMind.state).toBe('populated');
     expect(model.topOfMind.items).toHaveLength(3);
     expect(model.commitments.state).toBe('populated');
-    expect(model.commitments.items).toHaveLength(3);
+    expect(model.commitments.items).toHaveLength(5);
   });
 
   it('honors the persisted daily priority order and keeps the rest in a backlog', () => {
@@ -222,6 +224,16 @@ describe('buildDashboardHomeModel', () => {
       staleActions: [],
       activeActions: [
         makeAction({ id: 'backlog', name: 'Backlog item' }),
+        makeAction({
+          id: 'fourth',
+          name: 'Fourth priority',
+          metadata: priorityMetadata(3),
+        }),
+        makeAction({
+          id: 'fifth',
+          name: 'Fifth priority',
+          metadata: priorityMetadata(4),
+        }),
         makeAction({
           id: 'third',
           name: 'Third priority',
@@ -247,6 +259,8 @@ describe('buildDashboardHomeModel', () => {
       'first',
       'second',
       'third',
+      'fourth',
+      'fifth',
     ]);
     expect(model.commitments.backlog.map((item) => item.id)).toEqual([
       'backlog',
@@ -288,10 +302,9 @@ describe('buildDashboardHomeModel', () => {
       'daily-possible',
       'overdue-confirmed',
       'stale-possible',
-    ]);
-    expect(model.commitments.backlog.map((item) => item.id)).toEqual([
       'active-confirmed',
     ]);
+    expect(model.commitments.backlog).toEqual([]);
   });
 
   it('uses calm empty states when no attention item, commitment, or supported win exists', () => {
@@ -2418,8 +2431,8 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.commitments.state).toBe('populated');
-    expect(model.commitments.items).toHaveLength(3);
-    expect(model.commitments.backlog).toHaveLength(4);
+    expect(model.commitments.items).toHaveLength(5);
+    expect(model.commitments.backlog).toHaveLength(2);
     expect(
       [...model.commitments.items, ...model.commitments.backlog].find(
         (item) => item.id === 'newly-confirmed',

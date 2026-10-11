@@ -571,26 +571,50 @@ const transcriptForSource = (source: NotesSource): string =>
     .map((segment) => `${segment.speaker ?? 'Speaker'}: ${segment.text}`)
     .join('\n');
 
+// Lead with reviewed outcomes when available. Discussion stays in the body;
+// this presentation choice does not validate or rewrite its meaning.
+const isOutcome = (item: NotesItem) =>
+  item.kind === 'decision' || item.kind === 'action';
+
+const hasOutcomes = (draft: NotesDraft) =>
+  draft.sections.some((section) => section.items.some(isOutcome));
+
+const topicSummary = (section: NotesSection, outcomes: boolean) =>
+  outcomes ? undefined : section.items.find((item) => item.kind === 'point');
+
+const summaryText = (item: NotesItem): string => {
+  if (item.kind !== 'action') return item.text;
+  if (!item.owner) return `Action: ${item.text}`;
+  const text = item.text.toLowerCase();
+  const owner = item.owner.toLowerCase();
+  return text.startsWith(`${owner} `) || text.startsWith(`${owner}:`)
+    ? item.text
+    : `${item.owner}: ${item.text}`;
+};
+
 const overviewForDraft = (draft: NotesDraft): SupportedText | null => {
   if (draft.overview) return draft.overview;
-  // Sample across topics before adding detail. Prefer each topic's first
-  // reviewed outcome over an earlier offer, keeping narrative-only topics.
+  const outcomes = hasOutcomes(draft);
   const firstItems = draft.sections.flatMap((section) => {
-    const first =
-      section.items.find(
-        (item) => item.kind === 'decision' || item.kind === 'action',
-      ) ?? section.items[0];
+    const first = outcomes ? section.items.find(isOutcome) : section.items[0];
     return first ? [first] : [];
   });
   const selectedIds = new Set(firstItems.map((item) => item.id));
   const remainingItems = draft.sections.flatMap((section) =>
-    section.items.filter((item) => !selectedIds.has(item.id)),
+    section.items.filter(
+      (item) => !selectedIds.has(item.id) && (!outcomes || isOutcome(item)),
+    ),
   );
   const items = [...firstItems, ...remainingItems].slice(0, 3);
   return items.length
     ? {
         id: 'derived-overview',
-        text: items.map((item) => item.text).join(' '),
+        text: items
+          .map((item) => {
+            const text = summaryText(item);
+            return /[.!?…]["'”’)\]]*$/u.test(text) ? text : `${text}.`;
+          })
+          .join(' '),
         sources: items.flatMap((item) => item.sources),
       }
     : null;
@@ -633,22 +657,23 @@ const sourceMetadata = (draft: NotesDraft) => {
     add('recent_win:why_it_counts', draft.recentWin.impact);
   }
 
+  const outcomes = hasOutcomes(draft);
   let actionIndex = 0;
   let decisionIndex = 0;
   draft.sections.forEach((section, sectionIndex) => {
     add(`topic:${sectionIndex}:title`, section.title);
+    const summary = topicSummary(section, outcomes);
+    if (summary) addEditable(`topic:${sectionIndex}:summary`, summary);
     let pointIndex = 0;
     let questionIndex = 0;
     let topicActionIndex = 0;
     let topicDecisionIndex = 0;
     for (const item of section.items) {
       if (item.kind === 'point') {
-        const path =
-          pointIndex === 0
-            ? `topic:${sectionIndex}:summary`
-            : `topic:${sectionIndex}:point:${pointIndex - 1}`;
-        addEditable(path, item);
-        pointIndex += 1;
+        if (item !== summary) {
+          addEditable(`topic:${sectionIndex}:point:${pointIndex}`, item);
+          pointIndex += 1;
+        }
         continue;
       }
       if (item.kind === 'question') {
@@ -1295,10 +1320,14 @@ export const projectAuditedNotes = (
 ): AnalysisDocumentV3 => {
   if (!reviewedResults.has(audited))
     throw new MeetingNotesError('notes_unreviewed_projection');
+  const outcomes = hasOutcomes(audited.draft);
   const topics = audited.draft.sections
     .filter((section) => section.items.length > 0)
     .map((section) => {
-      const points = section.items.filter((item) => item.kind === 'point');
+      const summary = topicSummary(section, outcomes);
+      const points = section.items.filter(
+        (item) => item.kind === 'point' && item !== summary,
+      );
       const actions = section.items
         .filter((item) => item.kind === 'action')
         .map((item) => ({
@@ -1316,8 +1345,8 @@ export const projectAuditedNotes = (
         }));
       return {
         title: section.title.text,
-        summary: points[0]?.text ?? '',
-        key_points: points.slice(1).map((point) => ({ text: point.text })),
+        summary: summary ? summaryText(summary) : '',
+        key_points: points.map((point) => ({ text: point.text })),
         decisions,
         action_items: actions,
         open_questions: section.items

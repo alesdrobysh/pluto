@@ -1,6 +1,7 @@
 import type { AttentionItemStatus } from '../../../electron/intelligence/intelligenceTypes';
 import type { Entity, EntityStatus } from '../../api/knowledgeGraph';
 import { parseActionMetadata } from '../../utils/actionCommitment';
+import { MAX_DASHBOARD_COMMITMENTS } from './dashboardModel';
 
 export const DASHBOARD_ACTION_COMPLETION_ERROR =
   'Could not update follow-up status. Try again.';
@@ -26,8 +27,10 @@ export const persistDashboardCommitmentReview = async (
       state: 'confirmed' | 'rejected',
     ) => Promise<unknown>;
     refreshDashboard: () => Promise<void>;
+    preserveFocus?: () => Promise<void>;
   },
 ): Promise<void> => {
+  if (commitmentState === 'confirmed') await deps.preserveFocus?.();
   await deps.updateActionCommitmentState(taskId, commitmentState);
   try {
     await deps.refreshDashboard();
@@ -121,7 +124,7 @@ export const persistDashboardPriorityOrder = async (
     refreshDashboard: () => Promise<void>;
   },
 ): Promise<void> => {
-  const orderedIds = input.orderedIds.slice(0, 3);
+  const orderedIds = input.orderedIds.slice(0, MAX_DASHBOARD_COMMITMENTS);
   const affectedIds = Array.from(
     new Set([...input.previousIds, ...orderedIds]),
   );

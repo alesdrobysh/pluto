@@ -1537,6 +1537,17 @@
     @apply flex min-h-8 items-center justify-end text-xs font-medium;
     color: var(--notes-muted);
   }
+  .meeting-reminder-region {
+    @apply mt-6 mb-10;
+  }
+  .meeting-notes-document:has(> .meeting-reminder-region)
+    > .meeting-document-save-row:empty {
+    display: none;
+  }
+  .meeting-notes-document:has(> .meeting-reminder-region)
+    > .meeting-notes-section:first-of-type {
+    margin-top: 0;
+  }
   .meeting-save-state {
     @apply inline-flex items-center gap-1.5 text-[0.72rem] font-medium;
     color: var(--notes-muted);

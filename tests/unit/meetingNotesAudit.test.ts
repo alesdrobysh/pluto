@@ -104,6 +104,74 @@ it('lets the audit correct an item kind while preserving the material discussion
   expect(result.topics[0]?.summary).toBe(item.text);
 });
 
+it.each([
+  ['The room is ready', 'The room is ready.'],
+  ['Who reviews it?', 'Who reviews it?'],
+  ['The room is ready!', 'The room is ready!'],
+  ['Robin said "Ready!"', 'Robin said "Ready!"'],
+  ['Robin said “Ready?”', 'Robin said “Ready?”'],
+  ['Robin said “Ready”', 'Robin said “Ready”.'],
+])(
+  'separates derived overview sentences without rewriting %s',
+  (text, ending) => {
+    const fixture = makeDirectNotesFixture();
+    fixture.draft.sections[0]!.items[0]!.kind = 'point';
+    const source = createNotesSource(
+      JSON.stringify({
+        segments: [
+          { speaker: 'Milo', text: 'I will send the outline.' },
+          { speaker: 'Robin', text },
+        ],
+      }),
+    );
+    const span = { segment: 1, start: 0, end: text.length };
+    fixture.draft.sections[0]!.items.push({
+      id: 's0:item:1',
+      kind: 'point',
+      text,
+      sources: [span],
+      owner: null,
+      due: null,
+    });
+    fixture.audit.verdicts.push({
+      target: 's0:item:1',
+      status: 'supported',
+      sources: [span],
+    });
+    const original = structuredClone(fixture.draft);
+    const projected = projectAuditedNotes(
+      applyNotesAudit({ ...fixture, source }),
+    );
+
+    expect(projected.overview).toBe(`Send the outline. ${ending}`);
+    expect(projected.all_action_items).toEqual([]);
+    expect(projected.topics[0]?.key_points).toEqual([{ text }]);
+    expect(fixture.draft).toEqual(original);
+    expect(
+      projected.generation_metadata?.source_provenance?.blocks.overview
+        ?.sources,
+    ).toEqual([...original.sections[0]!.items[0]!.sources, span]);
+  },
+);
+
+it('leaves an explicit overview unchanged instead of adding derived punctuation', () => {
+  const fixture = makeDirectNotesFixture();
+  const sources = fixture.draft.sections[0]!.items[0]!.sources;
+  fixture.draft.overview = {
+    id: 'overview',
+    text: 'Send the outline',
+    sources,
+  };
+  fixture.audit.verdicts.push({
+    target: 'overview',
+    status: 'supported',
+    sources,
+  });
+  expect(projectAuditedNotes(applyNotesAudit(fixture)).overview).toBe(
+    'Send the outline',
+  );
+});
+
 it('rejects a deduplication record without an identified replacement', () => {
   expect(() =>
     parseNotesAudit(
@@ -616,7 +684,7 @@ it('projects audited source provenance onto renderer edit paths', () => {
   expect(blocks).toMatchObject({
     overview: { id: 'overview', sources: [actionSpan] },
     'topic:0:title': { id: 's0:title', sources: [actionSpan] },
-    'topic:0:summary': { id: 's0:item:0', sources: [actionSpan] },
+    'topic:0:point:0': { id: 's0:item:0', sources: [actionSpan] },
     'topic:0:question:0': { id: 's0:item:1', sources: [discussionSpan] },
     'topic:0:action:0': { id: 's0:item:2', sources: [actionSpan] },
     'topic:0:decision:0': { id: 's0:item:3', sources: [discussionSpan] },

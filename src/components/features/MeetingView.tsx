@@ -166,6 +166,8 @@ interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
   isLoadingDetail?: boolean;
   citationTarget?: { sectionId?: string; timestampMs?: number };
+  reminderEntityId?: string;
+  onDismissReminder?: () => void;
   editingTitle: boolean;
   setEditingTitle: (val: boolean) => void;
   titleValue: string;
@@ -778,6 +780,8 @@ export const MeetingView = (props: MeetingViewProps) => {
 const SelectedMeetingView = ({
   selectedMeeting,
   citationTarget,
+  reminderEntityId,
+  onDismissReminder,
   editingTitle,
   setEditingTitle,
   titleValue,
@@ -2112,6 +2116,8 @@ const SelectedMeetingView = ({
               onCopy={handleCopySummary}
             />
             <MeetingNotesDocument
+              reminderEntityId={reminderEntityId}
+              onDismissReminder={onDismissReminder}
               meeting={selectedMeeting}
               model={notesDocument}
               transcriptSegments={displayedTranscriptSegments}

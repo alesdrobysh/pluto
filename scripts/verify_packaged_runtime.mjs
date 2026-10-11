@@ -95,6 +95,10 @@ for (const relativePath of requiredExecutables) {
   await access(executablePath, constants.X_OK);
 }
 
+const notificationBridge = path.join(resourcesPath, 'notification-bridge.node');
+if (!statSync(notificationBridge).isFile())
+  throw new Error('Packaged notification bridge is missing.');
+execFileSync('codesign', ['--verify', '--strict', notificationBridge]);
 const calendarInfo = readFileSync(
   path.join(resourcesPath, 'PlutoCalendarHelper.app', 'Contents', 'Info.plist'),
   'utf8',
@@ -130,5 +134,5 @@ for (const [name, relativePath] of mediaTools) {
 }
 
 console.log(
-  `Verified Pluto icon and ${requiredExecutables.length + mediaTools.length} packaged runtimes.`,
+  `Verified Pluto icon and ${requiredExecutables.length + mediaTools.length + 1} packaged runtimes.`,
 );

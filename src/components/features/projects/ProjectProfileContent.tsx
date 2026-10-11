@@ -122,11 +122,6 @@ export function ProjectProfileContent({
         .replace(/[.!?]+$/, '')
         .trim();
   const sourceIds = new Set(brief.meetings.map((meeting) => meeting.id));
-  const newerEvidence =
-    theme &&
-    brief.meetings.some(
-      (meeting) => !theme.sourceMeetingIds.includes(meeting.id),
-    );
   const history = [
     ...changes.map((change) => ({
       ...change,
@@ -396,15 +391,6 @@ export function ProjectProfileContent({
                 )}
               </div>
             )}
-            {newerEvidence && (
-              <p
-                role="status"
-                className="mt-4 text-xs leading-5 text-pro-text-muted"
-              >
-                Additional source meetings are available. This saved brief has
-                not incorporated all of them yet.
-              </p>
-            )}
             {changes.length > 0 && (
               <section className="mt-8 border-t border-pro-border/50 pt-6">
                 <h2 className="project-dossier-section-title mb-4">
@@ -514,9 +500,11 @@ export function ProjectProfileContent({
                 </div>
               ) : (
                 <p className="text-sm text-pro-text-muted">
-                  {theme
-                    ? 'No unresolved questions were established in the saved synthesis.'
-                    : 'No discussion points have been synthesized yet.'}
+                  {brief.themeSourceOutdated
+                    ? 'Source notes changed. Refresh the brief to see current discussion points.'
+                    : theme
+                      ? 'No unresolved questions were established in the saved synthesis.'
+                      : 'No discussion points have been synthesized yet.'}
                 </p>
               )}
             </section>
@@ -607,8 +595,11 @@ export function ProjectProfileContent({
                 </div>
               ) : (
                 <p className="text-sm text-pro-text-muted">
-                  No specific discussion points were established. Start with the
-                  latest meeting.
+                  {brief.themeSourceOutdated
+                    ? 'Source notes changed. Refresh the brief to see current discussion points.'
+                    : theme
+                      ? 'No specific discussion points were established in the saved synthesis. Start with the latest meeting.'
+                      : 'No discussion points have been synthesized yet.'}
                 </p>
               )}
             </section>
@@ -709,7 +700,12 @@ export function ProjectProfileContent({
               {openThreads.find(
                 (thread) =>
                   thread.kind === 'decision' || thread.kind === 'question',
-              )?.text || 'No pending decision was established.'}
+              )?.text ||
+                (brief.themeSourceOutdated
+                  ? 'Source notes changed. Refresh the brief to see the next decision.'
+                  : theme
+                    ? 'No pending decision was established in the saved synthesis.'
+                    : 'No next decision has been synthesized yet.')}
             </p>
             <button
               type="button"

@@ -14,10 +14,10 @@
     "prestart": "pnpm run ensure:dev-runtime",
     "start": "vite",
     "prebuild": "node scripts/clean_generated_electron_output.mjs",
-    "build-native": "pnpm run ensure:media-tools && pnpm run build:audio-cap && pnpm run build:calendar-helper && pnpm run build:parakeet",
+    "build-native": "pnpm run ensure:media-tools && pnpm run build:audio-cap && pnpm run build:calendar-helper && pnpm run build:parakeet && pnpm run build:notifications",
     "build": "tsc && vite build && pnpm run build-native && electron-builder",
     "build:parakeet": "./scripts/build_parakeet.sh",
-    "ensure:dev-runtime": "pnpm run ensure:media-tools && pnpm run ensure:sqlite-abi && pnpm run ensure:parakeet && pnpm run ensure:audio-cap && pnpm run ensure:calendar-helper",
+    "ensure:dev-runtime": "pnpm run ensure:media-tools && pnpm run ensure:sqlite-abi && pnpm run ensure:parakeet && pnpm run ensure:audio-cap && pnpm run ensure:calendar-helper && pnpm run ensure:notifications",
     "ensure:sqlite-abi": "node scripts/ensure_sqlite_abi.mjs",
     "ensure:parakeet": "./scripts/ensure_parakeet_runtime.sh",
     "ensure:audio-cap": "./scripts/ensure_audio_cap_runtime.sh",
@@ -66,7 +66,9 @@
     "changelog:build": "node scripts/changelog.mjs build",
     "db:generate": "drizzle-kit generate --name",
     "db:check": "drizzle-kit check",
-    "backfill:meeting-intelligence": "node scripts/backfill_meeting_title_analysis.mjs"
+    "backfill:meeting-intelligence": "node scripts/backfill_meeting_title_analysis.mjs",
+    "build:notifications": "node scripts/build_notifications.mjs",
+    "ensure:notifications": "node scripts/build_notifications.mjs --ensure"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "2.1.2",

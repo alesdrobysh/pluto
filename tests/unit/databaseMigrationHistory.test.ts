@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { describe, expect, it } from 'vitest';
 import {
@@ -64,7 +66,7 @@ describe('database migration history', () => {
     const history = readPackagedMigrationHistory(
       path.join(process.cwd(), 'drizzle'),
     );
-    expect(history).toHaveLength(18);
+    expect(history).toHaveLength(20);
     expect(history[0]).toMatchObject({ tag: '0000_pluto_baseline' });
     expect(history[1]).toMatchObject({ tag: '0001_voice_representatives' });
     expect(history[2]).toMatchObject({
@@ -97,6 +99,10 @@ describe('database migration history', () => {
     expect(history[15]).toMatchObject({ tag: '0015_prep_past_meetings' });
     expect(history[16]).toMatchObject({ tag: '0016_prep_briefing' });
     expect(history[17]).toMatchObject({ tag: '0017_workspace_chat' });
+    expect(history[18]).toMatchObject({
+      tag: '0018_calendar_recording_confirmation',
+    });
+    expect(history[19]).toMatchObject({ tag: '0019_commitment_reminders' });
     for (const migration of history) {
       expect(migration.when).toEqual(expect.any(Number));
       expect(migration.hash).toMatch(/^[a-f0-9]{64}$/);
@@ -116,7 +122,8 @@ describe('database migration history', () => {
       const insert = sqlite.prepare(
         'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
       );
-      for (const migration of history.slice(0, 13)) {
+      for (const [index, migration] of history.slice(0, 13).entries()) {
+        for (const statement of migrations[index].sql) sqlite.exec(statement);
         insert.run(migration.hash, migration.when);
       }
       for (const statement of migrations[17].sql) sqlite.exec(statement);
@@ -129,8 +136,34 @@ describe('database migration history', () => {
         reconcileWorkspaceChatMigrationFork(sqlite, migrationsFolder, history),
       ).toBe(true);
       expect(readAppliedMigrationHistory(sqlite)).toEqual(
+        history
+          .slice(0, 18)
+          .map(({ hash, when }) => ({ hash, createdAt: when })),
+      );
+      expect(
+        getPendingMigrationId(readAppliedMigrationHistory(sqlite), history),
+      ).toBe('0018_calendar_recording_confirmation');
+      expect(
+        sqlite
+          .prepare(
+            "SELECT 1 FROM sqlite_schema WHERE name = 'meeting_calendar_pending_selection'",
+          )
+          .get(),
+      ).toBeUndefined();
+      migrate(drizzle(sqlite), { migrationsFolder });
+      expect(readAppliedMigrationHistory(sqlite)).toEqual(
         history.map(({ hash, when }) => ({ hash, createdAt: when })),
       );
+      expect(
+        getPendingMigrationId(readAppliedMigrationHistory(sqlite), history),
+      ).toBeNull();
+      expect(
+        sqlite
+          .prepare(
+            "SELECT 1 FROM sqlite_schema WHERE name = 'meeting_calendar_pending_selection'",
+          )
+          .get(),
+      ).toBeTruthy();
       expect(
         sqlite
           .prepare('SELECT title FROM workspace_chat_threads WHERE id = ?')

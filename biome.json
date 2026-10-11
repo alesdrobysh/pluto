@@ -43,8 +43,10 @@
     "ignore": [
       "**/node_modules/**",
       ".pnpm-store/**",
+      ".private/**",
       "**/dist/**",
       "**/dist-electron/**",
+      "**/dist-electron-package/**",
       "**/python/**",
       "**/release/**",
       "**/resources/bin/**",

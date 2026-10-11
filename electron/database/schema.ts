@@ -20,6 +20,57 @@ const bool = customType<{ data: number }>({
 });
 const now = sql`CURRENT_TIMESTAMP`;
 
+export const commitmentReminderLedger = sqliteTable(
+  'commitment_reminder_ledger',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    obligationId: text('obligation_id').notNull(),
+    entityId: text('entity_id').notNull(),
+    deadlineKey: text('deadline_key').notNull(),
+    scheduledAt: text('scheduled_at').notNull(),
+    state: text('state').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    attemptedAt: text('attempted_at'),
+    submittedAt: text('submitted_at'),
+    retryAt: text('retry_at'),
+    failureCode: text('failure_code'),
+  },
+  (table) => [
+    unique('commitment_reminder_obligation_deadline').on(
+      table.obligationId,
+      table.deadlineKey,
+    ),
+    index('idx_commitment_reminder_due').on(table.state, table.scheduledAt),
+    index('idx_commitment_reminder_retry').on(table.state, table.retryAt),
+    check(
+      'commitment_reminder_state',
+      sql`${table.state} IN ('pending','attempted','submitted','failed','cancelled')`,
+    ),
+  ],
+);
+
+export const commitmentReminderRevision = sqliteTable(
+  'commitment_reminder_revision',
+  {
+    singleton: integer('singleton').primaryKey(),
+    revision: integer('revision').notNull(),
+  },
+);
+
+export const commitmentReminderChanges = sqliteTable(
+  'commitment_reminder_changes',
+  {
+    entityId: text('entity_id').primaryKey(),
+    revision: integer('revision').notNull(),
+  },
+  (table) => [
+    index('idx_commitment_reminder_changes_revision').on(
+      table.revision,
+      table.entityId,
+    ),
+  ],
+);
+
 export const meetings = sqliteTable('meetings', {
   id: text('id').primaryKey(),
   title: text('title').notNull(),
@@ -244,6 +295,12 @@ export const entities = sqliteTable(
       sql`${table.status} IN ('active', 'completed', 'stale', 'overdue') OR ${table.status} IS NULL`,
     ),
     index('idx_entities_type').on(table.type),
+    index('idx_entities_reminder_due').on(table.type, table.dueDate, table.id),
+    index('idx_entities_reminder_source').on(
+      table.type,
+      sql`json_extract(CASE WHEN json_valid(${table.metadata}) THEN ${table.metadata} ELSE '{}' END, '$.source_meeting_id')`,
+      sql`json_type(CASE WHEN json_valid(${table.metadata}) THEN ${table.metadata} ELSE '{}' END, '$.meeting_regeneration_retired_at')`,
+    ),
     index('idx_entities_normalized_name').on(table.normalizedName),
     index('idx_entities_status').on(table.status),
   ],
@@ -376,22 +433,32 @@ export const workspaceChatMessages = sqliteTable(
   ],
 );
 
-export const commitmentAliases = sqliteTable('commitment_aliases', {
-  extractionId: text('extraction_id').primaryKey(),
-  canonicalId: text('canonical_id')
-    .notNull()
-    .references(() => entities.id, { onDelete: 'cascade' }),
-  meetingId: text('meeting_id')
-    .notNull()
-    .references(() => meetings.id, { onDelete: 'cascade' }),
-  description: text('description').notNull(),
-  reason: text('reason').notNull(),
-  originalJson: text('original_json'),
-  associationInserted: integer('association_inserted').notNull().default(0),
-  active: integer('active').notNull().default(1),
-  createdAt: text('created_at').notNull().default(now),
-  restoredAt: text('restored_at'),
-});
+export const commitmentAliases = sqliteTable(
+  'commitment_aliases',
+  {
+    extractionId: text('extraction_id').primaryKey(),
+    canonicalId: text('canonical_id')
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    meetingId: text('meeting_id')
+      .notNull()
+      .references(() => meetings.id, { onDelete: 'cascade' }),
+    description: text('description').notNull(),
+    reason: text('reason').notNull(),
+    originalJson: text('original_json'),
+    associationInserted: integer('association_inserted').notNull().default(0),
+    active: integer('active').notNull().default(1),
+    createdAt: text('created_at').notNull().default(now),
+    restoredAt: text('restored_at'),
+  },
+  (table) => [
+    index('idx_commitment_reminder_alias_target').on(
+      table.canonicalId,
+      table.meetingId,
+      table.active,
+    ),
+  ],
+);
 
 export const projectAliases = sqliteTable(
   'project_aliases',

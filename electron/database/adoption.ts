@@ -186,6 +186,18 @@ export const adoptLegacyDatabase = (input: {
       // Ignore if table doesn't exist yet
     }
 
+    // Early entity tables predate canonical deadlines and review metadata.
+    // Add nullable fields before later migrations create their indexes/triggers;
+    // absent legacy evidence must not invent an eligible reminder.
+    const entityColumns = sqlite.pragma('table_info(entities)') as Array<{
+      name: string;
+    }>;
+    const entityNames = new Set(entityColumns.map((column) => column.name));
+    for (const column of ['due_date', 'metadata']) {
+      if (entityColumns.length > 0 && !entityNames.has(column))
+        sqlite.exec(`ALTER TABLE entities ADD COLUMN ${column} TEXT`);
+    }
+
     // Ensure __drizzle_migrations exists and stamp baseline migration
     sqlite.exec(`
       CREATE TABLE IF NOT EXISTS __drizzle_migrations (

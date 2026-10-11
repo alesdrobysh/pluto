@@ -201,9 +201,13 @@ export const PeopleBriefing = ({
 
   const renderPerson = (person: PersonBriefingRow) => {
     const selected = selectedPersonId === person.id;
-    const cue = person.latestMeetingTitle
-      ? `Latest link: ${person.latestMeetingTitle}`
-      : 'No linked conversation yet';
+    const savedHeadline =
+      person.briefStatus === 'up_to_date' ? person.briefHeadline?.trim() : '';
+    const cue = savedHeadline
+      ? `Saved context: ${savedHeadline}`
+      : person.latestMeetingTitle
+        ? `Latest link: ${person.latestMeetingTitle}`
+        : 'No linked conversation yet';
     const showRole =
       person.role !== 'Known from conversations' &&
       Boolean(person.roleSourceMeetingId);

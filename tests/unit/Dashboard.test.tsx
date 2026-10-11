@@ -347,7 +347,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Collapse current read');
   });
 
-  it('renders the approved date-led first viewport with three daily priorities', () => {
+  it('renders the approved date-led first viewport with five daily priorities', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -356,6 +356,8 @@ describe('Dashboard', () => {
         makeAction({ id: 'action-2', name: 'Confirm launch owner' }),
         makeAction({ id: 'action-3', name: 'Close privacy review' }),
         makeAction({ id: 'action-4', name: 'Publish launch notes' }),
+        makeAction({ id: 'action-5', name: 'Review sample outline' }),
+        makeAction({ id: 'action-6', name: 'Send sample estimate' }),
       ],
       staleActions: [],
       activeActions: [],
@@ -387,7 +389,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('dashboard-top-of-mind-item');
     expect(
       markup.match(/data-testid="dashboard-commitment-row"/g) ?? [],
-    ).toHaveLength(3);
+    ).toHaveLength(5);
     expect(markup).toContain('Remaining commitments · 1');
     expect(markup).not.toContain('No recent win surfaced yet');
     expect(markup).not.toContain('Current read');
@@ -440,17 +442,17 @@ describe('Dashboard', () => {
     expect(markup.match(/Needs review/g) ?? []).toHaveLength(3);
     expect(markup).not.toContain('Confirm task');
     expect(markup).not.toContain('Not a task');
-    expect(markup).toContain('Recent win');
-    expect(markup).toContain('No wins yet this week');
+    expect(markup).toContain('Last conversation');
+    expect(markup).not.toContain('No wins yet this week');
   });
 
-  it('keeps possible items beyond the focused three reachable in the backlog', () => {
+  it('keeps possible items beyond the focused five reachable in the backlog', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [],
       overdueActions: [],
       staleActions: [],
-      activeActions: Array.from({ length: 4 }, (_, index) =>
+      activeActions: Array.from({ length: 6 }, (_, index) =>
         makeAction({
           id: `possible-${index + 1}`,
           name: `Possible item ${index + 1}`,
@@ -468,12 +470,12 @@ describe('Dashboard', () => {
     expect(markup).toContain('Add Possible item 1 to commitments');
     expect(markup).toContain('Dismiss suggestion: Possible item 1');
     expect(markup.match(/aria-label="Review suggestion:/g) ?? []).toHaveLength(
-      4,
+      6,
     );
-    expect(markup.match(/Needs review/g) ?? []).toHaveLength(4);
+    expect(markup.match(/Needs review/g) ?? []).toHaveLength(6);
   });
 
-  it('places Upcoming meetings before Recent win and removes duplicate re-entry', () => {
+  it('uses one dated saved conversation beneath the agenda during a quiet week', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting({ title: 'Launch Review' })],
@@ -487,13 +489,45 @@ describe('Dashboard', () => {
 
     const markup = renderDashboard(model);
 
-    expect(markup).toContain('Recent win');
-    expect(markup).toContain('No wins yet this week');
+    expect(markup).toContain('Last conversation');
+    expect(markup).toContain('Apr 27, 2026');
+    expect(markup).toContain('Launch readiness now depends on privacy review.');
+    expect(markup).toContain('Open last conversation: Launch Review');
+    expect(markup).not.toContain('No wins yet this week');
     expect(markup).toContain('Upcoming meetings');
     expect(markup.indexOf('Upcoming meetings')).toBeLessThan(
-      markup.indexOf('Recent win'),
+      markup.indexOf('Last conversation'),
     );
     expect(markup).not.toContain('Continue where you left off');
+  });
+
+  it('keeps the continuation bounded to the newest loaded meeting', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      dateKey: '2026-10-09',
+      meetings: [
+        makeMeeting({ id: 'older', title: 'Older conversation' }),
+        makeMeeting({
+          id: 'newer',
+          title: 'Latest conversation',
+          started_at: '2026-05-05T12:00:00.000Z',
+        }),
+      ],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderDashboard(model);
+
+    expect(
+      markup.match(/data-testid="dashboard-conversation-continuation"/g),
+    ).toHaveLength(1);
+    expect(markup).toContain('Latest conversation');
+    expect(markup).toContain('May 5, 2026');
+    expect(markup).not.toContain('Older conversation');
   });
 
   it('keeps a supported recent win beneath the compact agenda', () => {
@@ -520,6 +554,7 @@ describe('Dashboard', () => {
     );
     expect(markup).not.toContain('Continue where you left off');
     expect(markup).not.toContain('Your wins will show up here');
+    expect(markup).not.toContain('dashboard-conversation-continuation');
   });
 
   it('renders a truthful Recent Win preview when no supporting context exists', () => {

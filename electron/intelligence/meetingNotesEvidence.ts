@@ -107,6 +107,7 @@ export const resolveSavedMeetingEvidencePolicy = (
 export const buildMeetingNotesEvidenceDocument = (
   meeting: MeetingNotesEvidenceSource,
   speakerDisplayNames: Readonly<Record<string, string>> = {},
+  options: { prioritizeOpenQuestions?: boolean } = {},
 ): MeetingNotesEvidenceDocument => {
   const v3 = parseAnalysisDocumentV3Json(meeting.analysis_json);
   const mid = parseMidEvidence(meeting.mid_json);
@@ -171,9 +172,34 @@ export const buildMeetingNotesEvidenceDocument = (
   const blocks = notesDocument?.sections.flatMap((section) => section.blocks);
   const settledBlocks = blocks?.filter((block) => block.blockType !== 'review');
 
+  // Project prompts have a fixed source budget. Retain already-structured
+  // questions alongside outcomes/user notes before truncating long discussion.
+  // Reorder sections before the existing block-level deduplication so edited
+  // multiline blocks and their native continuations keep their exact text.
+  const noteSections = notesDocument?.sections || [];
+  const orderedNoteSections =
+    options.prioritizeOpenQuestions &&
+    noteSections.some((section) => section.kind === 'open_questions')
+      ? [
+          ...noteSections.filter(
+            (section) =>
+              section.kind === 'outcomes' || section.kind === 'scratchpad',
+          ),
+          ...noteSections.filter(
+            (section) => section.kind === 'open_questions',
+          ),
+          ...noteSections.filter(
+            (section) =>
+              section.kind !== 'outcomes' &&
+              section.kind !== 'scratchpad' &&
+              section.kind !== 'open_questions',
+          ),
+        ]
+      : noteSections;
+
   const notesText = notesDocument
     ? uniqueText(
-        notesDocument.sections.flatMap((section) =>
+        orderedNoteSections.flatMap((section) =>
           section.blocks.flatMap((block) => [
             ...(block.blockType === 'review' ? [] : [block.text]),
             ...(block.blockType === 'review'

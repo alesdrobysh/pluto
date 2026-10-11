@@ -64,10 +64,12 @@ import {
   persistDashboardCommitmentReview,
   persistDashboardPriorityOrder,
 } from './components/features/dashboardActionCompletion';
+import { getDashboardDateKey } from './components/features/dashboardModel';
 import type {
   MeetingRetryKind,
   MeetingRetryOperation,
 } from './components/features/meetingFailurePresentation';
+import { ProjectCommitments } from './components/features/projects/ProjectCommitments';
 import type {
   CaptureHealthState,
   LiveTranscriptIntegrity,
@@ -110,6 +112,7 @@ import {
 import type { AppTheme } from './types/theme';
 import { calendarAgendaWindow } from './utils/calendarAgenda';
 import { getCalendarRosterNames } from './utils/calendarRoster';
+import { connectCommitmentReminderNavigation } from './utils/commitmentReminderNavigation';
 import { hasConferenceLink } from './utils/conferenceUrl';
 import { meetingTitleNeedsGeneration } from './utils/meetingTitle';
 
@@ -362,6 +365,11 @@ function App() {
   const [dashboardActionError, setDashboardActionError] = useState<
     string | null
   >(null);
+  const [reminderContext, setReminderContext] = useState<{
+    entityId: string;
+    meetingId: string | null;
+  } | null>(null);
+  const [reminderNavigationError, setReminderNavigationError] = useState('');
   const [currentNotes, setCurrentNotes] = useState(
     () => window.localStorage.getItem(RECORDING_SCRATCHPAD_STORAGE_KEY) || '',
   );
@@ -661,19 +669,45 @@ function App() {
     }
   };
 
+  const dashboardReviewInFlight = useRef(false);
+
   const handleReviewDashboardCommitment = async (
     taskId: string,
     commitmentState: 'confirmed' | 'rejected',
   ) => {
-    if (updatingDashboardTaskIds.has(taskId)) return;
+    if (
+      dashboardReviewInFlight.current ||
+      updatingDashboardTaskIds.has(taskId)
+    ) {
+      throw new Error('A commitment update is already in progress');
+    }
+    dashboardReviewInFlight.current = true;
+    const focus = dashboardHome.model.commitments.items;
+    const affectedIds = new Set([taskId, ...focus.map((item) => item.id)]);
 
     setDashboardActionError(null);
-    setUpdatingDashboardTaskIds((prev) => new Set(prev).add(taskId));
+    setUpdatingDashboardTaskIds((prev) => new Set([...prev, ...affectedIds]));
 
     try {
       await persistDashboardCommitmentReview(taskId, commitmentState, {
         updateActionCommitmentState,
         refreshDashboard: dashboardHome.refresh,
+        preserveFocus: async () => {
+          if (
+            !focus.some((item) => item.id === taskId) ||
+            focus.every((item, rank) => item.dailyPriorityRank === rank)
+          )
+            return;
+          const orderedIds = focus.map((item) => item.id);
+          await persistDashboardPriorityOrder(
+            {
+              orderedIds,
+              previousIds: orderedIds,
+              dateKey: getDashboardDateKey(),
+            },
+            { getEntity, upsertEntity, refreshDashboard: async () => {} },
+          );
+        },
       });
     } catch (error) {
       console.error('Failed to review dashboard follow-up', error);
@@ -682,10 +716,12 @@ function App() {
           ? 'Follow-up review saved, but the dashboard could not refresh.'
           : 'Could not update follow-up review. Try again.',
       );
+      throw error;
     } finally {
+      dashboardReviewInFlight.current = false;
       setUpdatingDashboardTaskIds((prev) => {
         const next = new Set(prev);
-        next.delete(taskId);
+        for (const id of affectedIds) next.delete(id);
         return next;
       });
     }
@@ -1603,6 +1639,33 @@ function App() {
     [activeTab, selectedMeetingId, selectedPersonId, selectedProjectId],
   );
 
+  useEffect(
+    () =>
+      connectCommitmentReminderNavigation({
+        ready: setupNeeded === false && !databaseRecovery.visible,
+        onOpen: (entityId, meetingId) => {
+          setReminderNavigationError('');
+          handleOpenMeeting(meetingId);
+          setReminderContext({ entityId, meetingId });
+        },
+        onUnavailable: (entityId) => {
+          setSelectedMeetingId(null);
+          setActiveTab('hub');
+          setReminderContext(entityId ? { entityId, meetingId: null } : null);
+          setReminderNavigationError(
+            entityId
+              ? 'The source meeting is no longer available.'
+              : 'This commitment is no longer available.',
+          );
+        },
+        onError: () =>
+          setReminderNavigationError(
+            'Couldn’t open this reminder. Please try again.',
+          ),
+      }),
+    [setupNeeded, databaseRecovery.visible, handleOpenMeeting],
+  );
+
   const handleOpenPerson = useCallback(
     (
       personId: string,
@@ -2327,12 +2390,12 @@ function App() {
                   ? handleStartRecording
                   : handleReturnToRecording
               }
-              className="no-drag absolute right-5 top-2 z-[60] inline-flex h-8 items-center gap-2 rounded-lg border border-pro-accent/25 bg-pro-accent/[0.07] px-3 text-[13px] font-medium text-pro-text-main transition-colors duration-150 enabled:hover:border-pro-accent/40 enabled:hover:bg-pro-accent/[0.12] enabled:active:bg-pro-accent/[0.18] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent motion-reduce:transition-none"
+              className="no-drag absolute right-5 top-2 z-[60] inline-flex h-8 items-center gap-1.5 rounded-md border border-pro-border bg-pro-bg px-2.5 text-[13px] font-medium text-pro-text-main transition-colors duration-150 enabled:hover:border-pro-text-muted/30 enabled:hover:bg-pro-hover enabled:active:bg-pro-accent/10 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent motion-reduce:transition-none"
             >
               {captureAction.command === 'start' && (
                 <Plus
-                  size={16}
-                  strokeWidth={2.25}
+                  size={14}
+                  strokeWidth={2}
                   className="text-pro-accent"
                   aria-hidden="true"
                 />
@@ -2370,6 +2433,26 @@ function App() {
               <div className="app-background-glow fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[150px] pointer-events-none z-0 opacity-40" />
             </>
 
+            {reminderNavigationError && (
+              <p
+                role="alert"
+                className="mx-auto mb-3 w-full max-w-5xl text-sm text-pro-text-muted"
+              >
+                {reminderNavigationError}
+              </p>
+            )}
+            {reminderContext &&
+              reminderContext.meetingId === null &&
+              selectedMeetingId === null &&
+              activeTab === 'hub' && (
+                <div className="mx-auto mb-6 w-full max-w-[760px] px-6 md:px-8">
+                  <ProjectCommitments
+                    focusEntityId={reminderContext.entityId}
+                    defaultOpen
+                    onDismiss={() => setReminderContext(null)}
+                  />
+                </div>
+              )}
             {preMeetingBriefVisible ? (
               <PreMeetingBriefSheet
                 visible={preMeetingBriefVisible}
@@ -2387,6 +2470,12 @@ function App() {
             ) : selectedMeetingId ? (
               <MeetingView
                 key={selectedMeeting?.id}
+                reminderEntityId={
+                  reminderContext?.meetingId === String(selectedMeetingId)
+                    ? reminderContext.entityId
+                    : undefined
+                }
+                onDismissReminder={() => setReminderContext(null)}
                 selectedMeeting={selectedMeeting}
                 isLoadingDetail={
                   selectedMeetingId != null &&

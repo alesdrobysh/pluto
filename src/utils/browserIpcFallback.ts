@@ -157,6 +157,12 @@ const meetingPreviewEnabled = (): boolean => {
   );
 };
 
+const quietDashboardPreviewEnabled = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('preview') === 'dashboard' && params.get('quiet') === '1';
+};
+
 export const previewMeeting: Meeting = {
   id: 'preview-pricing-review',
   title: 'Q4 Launch & Customer Pricing',
@@ -337,7 +343,9 @@ const previewMeetingDashboard = (meeting: Meeting) => {
     analysis = {};
   }
   const recentWin =
-    analysis.recent_win && typeof analysis.recent_win === 'object'
+    !quietDashboardPreviewEnabled() &&
+    analysis.recent_win &&
+    typeof analysis.recent_win === 'object'
       ? (analysis.recent_win as Record<string, unknown>)
       : {};
   const bounded = (value: unknown, limit: number) =>
@@ -1469,7 +1477,7 @@ const createInvokeFallback =
         result = previewCalendarSnapshot;
         break;
       case 'CALENDAR_LIST_DAY':
-        result = previewCalendarEvents();
+        result = quietDashboardPreviewEnabled() ? [] : previewCalendarEvents();
         break;
       case 'CALENDAR_GET_MEETING_CONTEXT':
         result = null;
@@ -1935,7 +1943,7 @@ const createInvokeFallback =
             briefHeadline:
               previewPersonBriefings[person.id]?.knowledgeDoc?.scope_key ===
               person.id
-                ? 'Avery is coordinating the launch handoff.'
+                ? `${person.name} is coordinating the launch handoff.`
                 : null,
             briefStatus:
               previewPersonBriefings[person.id]?.knowledgeDoc?.status ?? null,

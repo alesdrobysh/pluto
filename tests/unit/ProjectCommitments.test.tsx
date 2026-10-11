@@ -3,6 +3,7 @@ import { act } from 'react';
 import { type Root, createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
+  getEntity: vi.fn(),
   getEntitiesByType: vi.fn(),
   getEntityLinks: vi.fn(),
   updateEntityStatus: vi.fn(),
@@ -182,4 +183,90 @@ it('resets disclosure and hides prior tasks after project navigation', async () 
   expect(host.querySelector('details')!.open).toBe(false);
   await open();
   expect(host.textContent).toContain('Linked action');
+});
+
+it('updates and explicitly removes the canonical due date without changing metadata', async () => {
+  api.getEntitiesByType.mockImplementation(async (type) =>
+    type === 'project' ? [] : [{ ...tasks[0], due_date: '2026-10-20' }],
+  );
+  await render();
+  await open();
+  const input = host.querySelector<HTMLInputElement>('input[type="date"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )!.set!.call(input, '2026-10-22');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(api.upsertEntity).toHaveBeenCalledWith({
+    id: 'a',
+    type: 'action_item',
+    name: 'Unassigned action',
+    due_date: '2026-10-22',
+    clear_due_date: false,
+  });
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>(
+        '[aria-label="Remove due date for Unassigned action"]',
+      )!
+      .click(),
+  );
+  expect(api.upsertEntity).toHaveBeenLastCalledWith({
+    id: 'a',
+    type: 'action_item',
+    name: 'Unassigned action',
+    due_date: null,
+    clear_due_date: true,
+  });
+});
+it('opens the current reminder commitment without offering to add unrelated tasks', async () => {
+  api.getEntity.mockResolvedValue({ ...tasks[0], type: 'action_item' });
+  await act(async () =>
+    root.render(<ProjectCommitments focusEntityId="a" defaultOpen />),
+  );
+  expect(api.getEntity).toHaveBeenCalledWith('a');
+  expect(host.textContent).toContain('Unassigned action');
+  expect(host.querySelector('form')).toBeNull();
+});
+it('handles a deleted reminder commitment gracefully', async () => {
+  api.getEntity.mockResolvedValue(undefined);
+  await act(async () =>
+    root.render(<ProjectCommitments focusEntityId="deleted" defaultOpen />),
+  );
+  expect(host.textContent).toContain('no longer available');
+});
+it('keeps completed reminders compact and refreshes the meeting after reopening', async () => {
+  const onChanged = vi.fn();
+  const onDismiss = vi.fn();
+  api.getEntity.mockResolvedValue({ ...tasks[1], type: 'action_item' });
+  await act(async () =>
+    root.render(
+      <ProjectCommitments
+        focusEntityId="b"
+        defaultOpen
+        onChanged={onChanged}
+        onDismiss={onDismiss}
+      />,
+    ),
+  );
+  expect(host.querySelector('details')?.open).toBe(true);
+  expect(host.textContent).not.toContain('Already completed');
+  expect(host.querySelector('input[type="date"]')).toBeNull();
+  await act(async () =>
+    host
+      .querySelector<HTMLInputElement>('[aria-label="Mark incomplete"]')!
+      .click(),
+  );
+  expect(api.updateEntityStatus).toHaveBeenCalledWith('b', 'active');
+  expect(onChanged).toHaveBeenCalledOnce();
+  expect(host.querySelector('input[type="date"]')).not.toBeNull();
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('[aria-label="Dismiss reminder"]')!
+      .click(),
+  );
+  expect(onDismiss).toHaveBeenCalledOnce();
 });

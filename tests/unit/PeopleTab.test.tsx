@@ -61,13 +61,14 @@ describe('PeopleBriefing', () => {
       <PeopleBriefing rows={rows} onSelectPerson={() => {}} />,
     );
     expect(markup).not.toContain('Needs you now');
-    expect(markup).toContain('Latest link: Product review');
-    expect(markup).not.toContain('Avery is preparing the launch handoff.');
+    expect(markup).toContain(
+      'Saved context: Avery is preparing the launch handoff.',
+    );
     expect(markup).toContain('2 open loops');
     expect(markup).toContain('1 to confirm');
     expect(markup).toContain('person-row__meeting');
     expect(markup).toContain(
-      '<span class="person-copy"><span class="person-identity"><strong>Avery Chen</strong></span><span class="person-context"><span class="person-role">Design lead</span><span>Latest link: Product review</span></span></span>',
+      '<span class="person-copy"><span class="person-identity"><strong>Avery Chen</strong></span><span class="person-context"><span class="person-role">Design lead</span><span>Saved context: Avery is preparing the launch handoff.</span></span></span>',
     );
     expect(markup).not.toContain('>Open <');
   });
@@ -77,6 +78,7 @@ describe('PeopleBriefing', () => {
       ...rows[0],
       name: 'Sarah Chen',
       roleSourceMeetingId: null,
+      briefStatus: 'stale',
       briefHeadline:
         'Sarah Chen: The conversation centered around design principles.',
     };
@@ -86,6 +88,55 @@ describe('PeopleBriefing', () => {
     expect(markup).toContain('Latest link: Product review');
     expect(markup).not.toContain('The conversation centered around');
     expect(markup).not.toContain('person-role');
+  });
+
+  it.each([null, 'stale', 'failed', 'generating'])(
+    'keeps the latest link when the saved brief status is %s',
+    (briefStatus) => {
+      const markup = renderToStaticMarkup(
+        <PeopleBriefing
+          rows={[{ ...rows[0], briefStatus }]}
+          onSelectPerson={() => {}}
+        />,
+      );
+      expect(markup).toContain('Latest link: Product review');
+      expect(markup).not.toContain('Saved context:');
+      expect(markup).not.toContain('Avery is preparing the launch handoff.');
+    },
+  );
+
+  it.each([null, '', '   '])(
+    'keeps the latest link when the saved headline is empty (%s)',
+    (briefHeadline) => {
+      const markup = renderToStaticMarkup(
+        <PeopleBriefing
+          rows={[{ ...rows[0], briefHeadline }]}
+          onSelectPerson={() => {}}
+        />,
+      );
+      expect(markup).toContain('Latest link: Product review');
+      expect(markup).not.toContain('Saved context:');
+    },
+  );
+
+  it('keeps the unlinked fallback when no saved context is available', () => {
+    const markup = renderToStaticMarkup(
+      <PeopleBriefing
+        rows={[
+          {
+            ...rows[0],
+            meetingCount: 0,
+            latestMeetingId: null,
+            latestMeetingTitle: null,
+            latestMeetingAt: null,
+            briefHeadline: null,
+          },
+        ]}
+        onSelectPerson={() => {}}
+      />,
+    );
+    expect(markup).toContain('No linked conversation yet');
+    expect(markup).not.toContain('Saved context:');
   });
 
   it('renders every linked person in ranked order without a loader', () => {

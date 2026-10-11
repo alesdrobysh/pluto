@@ -10,6 +10,12 @@ import type {
   NotesRequest,
 } from '../../electron/llm/meetingNotesTypes';
 import { createNotesWireRequest } from '../../electron/llm/meetingNotesWire';
+import { getAnalysisEditBlocks } from '../../src/utils/analysisDocument';
+import { buildMeetingNotesDocument } from '../../src/utils/meetingNotesDocument';
+import {
+  applyMeetingNotesUserEdit,
+  rebaseMeetingNotesEdits,
+} from '../../src/utils/meetingNotesEditRebase';
 import captured from '../fixtures/meeting-notes-qualified-publication-seed41.json';
 import {
   makeDirectNotesFixture,
@@ -18,7 +24,9 @@ import {
 } from '../fixtures/meeting-notes-v10';
 
 const projectSections = (
-  groups: Array<Array<Pick<NotesItem, 'kind' | 'text'>>>,
+  groups: Array<
+    Array<Pick<NotesItem, 'kind' | 'text'> & Partial<Pick<NotesItem, 'owner'>>>
+  >,
   explicitOverview = false,
 ) => {
   const source = makeSyntheticNotesSource(
@@ -39,7 +47,7 @@ const projectSections = (
           sources: [
             { segment: segment.index, start: 0, end: segment.text.length },
           ],
-          owner: null,
+          owner: item.owner ?? null,
           due: null,
         };
       });
@@ -83,7 +91,8 @@ it('derives an action-only overview from the reviewed action with matching prove
   const fixture = makeDirectNotesFixture();
   const action = fixture.draft.sections[0]!.items[0]!;
   const result = projectAuditedNotes(applyNotesAudit(fixture));
-  expect(result.overview).toBe(result.all_action_items[0]!.text);
+  expect(result.all_action_items[0]!.text).toBe('Send the outline');
+  expect(result.overview).toBe('Milo: Send the outline.');
   expect(
     result.generation_metadata?.source_provenance?.blocks.overview?.sources,
   ).toEqual(action.sources);
@@ -109,19 +118,16 @@ it.each([
         { kind: 'point', text: 'The report includes a diagram.' },
       ],
     ]);
+    expect(result.all_action_items[0]!.text).toBe('Send the outline');
     const outcomeText = (item: typeof first) =>
-      item.kind === 'action' ? result.all_action_items[0]!.text : item.text;
+      item.kind === 'action' ? 'Milo: Send the outline.' : item.text;
     expect(result.overview).toBe(
-      [
-        outcomeText(first),
-        draft.sections[0]!.items[0]!.text,
-        outcomeText(second),
-      ].join(' '),
+      [outcomeText(first), outcomeText(second)].join(' '),
     );
     expect(
       result.generation_metadata?.source_provenance?.blocks.overview?.sources,
     ).toEqual(
-      [1, 0, 2].flatMap((index) => draft.sections[0]!.items[index]!.sources),
+      [1, 2].flatMap((index) => draft.sections[0]!.items[index]!.sources),
     );
   },
 );
@@ -202,15 +208,210 @@ it.each(['decision-first', 'offer-first'])(
     expect(result.overview).toBe(
       [
         result.all_decisions[0]!.text,
-        'Cleo withdrew the promise to replace product screenshots because the images are still accurate.',
-        result.all_action_items[0]!.text,
+        `${result.all_action_items[0]!.text}.`,
       ].join(' '),
     );
     const metadata = result.generation_metadata!.source_provenance!.blocks;
     expect(metadata.overview?.sources).toEqual([
       ...metadata['all_decisions:0']!.sources,
-      ...metadata['topic:1:summary']!.sources,
       ...metadata['all_action_items:0']!.sources,
     ]);
   },
 );
+
+it('keeps early opinions in the body while the overview leads with a later outcome', () => {
+  const { result, draft } = projectSections([
+    [
+      { kind: 'point', text: 'Cedar seemed promising.' },
+      { kind: 'point', text: 'The quote is only an estimate.' },
+      { kind: 'decision', text: 'We decided to trial Birch.' },
+    ],
+  ]);
+  expect(result.topics[0]!.summary).toBe('');
+  expect(result.topics[0]!.key_points).toEqual([
+    { text: 'Cedar seemed promising.' },
+    { text: 'The quote is only an estimate.' },
+  ]);
+  const blocks = result.generation_metadata!.source_provenance!.blocks;
+  expect(blocks['topic:0:summary']).toBeUndefined();
+  for (const index of [0, 1])
+    expect(blocks[`topic:0:point:${index}`]).toEqual({
+      id: `s0:item:${index}`,
+      sources: draft.sections[0]!.items[index]!.sources,
+    });
+});
+
+it('leads with a conditional owned action after a narrative-only topic without dropping discussion', () => {
+  const { result, draft } = projectSections([
+    [
+      { kind: 'point', text: 'Cedar seemed promising.' },
+      { kind: 'point', text: 'The estimate remains uncertain.' },
+    ],
+    [
+      {
+        kind: 'action',
+        owner: 'Milo',
+        text: 'If approval arrives, Milo will send the outline by Thursday.',
+      },
+    ],
+  ]);
+  expect(result.topics[0]!.summary).toBe('');
+  expect(result.topics[0]!.key_points.map((point) => point.text)).toEqual(
+    draft.sections[0]!.items.map((item) => item.text),
+  );
+  expect(result.overview).toBe(
+    'Milo: If approval arrives, Milo will send the outline by Thursday.',
+  );
+  expect(result.topics[1]!.summary).toBe('');
+  expect(result.all_action_items[0]!.assignee).toBe('Milo');
+  expect(result.all_action_items[0]!.text).toBe(
+    'If approval arrives, Milo will send the outline by Thursday',
+  );
+  const blocks = result.generation_metadata!.source_provenance!.blocks;
+  expect(blocks.overview!.sources).toEqual(
+    draft.sections[1]!.items[0]!.sources,
+  );
+  expect(blocks['topic:1:summary']).toBeUndefined();
+  expect(blocks['topic:0:point:0']).toEqual({
+    id: 's0:item:0',
+    sources: draft.sections[0]!.items[0]!.sources,
+  });
+});
+
+it('keeps an unnamed speaker action separate from the reader', () => {
+  const fixture = makeDirectNotesFixture();
+  fixture.source = {
+    ...fixture.source,
+    segments: fixture.source.segments.map((segment) => ({
+      ...segment,
+      speaker: null,
+    })),
+  };
+  fixture.draft.sections[0]!.items[0]!.owner = null;
+  const result = projectAuditedNotes(applyNotesAudit(fixture));
+  expect(result.all_action_items[0]!.assignee).toBe('Speaker');
+  expect(result.all_action_items[0]!.text).toBe('Send the outline');
+  expect(result.overview).toBe('Speaker: Send the outline.');
+  expect(result.topics[0]!.summary).toBe('');
+});
+
+it.each(['action', 'decision'] as const)(
+  'preserves a %s edit through actual block extraction without duplicate topic summaries',
+  (kind) => {
+    const group = [
+      { kind: 'point' as const, text: 'The quote remains uncertain.' },
+      {
+        kind,
+        owner: 'Milo',
+        text:
+          kind === 'action'
+            ? 'Milo will send the outline.'
+            : 'We decided to keep the report plain.',
+      },
+    ];
+    const previous = projectSections([group]).result;
+    const next = projectSections([group]).result;
+    const original = structuredClone(next);
+    const outcomePath =
+      kind === 'action' ? 'all_action_items:0' : 'all_decisions:0';
+    const outcome =
+      kind === 'action'
+        ? previous.all_action_items[0]!
+        : previous.all_decisions[0]!;
+    const { edits } = applyMeetingNotesUserEdit(
+      {},
+      outcomePath,
+      outcome.text,
+      'User clarification of the outcome.',
+      '2026-10-10T12:00:00Z',
+    );
+    const previousBlocks = getAnalysisEditBlocks(previous);
+    const nextBlocks = getAnalysisEditBlocks(next);
+    if (kind === 'decision') {
+      expect(previous.overview).toBe(outcome.text);
+      expect(
+        previous.generation_metadata!.source_provenance!.blocks.overview!
+          .sources,
+      ).toEqual(
+        previous.generation_metadata!.source_provenance!.blocks[outcomePath]!
+          .sources,
+      );
+    }
+    const overviewEdit = applyMeetingNotesUserEdit(
+      {},
+      'overview',
+      previous.overview,
+      'User overview clarification.',
+      '2026-10-10T12:00:00Z',
+    );
+    const rebasedOverview = rebaseMeetingNotesEdits({
+      edits: overviewEdit.edits,
+      previousBlocks,
+      nextBlocks,
+    });
+    expect(rebasedOverview.conflicts).toEqual([]);
+    expect(Object.keys(rebasedOverview.edits)).toEqual(['overview']);
+    expect(rebasedOverview.edits.overview!.edited).toBe(
+      'User overview clarification.',
+    );
+    expect(nextBlocks.some((block) => block.path === 'topic:0:summary')).toBe(
+      false,
+    );
+    const rebased = rebaseMeetingNotesEdits({
+      edits,
+      previousBlocks,
+      nextBlocks,
+    });
+    expect(rebased.conflicts).toEqual([]);
+    expect(Object.keys(rebased.edits)).toEqual([outcomePath]);
+    const document = buildMeetingNotesDocument({
+      v2: null,
+      v3: next,
+      userNotes: '',
+      editsMap: rebased.edits,
+    });
+    const visible = document.sections.flatMap((section) => section.blocks);
+    expect(visible.find((block) => block.path === outcomePath)).toMatchObject({
+      text: 'User clarification of the outcome.',
+      edited: true,
+      ...(kind === 'action' ? { assignee: 'Milo' } : {}),
+    });
+    expect(
+      visible.find((block) => block.path === 'topic:0:point:0'),
+    ).toMatchObject({ text: 'The quote remains uncertain.', edited: false });
+    expect(next).toEqual(original);
+  },
+);
+
+it('rebases an existing discussion summary edit to its retained body point', () => {
+  const next = projectSections([
+    [
+      { kind: 'point', text: 'The quote remains uncertain.' },
+      { kind: 'decision', text: 'We decided to keep the report plain.' },
+    ],
+  ]).result;
+  const previous = structuredClone(next);
+  previous.topics[0]!.summary = previous.topics[0]!.key_points.shift()!.text;
+  const metadata = previous.generation_metadata!.source_provenance!.blocks;
+  metadata['topic:0:summary'] = metadata['topic:0:point:0']!;
+  previous.generation_metadata!.source_provenance!.blocks = Object.fromEntries(
+    Object.entries(metadata).filter(([path]) => path !== 'topic:0:point:0'),
+  );
+  const { edits } = applyMeetingNotesUserEdit(
+    {},
+    'topic:0:summary',
+    previous.topics[0]!.summary,
+    'The quote needs confirmation.',
+    '2026-10-10T12:00:00Z',
+  );
+  const rebased = rebaseMeetingNotesEdits({
+    edits,
+    previousBlocks: getAnalysisEditBlocks(previous),
+    nextBlocks: getAnalysisEditBlocks(next),
+  });
+  expect(rebased.conflicts).toEqual([]);
+  expect(Object.keys(rebased.edits)).toEqual(['topic:0:point:0']);
+  expect(rebased.edits['topic:0:point:0']!.edited).toBe(
+    'The quote needs confirmation.',
+  );
+});

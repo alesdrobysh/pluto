@@ -150,6 +150,9 @@ it.each([false, true])(
       legacy.exec(`CREATE TABLE entities(id TEXT PRIMARY KEY,type TEXT,name TEXT); CREATE TABLE meetings(id TEXT PRIMARY KEY, title TEXT);
       CREATE TABLE identity_resolution_history(action_id TEXT, fingerprint TEXT, payload TEXT, PRIMARY KEY(action_id,fingerprint));`);
       legacy
+        .prepare('INSERT INTO entities VALUES (?,?,?)')
+        .run('legacy-person', 'person', 'Fictional person');
+      legacy
         .prepare('INSERT INTO identity_resolution_history VALUES(?,?,?)')
         .run('old', 'fp', JSON.stringify(resolution));
       if (interrupted)
@@ -162,6 +165,18 @@ it.each([false, true])(
         migrationsFolder: path.join(process.cwd(), 'drizzle'),
       });
       const sql = runtime.initialize();
+      expect(
+        sql
+          .prepare(
+            'SELECT id,name,due_date,metadata FROM entities WHERE id = ?',
+          )
+          .get('legacy-person'),
+      ).toEqual({
+        id: 'legacy-person',
+        name: 'Fictional person',
+        due_date: null,
+        metadata: null,
+      });
       const store = createIdentityStore(sql);
       expect(store.getResolution('old', 'fp')).toEqual(resolution);
       sql.exec(

@@ -70,7 +70,7 @@ describe('Ask Pluto request lifecycle', () => {
 
     expect(container.textContent).toContain("Hello, I'm Pluto.");
     expect(container.textContent).toContain(
-      'Record a meeting to get personalized suggestions.',
+      'No suggestions right now. Ask a question below.',
     );
     expect(
       container.querySelector('input[aria-label="Ask Pluto"]'),

@@ -288,6 +288,39 @@ describe('SettingsTab', () => {
     },
   );
 
+  it('places cloud consent above the Settings animation and cancels without activating the provider', async () => {
+    const container = document.createElement('div');
+    container.style.transform = 'translateY(0)';
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(<SettingsTab {...defaultProps} initialTab="intelligence" />),
+    );
+    const providerButton = Array.from(
+      container.querySelectorAll('button'),
+    ).find((button) => button.textContent?.trim() === 'OpenRouter');
+    expect(providerButton).toBeDefined();
+    await act(async () => providerButton!.click());
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(container.contains(dialog)).toBe(false);
+    expect(dialog!.parentElement!.parentElement).toBe(document.body);
+    expect(dialog!.parentElement!.classList.contains('fixed')).toBe(true);
+    expect(dialog!.parentElement!.classList.contains('inset-0')).toBe(true);
+    const cancel = Array.from(dialog!.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Cancel',
+    );
+    await act(async () => cancel!.click());
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(defaultProps.setLlmProvider).not.toHaveBeenCalled();
+    expect(window.ipcRenderer.invoke).not.toHaveBeenCalledWith(
+      'SET_SETTING',
+      'cloud_consent_openrouter',
+      expect.anything(),
+    );
+    act(() => root.unmount());
+  });
+
   it('shows configured credentials as a non-copyable masked hint', async () => {
     const invoke = vi.fn(async (channel: string, provider?: string) => {
       if (channel === 'GET_SETTING') return '';
@@ -564,4 +597,72 @@ describe('SettingsTab', () => {
 
     act(() => root.unmount());
   });
+});
+
+it('defaults to automatic reminders with details visible and persists the global switches', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(<SettingsTab {...defaultProps} initialTab="meetings" />),
+  );
+  const enabled = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Automatic commitment reminders"]',
+  )!;
+  const previews = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Show commitment details in notifications"]',
+  )!;
+  expect(enabled.getAttribute('aria-checked')).toBe('true');
+  expect(previews.getAttribute('aria-checked')).toBe('true');
+  expect(container.textContent).toContain('Pluto must remain running');
+  await act(async () => enabled.click());
+  expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('SET_SETTING', {
+    key: 'automaticCommitmentReminders',
+    value: 'false',
+  });
+  await act(async () => previews.click());
+  expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('SET_SETTING', {
+    key: 'commitmentReminderPreviews',
+    value: 'false',
+  });
+  act(() => root.unmount());
+});
+it('preserves an explicit private reminder preview preference', async () => {
+  vi.mocked(window.ipcRenderer.invoke).mockImplementation(
+    async (channel, key) => {
+      if (channel === 'GET_SETTING' && key === 'commitmentReminderPreviews')
+        return 'false';
+      return '';
+    },
+  );
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(<SettingsTab {...defaultProps} initialTab="meetings" />),
+  );
+  const previews = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Show commitment details in notifications"]',
+  )!;
+  expect(previews.getAttribute('aria-checked')).toBe('false');
+  act(() => root.unmount());
+});
+it('retains the previous reminder setting when persistence fails', async () => {
+  vi.mocked(window.ipcRenderer.invoke).mockImplementation(async (channel) => {
+    if (channel === 'SET_SETTING') throw new Error('locked');
+    return '';
+  });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(<SettingsTab {...defaultProps} initialTab="meetings" />),
+  );
+  const enabled = container.querySelector<HTMLButtonElement>(
+    '[aria-label="Automatic commitment reminders"]',
+  )!;
+  await act(async () => enabled.click());
+  expect(enabled.getAttribute('aria-checked')).toBe('true');
+  expect(container.textContent).toContain('Couldn’t save reminder settings');
+  act(() => root.unmount());
 });

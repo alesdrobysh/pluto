@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import remarkGfm from 'remark-gfm';
+import { type Entity, getEntity } from '../../api/knowledgeGraph';
 import type { Meeting, TranscriptSegment } from '../../types';
 import type {
   MeetingNotesBlock,
@@ -11,11 +12,17 @@ import type {
   MeetingNotesSection,
   NativeMeetingNoteContinuation,
 } from '../../utils/meetingNotesDocument';
-import { nativeContinuationEditPath } from '../../utils/meetingNotesDocument';
+import {
+  findReminderNoteBlock,
+  nativeContinuationEditPath,
+} from '../../utils/meetingNotesDocument';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
 import { getTranscriptSegmentStartTime } from '../../utils/transcript';
+import { ProjectCommitments } from './projects/ProjectCommitments';
 
 interface MeetingNotesDocumentProps {
+  reminderEntityId?: string;
+  onDismissReminder?: () => void;
   meeting: Meeting;
   model: MeetingNotesDocumentModel;
   transcriptSegments: TranscriptSegment[];
@@ -180,8 +187,9 @@ const SaveStatus = ({
   state: SaveState;
   onRetry?: () => void;
 }) => {
+  if (state === 'saved') return null;
+
   const content = {
-    saved: 'Saved',
     dirty: 'Unsaved changes',
     saving: (
       <>
@@ -828,6 +836,7 @@ const NoteBlock = ({
   onSelectSource,
   autoFocus,
   selected,
+  reminderControls,
 }: {
   block: MeetingNotesBlock;
   section: MeetingNotesSection;
@@ -842,6 +851,7 @@ const NoteBlock = ({
   onSelectSource?: () => void;
   autoFocus: boolean;
   selected: boolean;
+  reminderControls?: React.ReactNode;
 }) => {
   const [completionPending, setCompletionPending] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
@@ -877,6 +887,7 @@ const NoteBlock = ({
     <div
       className={`meeting-note-block meeting-note-block--${section.kind} ${block.blockType === 'paragraph' ? 'meeting-note-block--paragraph' : ''} ${selected ? 'is-source-selected' : ''}`}
       data-authorship={block.authorship}
+      data-reminder-target={reminderControls ? 'true' : undefined}
     >
       {isCheckable ? (
         <label className="meeting-action-check">
@@ -943,7 +954,7 @@ const NoteBlock = ({
           )}
           {block.speaker ? <span>{block.speaker}</span> : null}
           {block.assignee ? <span>Owner: {block.assignee}</span> : null}
-          {block.due ? <span>Due {block.due}</span> : null}
+          {block.due && !reminderControls ? <span>Due {block.due}</span> : null}
           {block.edited ? (
             <span>
               <Pencil aria-hidden="true" size={10} /> Edited
@@ -953,6 +964,7 @@ const NoteBlock = ({
         {completionError ? (
           <p className="meeting-edit-error">{completionError}</p>
         ) : null}
+        {reminderControls}
       </div>
     </div>
   );
@@ -1040,6 +1052,8 @@ const SourcePane = ({
 };
 
 export const MeetingNotesDocument = ({
+  reminderEntityId,
+  onDismissReminder,
   meeting,
   model,
   transcriptSegments,
@@ -1048,6 +1062,29 @@ export const MeetingNotesDocument = ({
   header,
   workspaceStatus,
 }: MeetingNotesDocumentProps) => {
+  const reminderRoot = useRef<HTMLDivElement>(null);
+  const [reminderLookup, setReminderLookup] = useState<{
+    id: string;
+    entity: Entity | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!reminderEntityId) return;
+    let active = true;
+    void getEntity(reminderEntityId)
+      .then((entity) => {
+        if (active)
+          setReminderLookup({
+            id: reminderEntityId,
+            entity: entity?.type === 'action_item' ? entity : null,
+          });
+      })
+      .catch(() => {
+        if (active) setReminderLookup({ id: reminderEntityId, entity: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [reminderEntityId, meeting.id]);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [retrySave, setRetrySave] = useState<(() => void) | null>(null);
   const [pendingNativeContinuationId, setPendingNativeContinuationId] =
@@ -1255,8 +1292,21 @@ export const MeetingNotesDocument = ({
     model.sections,
     nativeContinuationOverrides,
   );
+  const reminderEntity =
+    reminderLookup && reminderLookup.id === reminderEntityId
+      ? reminderLookup.entity
+      : null;
+  const reminderBlock = reminderEntity
+    ? findReminderNoteBlock(visibleSections, reminderEntity, meeting.id)
+    : null;
+  useEffect(() => {
+    if (reminderBlock)
+      reminderRoot.current
+        ?.querySelector('[data-reminder-target="true"]')
+        ?.scrollIntoView?.({ block: 'center' });
+  }, [reminderEntityId, reminderBlock?.id]);
   return (
-    <div className="meeting-document-workspace">
+    <div ref={reminderRoot} className="meeting-document-workspace">
       {workspaceStatus}
       <article
         className="meeting-notes-document"
@@ -1264,6 +1314,21 @@ export const MeetingNotesDocument = ({
         aria-label="Meeting notes"
       >
         {header}
+        {reminderEntityId &&
+          reminderLookup?.id === reminderEntityId &&
+          !reminderBlock && (
+            <div className="meeting-reminder-region">
+              <p className="mb-3 text-sm text-pro-text-muted">
+                This reminder couldn’t be matched to an item in these notes.
+              </p>
+              <ProjectCommitments
+                focusEntityId={reminderEntityId}
+                defaultOpen
+                onDismiss={onDismissReminder}
+                onChanged={onDocumentChanged}
+              />
+            </div>
+          )}
         <output className="meeting-document-save-row" aria-live="polite">
           <SaveStatus state={saveState} onRetry={retrySave || undefined} />
         </output>
@@ -1331,6 +1396,18 @@ export const MeetingNotesDocument = ({
                         pendingNativeContinuationId
                       }
                       selected={sourceSelection?.label === block.text}
+                      reminderControls={
+                        reminderBlock?.id === block.id ? (
+                          <ProjectCommitments
+                            focusEntityId={reminderEntityId}
+                            embedded
+                            defaultOpen
+                            revision={meeting.user_edits_json}
+                            onDismiss={onDismissReminder}
+                            onChanged={onDocumentChanged}
+                          />
+                        ) : undefined
+                      }
                     />
                   ))}
                 </div>

@@ -15,6 +15,7 @@ vi.mock('electron', () => ({
 
 import {
   getEntitiesByType,
+  getOverdueActionItems,
   updateActionCommitmentState,
   upsertEntity,
 } from '../../electron/db';
@@ -24,6 +25,38 @@ afterAll(() => {
 });
 
 describe('action commitment database persistence', () => {
+  it('keeps date-only work due today active and compares explicit timestamp offsets as instants', () => {
+    const now = new Date();
+    const localDate = (date: Date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const atOffset = (instant: number, offsetHours: number) =>
+      `${new Date(instant + offsetHours * 3_600_000).toISOString().slice(0, -1)}${offsetHours >= 0 ? '+' : '-'}${String(Math.abs(offsetHours)).padStart(2, '0')}:00`;
+    const dates = [
+      localDate(now),
+      localDate(yesterday),
+      atOffset(now.getTime() - 3_600_000, 14),
+      atOffset(now.getTime() + 3_600_000, -12),
+      '2000-02-30',
+    ];
+    const actions = dates.map((due_date, index) =>
+      upsertEntity({
+        type: 'action_item',
+        name: `Fictional deadline ${index}`,
+        status: 'active',
+        due_date,
+        dedupe_by_name: false,
+        metadata: { commitment_state: 'confirmed', origin: 'user' },
+      }),
+    );
+    const overdue = new Set(getOverdueActionItems().map((action) => action.id));
+    expect(overdue.has(actions[0].id)).toBe(false);
+    expect(overdue.has(actions[1].id)).toBe(true);
+    expect(overdue.has(actions[2].id)).toBe(true);
+    expect(overdue.has(actions[3].id)).toBe(false);
+    expect(overdue.has(actions[4].id)).toBe(false);
+  });
   it('changes and explicitly clears a due date without losing commitment metadata', () => {
     const action = upsertEntity({
       type: 'action_item',

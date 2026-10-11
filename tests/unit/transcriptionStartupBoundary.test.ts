@@ -54,6 +54,7 @@ describe('transcription startup boundary', () => {
       'pnpm run ensure:parakeet',
       'pnpm run ensure:audio-cap',
       'pnpm run ensure:calendar-helper',
+      'pnpm run ensure:notifications',
     ]);
     expect(packageJson.scripts?.['ensure:media-tools']).toBe(
       'node scripts/verify_media_runtime.mjs',

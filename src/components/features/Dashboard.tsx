@@ -34,7 +34,10 @@ import type {
   DashboardActionInsightItem,
   DashboardHomeModel,
 } from './dashboardModel';
-import { getDashboardDateKey } from './dashboardModel';
+import {
+  MAX_DASHBOARD_COMMITMENTS,
+  getDashboardDateKey,
+} from './dashboardModel';
 
 interface DashboardProps {
   model: DashboardHomeModel;
@@ -194,10 +197,14 @@ const DashboardSuggestionReview = ({
             aria-label={action.ariaLabel}
             disabled={isUpdating}
             onClick={async () => {
-              await action.onClick();
-              onDecisionComplete(
-                action.kind === 'primary' ? 'confirmed' : 'rejected',
-              );
+              try {
+                await action.onClick();
+                onDecisionComplete(
+                  action.kind === 'primary' ? 'confirmed' : 'rejected',
+                );
+              } catch {
+                // App displays the failure; keep this item available to retry.
+              }
             }}
             className={
               action.kind === 'primary'
@@ -643,7 +650,10 @@ export const Dashboard = ({
       setCommitmentDueDate('');
       setAddingCommitment(false);
       if (created?.id) {
-        const nextIds = [created.id, ...orderedCommitmentIds].slice(0, 3);
+        const nextIds = [created.id, ...orderedCommitmentIds].slice(
+          0,
+          MAX_DASHBOARD_COMMITMENTS,
+        );
         try {
           await handleSetDailyCommitments(
             nextIds,
@@ -677,6 +687,15 @@ export const Dashboard = ({
   };
 
   const recentWin = model.recentWin;
+  const continuation =
+    !isRecording &&
+    recentWin.state === 'empty' &&
+    model.latestMeeting.state === 'populated'
+      ? model.latestMeeting
+      : null;
+  const continuationDate = continuation
+    ? new Date(continuation.occurredAt)
+    : null;
   const visibleWins =
     recentWin.state === 'populated'
       ? winsExpanded
@@ -1423,16 +1442,20 @@ export const Dashboard = ({
                       {item.canComplete ? (
                         <button
                           type="button"
-                          aria-label={`Add ${item.title} to today's three`}
+                          aria-label={`Add ${item.title} to today's focus`}
                           disabled={
                             isSavingDailyOrder || updatingTaskIds.has(item.id)
                           }
                           onClick={() => {
                             const nextIds =
-                              orderedCommitmentIds.length < 3
+                              orderedCommitmentIds.length <
+                              MAX_DASHBOARD_COMMITMENTS
                                 ? [...orderedCommitmentIds, item.id]
                                 : [
-                                    ...orderedCommitmentIds.slice(0, 2),
+                                    ...orderedCommitmentIds.slice(
+                                      0,
+                                      MAX_DASHBOARD_COMMITMENTS - 1,
+                                    ),
                                     item.id,
                                   ];
                             void saveDailyOrder(nextIds);
@@ -1498,13 +1521,15 @@ export const Dashboard = ({
             <p className="text-[11px] font-normal tracking-[0.02em] text-pro-text-muted">
               {recentWin.state === 'populated'
                 ? `This week · ${recentWin.total} ${recentWin.total === 1 ? 'win' : 'wins'}`
-                : 'Momentum'}
+                : continuation
+                  ? 'Saved context'
+                  : 'Momentum'}
             </p>
             <h2
               id="recent-win-title"
               className="mt-1.5 text-[18px] font-serif font-medium leading-tight text-pro-text-main"
             >
-              Recent win
+              {continuation ? 'Last conversation' : 'Recent win'}
             </h2>
             <div className="mt-4">
               {recentWin.state === 'populated' ? (
@@ -1568,6 +1593,37 @@ export const Dashboard = ({
                     </button>
                   </div>
                 </>
+              ) : continuation ? (
+                <article data-testid="dashboard-conversation-continuation">
+                  {continuationDate &&
+                  !Number.isNaN(continuationDate.getTime()) ? (
+                    <time
+                      dateTime={continuation.occurredAt}
+                      className="text-[11px] font-medium text-pro-text-muted"
+                    >
+                      {continuationDate.toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </time>
+                  ) : null}
+                  <h3 className="mt-1.5 break-words text-[15px] font-medium leading-6 text-pro-text-main">
+                    {continuation.title}
+                  </h3>
+                  <p className="mt-1.5 line-clamp-3 break-words text-[13px] font-normal leading-[1.55] text-pro-text-muted">
+                    {continuation.detail}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMeetingId(continuation.meetingId)}
+                    aria-label={`Open last conversation: ${continuation.title}`}
+                    className="mt-2 inline-flex min-h-8 items-center gap-1 text-[12px] font-semibold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                  >
+                    Open conversation
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </article>
               ) : (
                 <div className="flex items-start gap-3">
                   <button

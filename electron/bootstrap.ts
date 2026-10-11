@@ -6,6 +6,7 @@ import {
   canOpenProductionDatabase,
   resolveUserDataArgument,
 } from './appRuntimePolicy';
+import { initializeCommitmentNotificationBridge } from './commitmentReminderNotifications';
 import { ApplicationKeyStore } from './crypto/applicationKeyStore';
 import {
   initializeApplicationDatabase,
@@ -83,6 +84,7 @@ if (!canOpenDatabase) {
   );
   app.quit();
 } else {
+  initializeCommitmentNotificationBridge();
   app.on('second-instance', () => focusPrimaryWindow?.());
 
   void app.whenReady().then(() => {

@@ -70,6 +70,32 @@ describe('PeopleTab loading', () => {
     expect(container.textContent).toContain('Latest link: Product review');
   });
 
+  it('shows saved context from summaries without fetching a dossier or rereading on render', async () => {
+    api.getPeopleBriefingSummaries.mockResolvedValue([
+      {
+        ...summary,
+        briefHeadline: '  Preparing the launch handoff.  ',
+        briefStatus: 'up_to_date',
+        briefUpdatedAt: '2026-07-12T13:00:00.000Z',
+      },
+    ]);
+
+    await act(async () => {
+      root.render(<PeopleTab />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      root.render(<PeopleTab />);
+    });
+
+    expect(container.textContent).toContain(
+      'Saved context: Preparing the launch handoff.',
+    );
+    expect(container.textContent).not.toContain('Latest link: Product review');
+    expect(api.getPeopleBriefingSummaries).toHaveBeenCalledOnce();
+    expect(api.getPersonBriefing).not.toHaveBeenCalled();
+  });
+
   it('fetches one full dossier only after that person is selected', async () => {
     api.getPersonBriefing.mockResolvedValue({
       person: {

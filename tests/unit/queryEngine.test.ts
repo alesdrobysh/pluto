@@ -1581,6 +1581,21 @@ describe('Query Engine', () => {
       expect(accomplishments?.answer).not.toContain(
         'Send the revised launch plan',
       );
+
+      vi.mocked(dbModule.getAskPlutoMeeting).mockReturnValue({
+        ...meetings[0],
+        started_at: null,
+        created_at: '2026-10-09T12:00:00Z',
+      } as dbModule.PersistedMeeting);
+      const undated = buildAssigneeActionRecall(
+        "What's assigned to me?",
+        meetings,
+      );
+      expect(undated?.context[0].evidence_text).toContain(
+        '[Occurred]: unknown',
+      );
+      expect(undated?.context[0].evidence_text).not.toContain('2026-10-09');
+      expect(undated?.answer).toBe(recall?.answer);
     });
 
     it('searches beyond an empty canonical list for a known person mentioned in notes', () => {
@@ -2132,6 +2147,22 @@ describe('Query Engine', () => {
     );
     expect(result.evidence_text).toContain(
       '[Action items]: Select a suitable YouTube video and rerun the transcript analysis evaluation.',
+    );
+  });
+
+  it('does not present an import date as the occurrence of an undated meeting', () => {
+    const result = buildMeetingRetrievalResult({
+      id: 'imported-meeting',
+      title: 'Imported planning notes',
+      started_at: null,
+      created_at: '2026-10-09T12:00:00Z',
+      enhanced_notes: 'Send the draft tomorrow if the sample arrives.',
+    } as dbModule.PersistedMeeting);
+
+    expect(result.evidence_text).not.toContain('[Occurred]');
+    expect(result.evidence_text).not.toContain('2026-10-09');
+    expect(result.evidence_text).toContain(
+      'Send the draft tomorrow if the sample arrives.',
     );
   });
 

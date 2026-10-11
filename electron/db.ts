@@ -113,6 +113,7 @@ import {
 import type { TrustStatus } from '../src/utils/trustStatus';
 import { createCalendarStore } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
+import { createCommitmentReminderStore } from './commitmentReminderStore';
 import { getApplicationDatabase } from './database/applicationDatabase';
 import { syncActionCompletionToMeetingNotes } from './database/meetingActionSync';
 import {
@@ -172,6 +173,7 @@ import { saveMeetingSpeakerCandidates } from './speakerVoiceStore';
 const dbLog = createLogger('DB');
 
 export const db = getApplicationDatabase();
+export const commitmentReminderStore = createCommitmentReminderStore(db);
 
 type AttentionItemRow = {
   id: string;
@@ -10117,7 +10119,13 @@ export const getOverdueActionItems = (): Entity[] => {
     WHERE type = 'action_item' 
       AND status = 'active' 
       AND due_date IS NOT NULL 
-      AND due_date < datetime('now')
+      -- Keep the indexed deadline range; offsets may put a past instant on tomorrow's date.
+      AND due_date < date('now', '+2 days')
+      AND (
+        (length(due_date) = 10 AND date(due_date, '+0 days') = due_date
+          AND due_date < date('now', 'localtime'))
+        OR (length(due_date) > 10 AND julianday(due_date) < julianday('now'))
+      )
       AND NOT EXISTS (SELECT 1 FROM commitment_aliases a WHERE a.extraction_id = entities.id AND a.active = 1)
       AND json_type(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
         '$.meeting_regeneration_retired_at') IS NULL

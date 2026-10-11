@@ -257,7 +257,7 @@ ${details.join('\n')}`;
                 : isPlanningQuery
                   ? 'Answer the user’s planning question naturally. Recommend what to focus on first and explain why, using the freshest relevant notes, explicit ownership, deadlines, and dependencies. Ignore incidental chatter. Distinguish recorded status from your inferred recommendation; an old open item does not prove it remains unfinished. If current ownership or completion is unknown, say so. Use headings or bullets only when they help the answer.'
                   : task === 'analysis'
-                    ? 'Provide a thoughtful evidence-grounded analysis. Separate direct observations from interpretation. Call something a recurring pattern only when at least two sources support it. When asked what someone is most concerned about or prioritizing, identify one primary theme only when multiple explicit signals converge; otherwise present the distinct concerns without inventing a ranking. Identify strengths as well as opportunities. Prefix each recommendation with “Suggestion:” and do not introduce new factual details in it. Never diagnose personality, motivation, or performance from thin evidence.'
+                    ? 'Connect direct observations to supported conclusions, keeping interpretations distinct. A recurring pattern needs at least two sources. When asked what someone is most concerned about or prioritizing, identify one primary theme only when multiple explicit signals converge; otherwise present the distinct concerns without inventing a ranking. Prefix each recommendation with “Suggestion:” and do not introduce new factual details in it. Never diagnose personality, motivation, or performance from thin evidence.'
                     : task === 'comparison'
                       ? 'Compare the sources explicitly. State what stayed consistent, what changed, and what remains unknown. Do not infer progress, causality, or completion from silence in a later meeting.'
                       : multiMeetingSynthesis
@@ -415,12 +415,8 @@ ACTIVE CONVERSATION CONTEXT:
 ${identitySection}${disputeSection}${projectSection}${activeConversationSection}${personRecencySection}${otherPersonSection}
 RULES:
 1. Answer factual questions using ONLY the synthesized meeting notes, people profiles, and project profiles in Context. Never invent facts or use raw transcript dialogue. You may synthesize and rephrase this healthy context naturally.
-2. ${formatGuidance}
-3. Start with the answer immediately. ${requiresInlineCitations ? 'Add the inline source references required for validation; Pluto removes them before display.' : 'Provenance is attached by Pluto, so do not mention retrieval, grounding, sources, or context labels in the answer.'} Never begin with “Based on the meeting evidence provided” or similar evidence-policy narration.
-4. Use specific names, dates, numbers, decisions, owners, and next steps only where Context supports them. Address each distinct part of the user's question; if one part is unsupported, say which part remains unclear instead of substituting adjacent project history. For an ambiguous term, name your interpretation instead of silently conflating workstreams. If you cannot confirm the answer from what was retrieved, say so as a limit of this search. Do not conclude that the underlying source lacks the information.
-5. Write like a thoughtful colleague: lead with the useful judgment, connect related details, and avoid a search-result or compliance-report voice. Make every point self-contained; avoid vague stand-ins such as "an application" or "a participant".
-6. ${responseLimit}
-7. ${
+2. Start with the answer immediately. ${requiresInlineCitations ? 'Add the inline source references required for validation; Pluto removes them before display.' : 'Provenance is attached by Pluto, so do not mention retrieval, grounding, sources, or context labels in the answer.'} Never begin with “Based on the meeting evidence provided” or similar evidence-policy narration.
+3. ${
     requiresInlineCitations
       ? 'Do not add headings. Cite every factual sentence with the smallest set of directly supporting [Source N] references.'
       : options.projectContext
@@ -429,9 +425,9 @@ RULES:
           ? 'Use short paragraphs, with bullets or brief bold labels only if they make the priorities easier to follow. Do not fill a fixed template or include source/context markers.'
           : 'Do not add headings unless the user asks for a detailed breakdown. Do not include source or context markers in the answer.'
   }
-8. Use names rather than guessing gender or pronouns. Preserve source boundaries: do not transfer a fact between people, projects, or initiatives merely because both appear in Context or conversation. Attribute speech, decisions, requests, expectations, and ownership only when the same synthesized passage explicitly names the person. Participation or second-person wording does not prove ownership. For inferred expectations, say “My interpretation is…” rather than “they expect”.
-9. Treat source dates as the age of the information, not proof that an old status is still current. Relative deadlines such as “next Tuesday” are relative to the source's occurrence date, not today; if that target is already past, call it an earlier target or omit it. For priorities and recommendations, separate Pluto's judgment from recorded facts and prefer fresher matching updates.
-10. User corrections constrain what the user says is wrong. Never cite a user correction as meeting evidence. When the user asks for advice, distinguish your judgment from recorded facts in natural language; do not imply the source discussed your recommendation.
+4. Use names rather than guessing gender or pronouns. Preserve source boundaries: do not transfer a fact between people, projects, or initiatives merely because both appear in Context or conversation. Attribute speech, decisions, requests, expectations, and ownership only when the same synthesized passage explicitly names the person. Participation or second-person wording does not prove ownership. For inferred expectations, say “My interpretation is…” rather than “they expect”.
+5. Treat source dates as the age of the information, not proof that an old status is still current. Relative deadlines such as “next Tuesday” are relative to the source's occurrence date, not today; if that target is already past, call it an earlier target or omit it. For priorities and recommendations, separate Pluto's judgment from recorded facts and prefer fresher matching updates.
+6. User corrections constrain what the user says is wrong. Never cite a user correction as meeting evidence. When the user asks for advice, distinguish your judgment from recorded facts in natural language; do not imply the source discussed your recommendation.
 
 ${confirmedSelfName ? `Conversation identity: The user has confirmed that their name is ${confirmedSelfName}. Address supported facts about this person as "you" and "your". This identity is for address and search resolution only; it does not prove who spoke, attended, owned a task, or made a decision. Ground each such claim in the meeting Context.\n\n` : ''}Recent conversation:
 ${conversation}
@@ -479,7 +475,13 @@ CITATION RULES:
 - Prefer the smallest set of directly supporting sources; do not append every source to a claim.`;
   }
 
-  prompt += `\n\nUser Query: ${query}${personQuestionFraming}`;
+  prompt += `
+
+RESPONSE CONTRACT:
+${formatGuidance}
+Address each part of the question using only supported names, dates, numbers, decisions, owners and next steps. State which requested part cannot be confirmed by this search, without claiming the underlying source lacks it. Name your interpretation of ambiguous terms; do not replace a missing answer with adjacent project history.
+To evaluate someone’s performance, first establish what result and criterion the notes record. If either is missing, answer with that limit and the concrete work actually recorded; do not substitute participation, delivery or discussion for evidence of quality, initiative or ability. Where both are recorded, give the bounded result. Connect related details in natural, self-contained prose.
+${responseLimit}\n\nUser Query: ${query}${personQuestionFraming}`;
   return prompt;
 };
 

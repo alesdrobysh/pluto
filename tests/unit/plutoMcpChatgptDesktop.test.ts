@@ -39,17 +39,35 @@ function fixture() {
 }
 
 describe('ChatGPT Desktop local plugin installer', () => {
-  it('opens a fresh Work chat rather than only activating the previous window', async () => {
-    const { runCommand } = fixture();
-    await openChatGptDesktop(runCommand);
-    expect(runCommand).toHaveBeenCalledWith(
-      '/usr/bin/open',
-      ['-a', 'ChatGPT', 'codex://threads/new?mode=work'],
-      expect.objectContaining({ timeout: 10_000 }),
-    );
-    runCommand.mockRejectedValueOnce(new Error('missing app'));
-    await expect(openChatGptDesktop(runCommand)).rejects.toThrow('missing app');
-  });
+  it.each([
+    ['pluto-notes', 'Pluto'],
+    ['pluto-notes-development', 'Pluto (Development)'],
+  ])(
+    'opens a Work draft mentioning %s with a starter question',
+    async (pluginName, label) => {
+      const { runCommand } = fixture();
+      const plugin = { pluginName, marketplaceName: 'personal' };
+      await openChatGptDesktop(plugin, runCommand);
+      expect(runCommand).toHaveBeenCalledWith(
+        '/usr/bin/open',
+        ['-a', 'ChatGPT', expect.any(String)],
+        expect.objectContaining({ timeout: 10_000 }),
+      );
+      const url = new URL(runCommand.mock.calls[0][1][2]);
+      expect(url.protocol).toBe('codex:');
+      expect(url.host).toBe('threads');
+      expect(url.pathname).toBe('/new');
+      expect([...url.searchParams.keys()]).toEqual(['mode', 'prompt']);
+      expect(url.searchParams.get('mode')).toBe('work');
+      expect(url.searchParams.get('prompt')).toBe(
+        `[@${label}](plugin://${pluginName}@personal) What should I focus on?`,
+      );
+      runCommand.mockRejectedValueOnce(new Error('missing app'));
+      await expect(openChatGptDesktop(plugin, runCommand)).rejects.toThrow(
+        'missing app',
+      );
+    },
+  );
   it('locates the installed app and uses its supported CLI without a shell or editing config', async () => {
     const { options, runCommand, accessFile } = fixture();
     await installInChatGptDesktop(options);

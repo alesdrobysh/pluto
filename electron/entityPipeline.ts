@@ -20,6 +20,7 @@ import {
   readProjectQualification,
 } from '../src/utils/projectQualification';
 import { isGenericSpeakerLabel } from '../src/utils/speakerReview';
+import { normalizeReminderDeadline } from './commitmentReminderPolicy';
 import { syncMeetingActionEntitiesFromUserEdits } from './database/meetingActionSync';
 import * as db from './db';
 import type {
@@ -281,67 +282,67 @@ export function findSimilarEntity(
   return bestMatch;
 }
 
-/**
- * Parse natural language due dates into ISO date strings
- * This is a simple implementation - could be enhanced with a date parsing library
- */
-export function parseDueDate(dueDate: string): string | null {
+/** Normalize supported dates using the source meeting calendar, never extraction time. */
+export function parseDueDate(
+  dueDate: string,
+  meetingStartedAt?: string | null,
+  timeZone?: string,
+): string | null {
   if (!dueDate || typeof dueDate !== 'string') return null;
-
-  const now = new Date();
-  const lower = dueDate.toLowerCase().trim();
-
-  // Handle common patterns
-  if (lower === 'today') {
-    return now.toISOString();
-  }
-  if (lower === 'tomorrow') {
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString();
-  }
-  if (lower === 'next week' || lower === 'by next week') {
-    const nextWeek = new Date(now);
-    nextWeek.setDate(nextWeek.getDate() + 7);
-    return nextWeek.toISOString();
-  }
-  if (lower === 'end of week' || lower === 'eow') {
-    const eow = new Date(now);
-    const daysUntilFriday = (5 - eow.getDay() + 7) % 7 || 7;
-    eow.setDate(eow.getDate() + daysUntilFriday);
-    return eow.toISOString();
-  }
-
-  // Handle day names (e.g., "by Friday", "on Monday")
-  const dayNames = [
-    'sunday',
-    'monday',
-    'tuesday',
-    'wednesday',
-    'thursday',
-    'friday',
-    'saturday',
-  ];
-  for (let i = 0; i < dayNames.length; i++) {
-    if (lower.includes(dayNames[i])) {
-      const target = new Date(now);
-      const daysUntil = (i - target.getDay() + 7) % 7 || 7;
-      target.setDate(target.getDate() + daysUntil);
-      return target.toISOString();
+  const text = dueDate.trim();
+  const explicit = normalizeReminderDeadline(text);
+  if (explicit)
+    return explicit.kind === 'date'
+      ? text
+      : new Date(explicit.instant).toISOString();
+  if (!meetingStartedAt) return null;
+  const meeting = normalizeReminderDeadline(meetingStartedAt);
+  if (!meeting) return null;
+  let calendarDate = meetingStartedAt.slice(0, 10);
+  if (timeZone && meeting.kind === 'timestamp') {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(meeting.instant);
+      const part = (type: string) =>
+        parts.find((entry) => entry.type === type)?.value;
+      calendarDate = `${part('year')}-${part('month')}-${part('day')}`;
+    } catch {
+      return null;
     }
   }
-
-  // Try to parse as a date directly
-  try {
-    const parsed = new Date(dueDate);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
-  } catch {
-    // Ignore parse errors
+  const base = normalizeReminderDeadline(calendarDate);
+  if (base?.kind !== 'date') return null;
+  const lower = text.toLowerCase();
+  let days: number;
+  if (lower === 'today') days = 0;
+  else if (lower === 'tomorrow') days = 1;
+  else {
+    const dayNames = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
+    const weekday =
+      /^(?:(?:by|on) )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/.exec(
+        lower,
+      );
+    const target = weekday
+      ? dayNames.indexOf(weekday[1])
+      : lower === 'end of week' || lower === 'eow'
+        ? 5
+        : -1;
+    if (target < 0) return null; // A week, locale-dependent date or vague phrase is not a deadline.
+    days = (target - new Date(base.day).getUTCDay() + 7) % 7;
   }
-
-  return null;
+  return new Date(base.day + days * 86_400_000).toISOString().slice(0, 10);
 }
 
 /**
@@ -534,11 +535,14 @@ function persistExtractedEntities(
   }
 
   // 3. Process Action Items
+  const meetingStartedAt = extracted.action_items.length
+    ? (db.getMeeting(meetingId) as db.PersistedMeeting | undefined)?.started_at
+    : null;
   for (const [actionIndex, actionItem] of extracted.action_items.entries()) {
     ensureCurrent();
     if (!actionItem?.description || typeof actionItem.description !== 'string')
       continue;
-    const dueDate = parseDueDate(actionItem.due_date || '');
+    const dueDate = parseDueDate(actionItem.due_date || '', meetingStartedAt);
     const actionId =
       options.actionIds?.get(actionIndex) ??
       getExtractedActionId(meetingId, actionItem.description);

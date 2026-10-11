@@ -322,7 +322,9 @@ const editBlockSourceKey = (
     )
     .map((source) => `${source.segment}:${source.start}:${source.end}`)
     .join(',');
-  return `${revision}|${spans}`;
+  // The overview is a distinct editable surface even when it repeats one
+  // outcome with identical evidence. Other paths can still move with the source.
+  return `${path === 'overview' ? 'overview|' : ''}${revision}|${spans}`;
 };
 
 const rendererEditPaths = (doc: AnalysisDocumentV3): string[] => [

@@ -17,11 +17,22 @@ const commandOptions: CommandOptions = {
 };
 
 export async function openChatGptDesktop(
+  {
+    pluginName,
+    marketplaceName,
+  }: { pluginName: string; marketplaceName: string },
   runCommand: RunCommand = executeFile,
 ): Promise<void> {
+  const label =
+    pluginName === 'pluto-notes-development' ? 'Pluto (Development)' : 'Pluto';
+  const prompt = `[@${label}](plugin://${pluginName}@${marketplaceName}) What should I focus on?`;
   await runCommand(
     '/usr/bin/open',
-    ['-a', 'ChatGPT', 'codex://threads/new?mode=work'],
+    [
+      '-a',
+      'ChatGPT',
+      `codex://threads/new?mode=work&prompt=${encodeURIComponent(prompt)}`,
+    ],
     { ...commandOptions, timeout: 10_000 },
   );
 }

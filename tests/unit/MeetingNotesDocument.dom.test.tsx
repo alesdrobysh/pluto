@@ -122,6 +122,82 @@ describe('MeetingNotesDocument', () => {
       />,
     );
 
+  it('places reminder controls beneath the original action without repeating its text', async () => {
+    const text = 'Send the reviewed plan.';
+    invoke.mockImplementation(async (channel) =>
+      channel === 'GET_ENTITY'
+        ? {
+            id: 'reminder-a',
+            type: 'action_item',
+            name: text,
+            status: 'completed',
+            metadata: JSON.stringify({
+              source_meeting_id: meeting.id,
+              source_path: 'all_action_items:0',
+              original_description: text,
+            }),
+          }
+        : null,
+    );
+    const actionModel: MeetingNotesDocumentModel = {
+      hasAnalysis: true,
+      sections: [
+        {
+          id: 'outcomes',
+          kind: 'outcomes',
+          title: 'Decisions & next steps',
+          blocks: [
+            {
+              id: 'action-a',
+              path: 'all_action_items:0',
+              text,
+              originalText: text,
+              authorship: 'ai',
+              edited: false,
+              blockType: 'action',
+              completed: true,
+            },
+          ],
+        },
+      ],
+    };
+    const onDismiss = vi.fn();
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={meeting}
+          model={actionModel}
+          transcriptSegments={transcript}
+          onDocumentChanged={vi.fn()}
+          onShowTranscript={vi.fn()}
+          reminderEntityId="reminder-a"
+          onDismissReminder={onDismiss}
+        />,
+      ),
+    );
+    const target = container.querySelector('[data-reminder-target="true"]')!;
+    expect(target).not.toBeNull();
+    expect(target.querySelectorAll('.meeting-markdown-preview')).toHaveLength(
+      1,
+    );
+    expect(
+      target.querySelector('.meeting-markdown-preview')?.textContent,
+    ).toContain(text);
+    expect(
+      target.querySelector('[aria-label="Reminder commitment"]'),
+    ).toBeNull();
+    expect(container.querySelectorAll('.meeting-note-block')).toHaveLength(1);
+    expect(target.querySelector('input[type="checkbox"]')).not.toBeNull();
+    expect(target.textContent).not.toContain('Already completed');
+    expect(target.querySelector('input[type="date"]')).toBeNull();
+    expect(
+      Array.from(target.querySelectorAll('button')).some(
+        (button) => button.textContent === 'Mark incomplete',
+      ),
+    ).toBe(false);
+    expect(target.querySelector('[aria-label="Dismiss reminder"]')).toBeNull();
+  });
+
   const openBlockEditor = async (blockText: string) => {
     const block = Array.from(
       container.querySelectorAll('.meeting-note-block'),
@@ -364,9 +440,7 @@ describe('MeetingNotesDocument', () => {
 
     await act(async () => vi.advanceTimersByTimeAsync(650));
 
-    expect(container.querySelector('.meeting-save-state')?.textContent).toBe(
-      'Saved',
-    );
+    expect(container.querySelector('.meeting-save-state')).toBeNull();
     expect(textarea?.getAttribute('aria-busy')).toBe('false');
   });
 

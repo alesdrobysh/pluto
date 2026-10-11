@@ -1177,7 +1177,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   </>
                 ) : dynamicQueries.length === 0 ? (
                   <p className="text-pro-text-muted/50 text-[13px] font-medium">
-                    Record a meeting to get personalized suggestions.
+                    No suggestions right now. Ask a question below.
                   </p>
                 ) : (
                   dynamicQueries.map((sq) => (

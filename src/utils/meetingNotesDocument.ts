@@ -4,6 +4,7 @@ import type {
   TopicSection,
   UserEditsMap,
 } from '../types';
+import { parseActionMetadata } from './actionCommitment';
 import { applyUserEdit } from './analysisDocument';
 import { projectMeetingNotesSpeakerReferences } from './meetingNotesSpeakerReferences';
 import {
@@ -72,6 +73,48 @@ const normalizeForComparison = (value: string): string =>
     .toLocaleLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+
+export const findReminderNoteBlock = (
+  sections: MeetingNotesSection[],
+  entity: { name: string; metadata: string | null },
+  meetingId: string | number,
+): MeetingNotesBlock | null => {
+  const metadata = parseActionMetadata(entity.metadata);
+  if (
+    String(metadata.source_meeting_id) !== String(meetingId) ||
+    metadata.meeting_regeneration_retired_at
+  )
+    return null;
+  const blocks = sections
+    .flatMap((section) => section.blocks)
+    .filter((block) => block.blockType === 'action');
+  if (typeof metadata.continuation_id === 'string') {
+    return (
+      blocks.find(
+        (block) => block.nativeContinuation?.id === metadata.continuation_id,
+      ) ?? null
+    );
+  }
+  const descriptions = [
+    metadata.original_description,
+    metadata.full_description,
+    entity.name,
+  ]
+    .filter(
+      (text): text is string =>
+        typeof text === 'string' && text.trim().length > 0,
+    )
+    .map((text) => text.trim().toLocaleLowerCase());
+  const matches = blocks.filter(
+    (block) =>
+      !block.nativeContinuation &&
+      descriptions.includes(block.originalText.trim().toLocaleLowerCase()),
+  );
+  const exactPath = matches.find(
+    (block) => block.path === metadata.source_path,
+  );
+  return exactPath ?? (matches.length === 1 ? matches[0] : null);
+};
 
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

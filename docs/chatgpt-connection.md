@@ -16,9 +16,10 @@ reads; it cannot remove content already shared with ChatGPT.
 3. Allow meeting-note access and click **Connect to ChatGPT**.
 4. Fully quit ChatGPT (⌘Q) and reopen it to load the local plugin. Opening
    another window is not enough. Keep Pluto running with access enabled.
-5. Click **Start a ChatGPT chat** in Pluto to open a new Work chat. Type `@`,
-   select **Pluto**, and ask a question such as “What did we decide in my latest
-   meeting?” ChatGPT controls tool permissions. If ChatGPT restores an older
+5. Click **Start a ChatGPT chat** in Pluto to open a new Work chat with **@Pluto**
+   and “What should I focus on?” already in the composer. Review or edit the draft,
+   then send it. Development builds mention **@Pluto (Development)** instead.
+   ChatGPT controls tool permissions. If ChatGPT restores an older
    screen, start a new Work chat manually and select Pluto with `@`.
 
 The button registers and installs the local plugin through ChatGPT's bundled
@@ -30,8 +31,10 @@ without local plugin support does not make it compatible.
 Pluto and ChatGPT communicate on the same Mac. Pluto ships the stdio bridge and
 uses its bundled Electron runtime. Its service listens only on `127.0.0.1` with
 a random credential in a private connection file. The plugin is registered in
-the personal local marketplace, preserving other entries. **Ready for ChatGPT**
+the personal local marketplace, preserving other entries. **Note access enabled**
 confirms local setup, not a successful conversation or account authorization.
+The settings show the complete setup sequence before consent; after setup, it
+remains available under **How to use Pluto in ChatGPT**.
 
 See OpenAI's [local plugin documentation](https://developers.openai.com/plugins/build/plugins).
 

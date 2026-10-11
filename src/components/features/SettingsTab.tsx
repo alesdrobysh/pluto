@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
 import type {
   CloudProviderId,
@@ -258,10 +259,12 @@ const SettingsRow = ({
 const Toggle = ({
   checked,
   onChange,
-}: { checked: boolean; onChange: () => void }) => (
+  label,
+}: { checked: boolean; onChange: () => void; label?: string }) => (
   <button
     type="button"
     role="switch"
+    aria-label={label}
     aria-checked={checked}
     onClick={onChange}
     className={`relative inline-flex h-[24px] w-[44px] shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 ${
@@ -333,6 +336,56 @@ export const SettingsTab = ({
   >('idle');
   const [browserCallDetectionEnabled, setBrowserCallDetectionEnabled] =
     useState(false);
+  const [automaticCommitmentReminders, setAutomaticCommitmentReminders] =
+    useState(true);
+  const [commitmentReminderPreviews, setCommitmentReminderPreviews] =
+    useState(true);
+  const [reminderSettingsError, setReminderSettingsError] = useState('');
+  const [reminderSettingsBusy, setReminderSettingsBusy] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      window.ipcRenderer.invoke('GET_SETTING', 'automaticCommitmentReminders'),
+      window.ipcRenderer.invoke('GET_SETTING', 'commitmentReminderPreviews'),
+    ])
+      .then(([enabled, previews]) => {
+        if (!active) return;
+        setAutomaticCommitmentReminders(enabled !== 'false');
+        setCommitmentReminderPreviews(previews !== 'false');
+      })
+      .catch(() => {
+        if (active)
+          setReminderSettingsError(
+            'Couldn’t load reminder settings. Please reopen Settings.',
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const updateReminderSetting = async (
+    key: 'automaticCommitmentReminders' | 'commitmentReminderPreviews',
+    value: boolean,
+  ) => {
+    if (reminderSettingsBusy) return;
+    setReminderSettingsBusy(true);
+    setReminderSettingsError('');
+    try {
+      await window.ipcRenderer.invoke('SET_SETTING', {
+        key,
+        value: String(value),
+      });
+      if (key === 'automaticCommitmentReminders')
+        setAutomaticCommitmentReminders(value);
+      else setCommitmentReminderPreviews(value);
+    } catch {
+      setReminderSettingsError(
+        'Couldn’t save reminder settings. Please try again.',
+      );
+    } finally {
+      setReminderSettingsBusy(false);
+    }
+  };
   useEffect(() => {
     void window.ipcRenderer
       .invoke('GET_SETTING', 'browser_call_detection_enabled')
@@ -759,6 +812,45 @@ export const SettingsTab = ({
             snapshot={calendarSnapshot}
             onSnapshotChange={onCalendarSnapshotChange}
           />
+          <Section title="Commitment reminders">
+            <SettingsRow
+              label="Automatic reminders"
+              helper="Remind me about confirmed commitments with due dates. Pluto must remain running, and notifications must be allowed in System Settings."
+              actionControl
+            >
+              <Toggle
+                label="Automatic commitment reminders"
+                checked={automaticCommitmentReminders}
+                onChange={() =>
+                  void updateReminderSetting(
+                    'automaticCommitmentReminders',
+                    !automaticCommitmentReminders,
+                  )
+                }
+              />
+            </SettingsRow>
+            <SettingsRow
+              label="Show commitment details"
+              helper="Include commitment text in system notifications. Off keeps reminder previews private."
+              actionControl
+            >
+              <Toggle
+                label="Show commitment details in notifications"
+                checked={commitmentReminderPreviews}
+                onChange={() =>
+                  void updateReminderSetting(
+                    'commitmentReminderPreviews',
+                    !commitmentReminderPreviews,
+                  )
+                }
+              />
+            </SettingsRow>
+            {reminderSettingsError && (
+              <p role="alert" className="px-5 pb-4 text-sm text-pro-urgent">
+                {reminderSettingsError}
+              </p>
+            )}
+          </Section>
           <Section title="Note templates">
             <SettingsRow
               htmlFor="default-meeting-notes-template"
@@ -1446,52 +1538,56 @@ export const SettingsTab = ({
         </div>
       ) : null}
 
-      {pendingCloudProvider ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-6">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="cloud-consent-title"
-            className="max-w-md rounded-2xl border border-pro-border bg-pro-bg p-6 shadow-2xl"
-          >
-            <h2
-              id="cloud-consent-title"
-              className="text-lg font-semibold text-pro-text-main"
-            >
-              Allow cloud inference with {pendingCloudProvider}?
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-pro-text-muted">
-              Selected transcript excerpts, notes, questions, and relevant local
-              context may leave this Mac. Audio never leaves. Requests are
-              stateless, and Pluto remains the only durable memory store.
-            </p>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setPendingCloudProvider(null)}
-                className="rounded-lg border border-pro-border px-4 py-2 text-sm text-pro-text-muted"
+      {pendingCloudProvider
+        ? createPortal(
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-6">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="cloud-consent-title"
+                className="max-w-md rounded-2xl border border-pro-border bg-pro-bg p-6 shadow-2xl"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const provider = pendingCloudProvider;
-                  persistSetting(
-                    cloudConsentSettingKey(provider),
-                    CLOUD_CONSENT_VERSION,
-                  );
-                  activateProvider(provider);
-                  setPendingCloudProvider(null);
-                }}
-                className="rounded-lg bg-pro-accent px-4 py-2 text-sm font-semibold text-white"
-              >
-                Allow and select
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+                <h2
+                  id="cloud-consent-title"
+                  className="text-lg font-semibold text-pro-text-main"
+                >
+                  Allow cloud inference with {pendingCloudProvider}?
+                </h2>
+                <p className="mt-3 text-sm leading-6 text-pro-text-muted">
+                  Selected transcript excerpts, notes, questions, and relevant
+                  local context may leave this Mac. Audio never leaves. Requests
+                  are stateless, and Pluto remains the only durable memory
+                  store.
+                </p>
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingCloudProvider(null)}
+                    className="rounded-lg border border-pro-border px-4 py-2 text-sm text-pro-text-muted"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const provider = pendingCloudProvider;
+                      persistSetting(
+                        cloudConsentSettingKey(provider),
+                        CLOUD_CONSENT_VERSION,
+                      );
+                      activateProvider(provider);
+                      setPendingCloudProvider(null);
+                    }}
+                    className="rounded-lg bg-pro-accent px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    Allow and select
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 };

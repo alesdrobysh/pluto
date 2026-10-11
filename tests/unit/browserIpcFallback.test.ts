@@ -106,6 +106,31 @@ describe('browser IPC capture journal fallback', () => {
     ]);
   });
 
+  it('provides saved context without wins or upcoming events for the quiet dashboard preview', async () => {
+    vi.stubGlobal('window', {
+      location: { search: '?preview=dashboard&quiet=1' },
+    });
+    const ipc = createBrowserIpcFallback();
+    const previews = (await ipc.invoke(
+      'GET_DASHBOARD_MEETING_PREVIEWS',
+    )) as Array<Record<string, unknown>>;
+
+    expect(previews.length).toBeGreaterThan(0);
+    expect(previews[0]).toMatchObject({
+      dashboard_detail: expect.any(String),
+      recent_win_title: null,
+    });
+    expect(previews.every((meeting) => meeting.recent_win_title === null)).toBe(
+      true,
+    );
+    await expect(
+      ipc.invoke('GET_MEETING', previews[0].id),
+    ).resolves.toMatchObject({
+      id: previews[0].id,
+    });
+    await expect(ipc.invoke('CALENDAR_LIST_DAY')).resolves.toEqual([]);
+  });
+
   it('reports Parakeet final transcription setup as ready', async () => {
     const ipc = createBrowserIpcFallback();
 
