@@ -1,14 +1,17 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   canOpenProductionDatabase,
-  resolveDevelopmentUserDataDir,
   resolveProductionUserDataDir,
+  resolveSourceProfileMode,
+  resolveSourceUserDataDir,
   resolveUserDataArgument,
 } from '../../electron/appRuntimePolicy';
 
 describe('Pluto application runtime policy', () => {
-  it('uses the persistent application profile for both source commands', () => {
+  it('routes dev to its own profile and start to production', () => {
     const productionDir = resolveProductionUserDataDir({
       platform: 'darwin',
       homeDir: '/Users/pluto',
@@ -17,34 +20,90 @@ describe('Pluto application runtime policy', () => {
       '/Users/pluto/Library/Application Support/pluto',
     );
     expect(
-      resolveDevelopmentUserDataDir({
+      resolveSourceUserDataDir({
         tempDir: '/tmp',
         productionDir: productionDir!,
+        mode: 'dev',
+      }),
+    ).toBe(`${productionDir}-development`);
+    expect(
+      resolveSourceUserDataDir({
+        tempDir: '/tmp',
+        productionDir: productionDir!,
+        mode: 'start',
       }),
     ).toBe(productionDir);
   });
-  it('honors explicit profiles including existing isolated development meetings', () => {
+  it('honors explicit isolated profiles but keeps dev out of production', () => {
     const productionDir = '/Users/pluto/Library/Application Support/pluto';
     for (const explicit of [
-      productionDir,
       '/tmp/pluto-development-profile',
       '/tmp/pluto-test-profile',
     ]) {
       expect(
-        resolveDevelopmentUserDataDir({
+        resolveSourceUserDataDir({
           explicit,
           tempDir: '/private/tmp',
           productionDir,
+          mode: 'dev',
         }),
       ).toBe(explicit);
     }
     expect(
-      resolveDevelopmentUserDataDir({
+      resolveSourceUserDataDir({
         explicit: '  ',
         tempDir: '/tmp',
         productionDir,
+        mode: 'dev',
+      }),
+    ).toBe(`${productionDir}-development`);
+    for (const explicit of [productionDir, `${productionDir}/../PLUTO`]) {
+      expect(() =>
+        resolveSourceUserDataDir({
+          explicit,
+          tempDir: '/tmp',
+          productionDir,
+          mode: 'dev',
+        }),
+      ).toThrow('pnpm dev cannot open the production data profile.');
+    }
+    expect(
+      resolveSourceUserDataDir({
+        explicit: productionDir,
+        tempDir: '/tmp',
+        productionDir,
+        mode: 'start',
       }),
     ).toBe(productionDir);
+  });
+  it('rejects a symlink to the production profile', () => {
+    const root = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'pluto-profile-policy-'),
+    );
+    try {
+      const productionDir = path.join(root, 'pluto');
+      const alias = path.join(root, 'alias');
+      fs.mkdirSync(productionDir);
+      fs.symlinkSync(productionDir, alias, 'dir');
+      expect(() =>
+        resolveSourceUserDataDir({
+          explicit: alias,
+          tempDir: root,
+          productionDir,
+          mode: 'dev',
+        }),
+      ).toThrow('pnpm dev cannot open the production data profile.');
+      fs.symlinkSync(productionDir, `${productionDir}-development`, 'dir');
+      expect(() =>
+        resolveSourceUserDataDir({
+          tempDir: root,
+          productionDir,
+          mode: 'dev',
+        }),
+      ).toThrow('pnpm dev cannot open the production data profile.');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
   it('keeps the fallback path for unsupported platforms', () => {
     expect(
@@ -53,9 +112,18 @@ describe('Pluto application runtime policy', () => {
         homeDir: '/home/pluto',
       }),
     ).toBeNull();
-    expect(resolveDevelopmentUserDataDir({ tempDir: '/private/tmp' })).toBe(
-      path.join('/private/tmp', 'pluto-development-profile'),
+    expect(
+      resolveSourceUserDataDir({ tempDir: '/private/tmp', mode: 'dev' }),
+    ).toBe(path.join('/private/tmp', 'pluto-development-profile'));
+  });
+  it('recognizes the source command passed to Electron', () => {
+    expect(resolveSourceProfileMode(['.', '--pluto-source-mode=start'])).toBe(
+      'start',
     );
+    expect(resolveSourceProfileMode(['.'])).toBe('dev');
+    expect(() =>
+      resolveSourceProfileMode(['.', '--pluto-source-mode=other']),
+    ).toThrow('Invalid source profile mode.');
   });
   it('allows normal source startup without a signed app and preserves packaged enforcement', () => {
     expect(
