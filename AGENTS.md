@@ -33,13 +33,15 @@ process code in `electron/`); native Swift runtimes live in `native/` and
 - Lint: `pnpm run lint`
 - Build native: `pnpm run build-native`
 - Package: `pnpm run build`
-- Release: `pnpm release` (next RC during prerelease, otherwise next patch).
-  Preview with `pnpm release --dry-run`; use `stable`, `minor`, or `major` for
-  an intentional version boundary. Follow [docs/releasing.md](docs/releasing.md).
-  Use this workflow for release requests rather than hand-bumping versions,
-  creating tags, or uploading unchecked installers. It writes release notes,
-  pushes the version commit and tag atomically, and waits for verified GitHub
-  publication. Do not run it merely to test the workflow.
+- Release: `pnpm release` prepares the next RC (or stable patch) as a metadata PR,
+  without creating a tag. Preview with `pnpm release --dry-run`; use `stable`,
+  `minor`, or `major` for an intentional version boundary. After that PR merges,
+  sync a clean `master` and run `pnpm release publish`: it verifies the installer
+  for that exact commit before tagging, then waits for GitHub publication.
+  Follow [docs/releasing.md](docs/releasing.md). Use this workflow rather than
+  hand-bumping versions, bypassing PR checks, creating unverified tags, or
+  uploading unchecked installers. Do not run either publishing step merely to
+  test the workflow.
 
 For Node tests that use SQLite, run `pnpm rebuild better-sqlite3` if its ABI is
 wrong. Run `pnpm run ensure:sqlite-abi` before returning to Electron; `pnpm run dev`

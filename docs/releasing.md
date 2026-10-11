@@ -1,80 +1,90 @@
 # Releasing Pluto
 
+Product changes and release metadata go through PRs into `master`. GitHub requires
+`Biome Lint` and `Full Tests` on an up-to-date PR before merging. Full Tests runs
+TypeScript, release/installer regression tests, and the complete Vitest suite on
+Apple Silicon macOS. Pushing or merging to `master` never publishes a release.
+
+## Prepare, verify, publish
+
 From a clean checkout of the GitHub default branch (`master`), synced with
-`origin/master`, run:
+`origin/master`:
 
 ```sh
+pnpm release --dry-run
 pnpm release
 ```
 
-Requires Node, pnpm, Git, and an authenticated GitHub CLI (`gh auth login`) with
-repository Contents write and Actions read access. The command checks Actions
-access before changing files or creating tags. The macOS installer is built on GitHub; the command can run from
-any development machine. Merge and push product changes before releasing.
-
-## Version policy
-
-- Default (`auto`): `1.0.0-rc.3` → `1.0.0-rc.4`; once stable,
-  `1.0.0` → `1.0.1`.
-- `pnpm release stable`: promote the current RC base, e.g. `1.0.0-rc.4` → `1.0.0`.
-- `pnpm release patch`, `minor`, or `major`: explicit SemVer bump for fixes,
-  features, or breaking changes. These produce stable releases.
-- `pnpm release rc`: increment an RC, or start the next patch RC from stable.
-
-All new tags are `v<SemVer>`, e.g. `v1.0.0-rc.4`. The older `v1.0.0.rc.3`
-format remains recognized. Automatic numbering does not infer whether a change
-is breaking; choose `major` explicitly when it is.
-
-## Notes and publication
-
-`pnpm release --dry-run` fetches tags and previews the next version and notes
-without changing files, creating a tag, or publishing. Notes include every
-non-merge commit since the closest release tag on the branch, commit links,
-an upgrade/install section, and a full comparison link. This includes direct
-fix commits as well as changes merged through PRs.
-
-For a curated product summary, supply a complete Markdown file:
+The second command prepares the next version and `docs/releases/v<version>.md`
+on a `codex/release-*` branch, pushes that branch, and opens a metadata PR. It
+creates no tag and publishes nothing. Review and merge the PR after its required
+checks pass, then sync a clean `master` checkout and explicitly run:
 
 ```sh
-pnpm release --dry-run --notes /path/to/release-notes.md
-pnpm release --notes /path/to/release-notes.md
+pnpm release publish --dry-run
+pnpm release publish
 ```
 
-The command commits `package.json` and `docs/releases/v<version>.md`, creates
-an annotated tag, and pushes the branch and tag together with `git push --atomic`.
-It rejects dirty, detached, unsynced, duplicate-tag, and no-change releases.
-Promoting an existing RC to stable is allowed without additional code changes.
-No PR is needed for this metadata commit. If branch protection requires a PR,
-prepare and merge the metadata through that policy before pushing its tag;
-never bypass protection or force-push.
+`publish` dispatches the Release workflow without a tag and waits for successful
+installer verification at the exact current commit. Verification runs the full
+test suite, builds native runtimes and an Apple Silicon DMG, mounts the DMG
+read-only, checks the app inside it, and exercises empty-cache model preparation
+plus a cached restart without additional downloads. This downloads about 1 GB
+into disposable storage and never reads your profile or meeting data.
 
-The existing Release workflow tests the code, builds native runtimes and the
-Apple Silicon DMG, verifies the packaged runtimes and checksum, then creates
-the GitHub Release with the committed notes, installer, and SHA256SUMS.txt.
-Publication also requires a real packaged-runtime prepare against an empty
-model cache and a separate cached restart with no additional downloads
-(`pnpm run package:verify-setup`). This downloads about 1 GB into a disposable
-directory; it never reads your profile or meeting data.
-RCs are marked prerelease and never marked Latest. The command waits for the
-workflow result and prints the release URL. The current pipeline uses ad-hoc
-signing; it does not claim Developer ID signing or notarization.
+Only after verification passes does the command fetch again, confirm both the
+checkout and remote `master` still identify that verified commit, and create and
+push its annotated `v<SemVer>` tag. Failure or a changed revision blocks tagging.
+The tag workflow independently requires successful untagged verification for
+that SHA, repeats packaging checks, and publishes the installer and
+`SHA256SUMS.txt`. The command waits for publication and reports the release URL.
 
-## Recovery
+Requires Node, pnpm, Git, and an authenticated GitHub CLI with repository Contents
+write, Pull requests write, and Actions read/write access. Builds run on GitHub.
+Never bypass required checks, force-push a release tag, or manually tag unverified
+code. The current pipeline uses ad-hoc signing, not Developer ID or notarization.
+Packaged recording, permissions, and real upgrades still require manual acceptance;
+model preparation and automated tests do not establish those outcomes.
 
-- If commit checks fail, fix the problem and inspect the checkout before retrying.
-- If push fails, the command prints the exact atomic push to retry. Keep the
-  existing release commit and tag; do not create a second version or delete data.
-- If GitHub fails after the tag is pushed, fix the build issue and use
-  `gh run rerun <run-id> --failed` for transient failures. A source fix requires a
-  new version because the published tag identifies an immutable source revision.
-- If workflow discovery times out, use `gh run list --workflow release.yml`, then
-  `gh run watch <run-id> --exit-status`. Do not bump just because discovery failed.
-- Publishing can be retried: an existing draft resumes asset upload; an already
-  published release is left intact.
+## Version policy and notes
 
-Verify without publishing: `pnpm run test:release-workflow`. A workflow-only
-change can additionally be exercised on a PR with the `release-test` label; that
-builds and verifies an installer without publishing a release.
+- Default (`auto`): `1.0.0-rc.3` → `1.0.0-rc.4`; once stable, `1.0.0` → `1.0.1`.
+- `pnpm release stable`: prepare promotion of the current RC base to stable.
+- `pnpm release patch`, `minor`, or `major`: prepare an explicit stable bump.
+- `pnpm release rc`: increment an RC, or start the next patch RC from stable.
+- `pnpm release publish`: publish the version already merged into `package.json`;
+  this does not bump it again.
+
+New tags use SemVer; legacy dotted RC tags remain recognized. Automatic numbering
+does not infer breaking changes. RCs are prereleases and never marked Latest.
+Notes include non-merge commits since the nearest first-parent release tag, links,
+and installation instructions. Supply `--notes /path/to/release-notes.md` when
+preparing for a curated summary. Dry runs do not edit files, dispatch builds,
+create PRs/tags, or publish.
+
+## Publication and recovery
+
+Publication creates a draft, uploads both the DMG and checksums, then publishes.
+Retries resume a draft; an existing published immutable release is left intact.
+API/authentication errors stop publication instead of being treated as absence.
+
+- If preparation fails, inspect the checkout and existing branch/PR before retrying.
+- If installer verification fails, no tag exists. Fix the source through a PR,
+  merge it, sync `master`, and rerun `pnpm release publish`.
+- If tag push fails, retry the printed push for that existing tag. Do not move it.
+- If publication fails transiently, rerun the failed job with
+  `gh run rerun <run-id> --failed`. Do not bump solely for a transient failure.
+- If GitHub reports `tag_name was used by an immutable release`, that tag name is
+  permanently reserved, even if the release was deleted. It cannot be recovered
+  by deleting/recreating tags or disabling immutability. Prepare a fresh version
+  only after release authorization; do not retry the reserved name. This applies
+  to the failed rc.16 publication. This workflow change does not publish a replacement.
+- A source change after tagging requires a new version; tags remain immutable.
+
+Verify the command and publisher without publishing with
+`pnpm run test:release-workflow`. A PR labelled `release-test` additionally builds
+and verifies an installer without publishing. Untagged workflow dispatches also
+never publish.
 
 ## One-command installation
 

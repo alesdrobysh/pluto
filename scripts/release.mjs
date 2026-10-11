@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
@@ -48,7 +49,7 @@ export function releaseNotes(version, previousTag, commits, repository) {
 export async function main(args = process.argv.slice(2)) {
   if (args.includes('--help')) {
     console.log(
-      'pnpm release [auto|rc|stable|patch|minor|major] [--dry-run] [--notes FILE]',
+      'pnpm release [auto|rc|stable|patch|minor|major|publish] [--dry-run] [--notes FILE]',
     );
     return;
   }
@@ -60,7 +61,9 @@ export async function main(args = process.argv.slice(2)) {
     if (arg === '--dry-run') dryRun = true;
     else if (arg === '--notes' && args[i + 1]) notesFile = args[++i];
     else if (
-      ['auto', 'rc', 'stable', 'patch', 'minor', 'major'].includes(arg) &&
+      ['auto', 'rc', 'stable', 'patch', 'minor', 'major', 'publish'].includes(
+        arg,
+      ) &&
       i === 0
     )
       kind = arg;
@@ -88,7 +91,8 @@ export async function main(args = process.argv.slice(2)) {
       `Local ${branch} must match origin/${branch}. Pull or push first.`,
     );
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-  const version = nextVersion(pkg.version, kind);
+  const version =
+    kind === 'publish' ? pkg.version : nextVersion(pkg.version, kind);
   const tag = `v${version}`;
   const tags = git('tag', '--list').split('\n').filter(Boolean);
   if (tags.some((existing) => normalizeVersion(existing) === version))
@@ -115,8 +119,118 @@ export async function main(args = process.argv.slice(2)) {
         return { hash, subject: subject.join(' ') };
       })
     : [];
-  if (!commits.length && kind !== 'stable')
+  if (!commits.length && kind !== 'stable' && kind !== 'publish')
     throw new Error('No changes since the previous release.');
+  if (kind === 'publish') {
+    const notesPath = `docs/releases/${tag}.md`;
+    if (!readFileSync(notesPath, 'utf8').trim())
+      throw new Error(`Missing release notes: ${notesPath}`);
+    if (dryRun) {
+      console.log(
+        `Verify installer at ${git('rev-parse', 'HEAD')}, then tag ${tag}.`,
+      );
+      return;
+    }
+    // Dispatch without a tag; only a successful run for this exact SHA can unlock tagging.
+    const commit = git('rev-parse', 'HEAD');
+    const listRuns = () =>
+      JSON.parse(
+        capture('gh', [
+          'run',
+          'list',
+          '--workflow',
+          'release.yml',
+          '--commit',
+          commit,
+          '--event',
+          'workflow_dispatch',
+          '--json',
+          'databaseId',
+          '--limit',
+          '100',
+        ]),
+      );
+    const previousRuns = new Set(listRuns().map((run) => run.databaseId));
+    run('gh', [
+      'workflow',
+      'run',
+      'release.yml',
+      '--ref',
+      branch,
+      '-f',
+      `expected_sha=${commit}`,
+    ]);
+    let verification;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      verification = listRuns().find(
+        (candidate) => !previousRuns.has(candidate.databaseId),
+      );
+      if (verification) break;
+      await setTimeout(5000);
+    }
+    if (!verification)
+      throw new Error(
+        'Installer verification run not found. No tag was created.',
+      );
+    run('gh', [
+      'run',
+      'watch',
+      String(verification.databaseId),
+      '--exit-status',
+    ]);
+    run('git', ['fetch', 'origin', branch, '--tags']);
+    if (
+      git('rev-parse', `origin/${branch}`) !== commit ||
+      git('rev-parse', 'HEAD') !== commit ||
+      git('status', '--porcelain')
+    )
+      throw new Error(
+        'Checkout or master changed during verification. No tag was created; verify the current revision again.',
+      );
+    run('git', ['tag', '-a', tag, '-m', `Pluto ${version}`]);
+    console.log(`If pushing fails, retry: git push origin ${tag}`);
+    run('git', ['push', 'origin', tag]);
+    console.log(`Tag ${tag} pushed. Waiting for publication…`);
+    let publication;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const runs = JSON.parse(
+        capture('gh', [
+          'run',
+          'list',
+          '--workflow',
+          'release.yml',
+          '--commit',
+          commit,
+          '--event',
+          'push',
+          '--json',
+          'databaseId,headBranch',
+          '--limit',
+          '100',
+        ]),
+      );
+      publication = runs.find((candidate) => candidate.headBranch === tag);
+      if (publication) break;
+      await setTimeout(5000);
+    }
+    if (!publication)
+      throw new Error(
+        'Tag pushed but publication run not found. Inspect release.yml runs; do not bump again.',
+      );
+    console.log(
+      `Recovery: gh run rerun ${publication.databaseId} --failed (unless GitHub reports a permanently reserved immutable tag).`,
+    );
+    run('gh', [
+      'run',
+      'watch',
+      String(publication.databaseId),
+      '--exit-status',
+    ]);
+    console.log(
+      capture('gh', ['release', 'view', tag, '--json', 'url', '--jq', '.url']),
+    );
+    return;
+  }
   const notes = notesFile
     ? `${readFileSync(resolve(notesFile), 'utf8').trim()}\n`
     : releaseNotes(version, previousTag, commits, repository.nameWithOwner);
@@ -143,7 +257,9 @@ export async function main(args = process.argv.slice(2)) {
   if (workflowState !== 'active')
     throw new Error('Enable the GitHub Release workflow before releasing.');
   run('pnpm', ['run', 'changelog:check']);
-  // CI runs tests and builds before publishing; release metadata is the only local edit.
+  // Release metadata goes through the same required PR checks as product changes.
+  const releaseBranch = `codex/release-${tag}-${randomUUID().slice(0, 8)}`;
+  run('git', ['switch', '-c', releaseBranch]);
   pkg.version = version;
   mkdirSync('docs/releases', { recursive: true });
   writeFileSync('package.json', `${JSON.stringify(pkg, null, 2)}\n`);
@@ -151,44 +267,22 @@ export async function main(args = process.argv.slice(2)) {
   run('git', ['add', 'package.json', notesPath]);
   run('git', ['commit', '-m', `Release ${tag}`]);
   if (git('status', '--porcelain'))
-    throw new Error('Commit hooks left changes. Review them before tagging.');
-  run('git', ['tag', '-a', tag, '-m', `Pluto ${version}`]);
-  const commit = git('rev-parse', 'HEAD');
+    throw new Error('Commit hooks left changes. Review them before pushing.');
+  run('git', ['push', '-u', 'origin', releaseBranch]);
+  const pullRequest = capture('gh', [
+    'pr',
+    'create',
+    '--base',
+    branch,
+    '--head',
+    releaseBranch,
+    '--title',
+    `Prepare ${tag}`,
+    '--body',
+    `Prepare release metadata for ${tag}. Full PR checks must pass before merge. After merging, sync ${branch} and run pnpm release publish to verify the installer before tagging. This PR does not publish a release.`,
+  ]);
   console.log(
-    `If pushing fails, retry: git push --atomic origin ${branch} ${tag}`,
-  );
-  run('git', ['push', '--atomic', 'origin', branch, tag]);
-  console.log('Waiting for GitHub to build, verify, and publish the release…');
-  let workflow;
-  for (let attempt = 0; attempt < 24; attempt++) {
-    const runs = JSON.parse(
-      capture('gh', [
-        'run',
-        'list',
-        '--workflow',
-        'release.yml',
-        '--commit',
-        commit,
-        '--event',
-        'push',
-        '--json',
-        'databaseId,headBranch',
-        '--limit',
-        '20',
-      ]),
-    );
-    workflow = runs.find((candidate) => candidate.headBranch === tag);
-    if (workflow) break;
-    await setTimeout(5000);
-  }
-  if (!workflow)
-    throw new Error(
-      'Tag pushed but workflow was not found. Check: gh run list --workflow release.yml. Do not bump again.',
-    );
-  console.log(`Recovery: gh run rerun ${workflow.databaseId} --failed`);
-  run('gh', ['run', 'watch', String(workflow.databaseId), '--exit-status']);
-  console.log(
-    capture('gh', ['release', 'view', tag, '--json', 'url', '--jq', '.url']),
+    `${pullRequest}\nNo tag created. After merge, sync ${branch} and run pnpm release publish.`,
   );
 }
 
