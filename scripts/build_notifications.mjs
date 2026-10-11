@@ -56,7 +56,7 @@ if (!headers) {
     '.cache/pluto-electron-headers',
     electronVersion,
   );
-  headers = path.join(cache, `node-v${electronVersion}`, 'include/node');
+  headers = path.join(cache, 'node_headers', 'include/node');
   if (!existsSync(path.join(headers, 'node_api.h'))) {
     mkdirSync(cache, { recursive: true });
     const filename = `node-v${electronVersion}-headers.tar.gz`;
@@ -86,6 +86,8 @@ if (!headers) {
     }
   }
 }
+if (!existsSync(path.join(headers, 'node_api.h')))
+  throw new Error('Electron notification bridge headers are incomplete.');
 mkdirSync(path.dirname(output), { recursive: true });
 const temporary = `${output}.${process.pid}.tmp`;
 try {
