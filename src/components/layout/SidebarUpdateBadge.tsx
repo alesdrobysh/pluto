@@ -13,7 +13,8 @@ import { INSTALL_COMMAND } from '../../utils/plutoInstaller';
 const INSTALL_CMD = INSTALL_COMMAND;
 
 export const SidebarUpdateBadge = () => {
-  const { status, isUpdating, applyUpdate, openReleaseUrl } = useAppUpdate();
+  const { status, isUpdating, updateError, applyUpdate, openReleaseUrl } =
+    useAppUpdate();
   const [isDismissed, setIsDismissed] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -86,6 +87,12 @@ export const SidebarUpdateBadge = () => {
             </>
           )}
         </button>
+
+        {updateError && (
+          <p role="alert" className="text-[11px] leading-normal text-red-600">
+            {updateError}
+          </p>
+        )}
 
         {/* Secondary Actions: Terminal Command & Changelog */}
         <div className="flex items-center justify-between pt-0.5 text-[10px]">

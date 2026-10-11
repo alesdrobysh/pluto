@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { app, dialog, ipcMain, shell } from 'electron';
-import { INSTALLER_URL } from '../src/utils/plutoInstaller';
 import { createLogger } from './logger';
 
 const log = createLogger('UpdateChecker');
@@ -17,6 +16,10 @@ export interface UpdateInfo {
   checkedAt: number;
   error?: string;
 }
+
+export type UpdateApplyResult =
+  | { started: true }
+  | { started: false; error: string };
 
 const GITHUB_REPO = 'metagrover/pluto';
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
@@ -191,8 +194,9 @@ export class UpdateChecker {
     }
   }
 
-  public async applyUpdate(): Promise<void> {
-    if (this.applying) return;
+  public async applyUpdate(): Promise<UpdateApplyResult> {
+    if (this.applying)
+      return { started: false, error: 'An update is already starting.' };
     this.applying = true;
     let scratch: string | undefined;
     let handedOff = false;
@@ -210,12 +214,22 @@ export class UpdateChecker {
       const appPath = dirname(dirname(dirname(app.getPath('exe'))));
       if (!appPath.endsWith('/Pluto.app'))
         throw new Error('Update the installed Pluto.app in Applications.');
-      const response = await fetch(INSTALLER_URL, {
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok)
-        throw new Error(`Installer download failed (${response.status}).`);
-      const installer = await response.text();
+      // Ship the verified installer with Pluto so a separate source-code download
+      // cannot prevent an otherwise available release from starting.
+      let installer: string;
+      try {
+        installer = await readFile(
+          join(dirname(app.getAppPath()), 'installer', 'install-macos.sh'),
+          'utf8',
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          throw new Error(
+            'The update installer is missing from this Pluto build. Reinstall Pluto to update.',
+          );
+        }
+        throw error;
+      }
       if (
         !installer.startsWith('#!/bin/bash') ||
         !installer.trimEnd().endsWith('main "$@"')
@@ -263,15 +277,13 @@ export class UpdateChecker {
       scratch = undefined; // The detached helper owns cleanup from here.
       handedOff = true;
       app.quit();
+      return { started: true };
     } catch (error) {
       log.warn('Update could not start', error);
-      await dialog.showMessageBox({
-        type: 'error',
-        title: 'Pluto Update',
-        message: 'Pluto could not start the update.',
-        detail: error instanceof Error ? error.message : String(error),
-        buttons: ['OK'],
-      });
+      return {
+        started: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
     } finally {
       if (scratch) await rm(scratch, { recursive: true, force: true });
       if (!handedOff) this.applying = false;
