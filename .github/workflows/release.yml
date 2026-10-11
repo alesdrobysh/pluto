@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-macos:
@@ -93,6 +93,8 @@ jobs:
         env:
           # In unsigned mode, electron-builder packages an ad-hoc / unsigned DMG
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          # PR installer checks need the same ad-hoc signature as tagged builds.
+          CSC_FOR_PULL_REQUEST: true
         run: |
           pnpm run prebuild
           pnpm exec tsc
