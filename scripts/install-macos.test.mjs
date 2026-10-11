@@ -132,8 +132,22 @@ exec /bin/mv "$@"`,
       const invalidTag = run({}, ['--tag', 'v1.0.0;touch bad']);
       assert.match(invalidTag.stderr, /Invalid release tag/);
       assert.equal(existsSync(app), false);
-      const profile = join(root, 'existing-profile');
+      const profileDir = join(root, 'Library', 'Application Support', 'pluto');
+      mkdirSync(profileDir, { recursive: true });
+      const profile = join(profileDir, 'pluto.db');
       writeFileSync(profile, 'preserve meeting data');
+      const choicePath = join(profileDir, 'database-storage.json');
+      const envelopePath = join(profileDir, 'app-key-envelope.json');
+      writeFileSync(
+        choicePath,
+        JSON.stringify({ version: 1, mode: 'encrypted', initialized: true }),
+      );
+      writeFileSync(envelopePath, 'fictional encrypted key envelope');
+      const profileFiles = [profile, choicePath, envelopePath].map((file) => [
+        file,
+        readFileSync(file),
+      ]);
+
       let result = run({ TEST_SIGNATURE: '1' });
       assert.notEqual(result.status, 0);
       assert.equal(existsSync(app), false);
@@ -154,8 +168,27 @@ exec /bin/mv "$@"`,
       assert.equal(result.status, 0, result.stderr);
       assert.equal(readFileSync(join(app, 'new'), 'utf8'), 'new app');
       assert.match(readFileSync(log, 'utf8'), /xattr -dr com.apple.quarantine/);
-      assert.match(readFileSync(log, 'utf8'), /open .*Applications\/Pluto.app/);
+      assert.match(
+        readFileSync(log, 'utf8'),
+        /open -na .*Applications\/Pluto.app/,
+      );
       writeFileSync(join(app, 'old'), 'previous app');
+      writeFileSync(
+        join(app, 'Contents', 'Info.plist'),
+        JSON.stringify({ ...info, CFBundleShortVersionString: '1.0.0-rc.14' }),
+      );
+      for (const newerVersion of ['1.0.0-rc.16', '1.0.0', '1.1.0-rc.1']) {
+        writeFileSync(
+          join(app, 'Contents', 'Info.plist'),
+          JSON.stringify({ ...info, CFBundleShortVersionString: newerVersion }),
+        );
+        result = run();
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /Refusing to install an older Pluto build/);
+        assert.equal(readFileSync(join(app, 'old'), 'utf8'), 'previous app');
+        for (const [file, bytes] of profileFiles)
+          assert.deepEqual(readFileSync(file), bytes);
+      }
       writeFileSync(
         join(app, 'Contents', 'Info.plist'),
         JSON.stringify({ ...info, CFBundleShortVersionString: '1.0.0-rc.14' }),
@@ -192,6 +225,32 @@ exec /bin/mv "$@"`,
         /tccutil reset All com\.pluto\.app/,
       );
       assert.equal(readFileSync(profile, 'utf8'), 'preserve meeting data');
+      for (const [file, bytes] of profileFiles)
+        assert.deepEqual(readFileSync(file), bytes);
+      assert.match(
+        readFileSync(log, 'utf8'),
+        new RegExp(`--user-data-dir=${profileDir}`),
+      );
+      writeFileSync(log, '');
+      const customProfile = join(root, 'original custom profile');
+      result = run({ PLUTO_USER_DATA_DIR: '/unrelated/inherited/profile' }, [
+        '--user-data-dir',
+        customProfile,
+      ]);
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(
+        readFileSync(log, 'utf8'),
+        new RegExp(`--user-data-dir=${customProfile}`),
+      );
+      assert.doesNotMatch(
+        readFileSync(log, 'utf8'),
+        /pluto-first-run|unrelated/,
+      );
+      for (const [file, bytes] of profileFiles)
+        assert.deepEqual(readFileSync(file), bytes);
+      result = run({}, ['--fresh-profile', '--user-data-dir', customProfile]);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /fresh profile cannot replace/);
       result = run({}, ['--fresh-profile']);
       assert.equal(result.status, 0, result.stderr);
       assert.match(result.stdout, /separate empty profile/);

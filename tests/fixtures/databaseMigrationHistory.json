@@ -1,0 +1,102 @@
+[
+  {
+    "tag": "0000_pluto_baseline",
+    "when": 1788301324528,
+    "hash": "de1ac76fc91c2b56465a2940c8221c8e4e4c9014fd02db0e852c78fd8a673067"
+  },
+  {
+    "tag": "0001_voice_representatives",
+    "when": 1788886057891,
+    "hash": "11cae19b059b1c78f02d3cb1be1bf41e47b74545718db2d4bca994f0037748de"
+  },
+  {
+    "tag": "0002_live_meeting_context_checkpoints",
+    "when": 1789043416934,
+    "hash": "d407aecbf2be6195e25488dd058b6405d7f2378a548e5cfa9d0f11b85fe59cda"
+  },
+  {
+    "tag": "0003_singleton_participant_identity",
+    "when": 1789244099234,
+    "hash": "2e6f841528f52c3efcbe2363c487a001de184fcfb291c30ded6a283b91d2080c"
+  },
+  {
+    "tag": "0004_audio_retention",
+    "when": 1789245770636,
+    "hash": "35eb48ab24151e73f34437ddec82ae210bc8bcc82e0e8af53f68afd3b4a196f3"
+  },
+  {
+    "tag": "0005_audio_encryption_rollout",
+    "when": 1789247550469,
+    "hash": "409f12f60cc08316e1de807c65e7c2f6dd8e9bed6d47b65462e55aa39b6aaf6d"
+  },
+  {
+    "tag": "0006_voice_candidate_attempts",
+    "when": 1789265747447,
+    "hash": "b3cfa3481912fdb46e20f0af66a30ffcf8f750766406bc14384674bd12841635"
+  },
+  {
+    "tag": "0007_person_chat",
+    "when": 1789320739869,
+    "hash": "53c4a9a01d13c00c0607054015aca17172d2bced3e622f853ea1de42727b2c6d"
+  },
+  {
+    "tag": "0008_hierarchical_context",
+    "when": 1789428685802,
+    "hash": "efe7d4f8db154dabad1a3d27ad948a64e841bae2c109be507e69be4dfaa91ba6"
+  },
+  {
+    "tag": "0009_live_speaker_identity_confirmations",
+    "when": 1789800000000,
+    "hash": "c47f073ec384874c330fa16a075e9eaf0409a52254e4a3d42b88f2923b8becf8"
+  },
+  {
+    "tag": "0010_local_artifacts",
+    "when": 1789967259886,
+    "hash": "3c692cfe5f0aea5a7fa3381e5bdf75454d2be0a9e78e92776fe6cba921b6df3a"
+  },
+  {
+    "tag": "0011_local_artifacts_docx_pages",
+    "when": 1789970000000,
+    "hash": "41e926dccfeae906d254e00f3bfc35c89b0e5a6b879ecb4c916aba18ee01f52e"
+  },
+  {
+    "tag": "0012_meeting_local_artifacts",
+    "when": 1789975000000,
+    "hash": "649efad33edab83cf12a939beecf6e96b783ea4b415f3a1af685165264b221ae"
+  },
+  {
+    "tag": "0013_prep_attendee_links",
+    "when": 1790517000000,
+    "hash": "2910b585f817f16d084a2f521d88b28f31614185cadebc117de766b628f2d3dc"
+  },
+  {
+    "tag": "0014_meeting_prep",
+    "when": 1790526000000,
+    "hash": "563be96b2dd4bc4634bbf7a5e705fcc6bc7e13997764226cc2bc8ae89ccd2c00"
+  },
+  {
+    "tag": "0015_prep_past_meetings",
+    "when": 1790533000000,
+    "hash": "6e7a09be3cacf5cf9ef9a1b658bb39946a49d3cc16736e2971e24283fd348dea"
+  },
+  {
+    "tag": "0016_prep_briefing",
+    "when": 1790534000000,
+    "hash": "bbb3467775f103098831237999519f608294e59af8ffc86b22dc3a6f6c063cb5"
+  },
+  {
+    "tag": "0017_workspace_chat",
+    "when": 1790621098891,
+    "hash": "46ade47a4934395de086334a6697a95f38b4d36444f0056a6964f72f8b3e1361"
+  },
+  {
+    "tag": "0018_calendar_recording_confirmation",
+    "when": 1791415198914,
+    "hash": "705991503df076fa2db213267463778571b7f0faa7967d15f5daaa34ddcd05a0"
+  },
+  {
+    "tag": "0019_commitment_reminders",
+    "when": 1791670000000,
+    "hash": "ebb0187616a8530a990a1627ce96707ef5b5d3349827f52c5d8fd51ed675a87c"
+  }
+]

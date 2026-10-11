@@ -35,12 +35,9 @@ export default defineConfig(({ command }) => ({
           encryptedAudioWorker: 'electron/crypto/encryptedAudioWorker.ts',
         },
         onstart({ startup }) {
-          const sourceMode =
-            process.env.npm_lifecycle_event === 'start' ? 'start' : 'dev';
           const userDataDir = resolveSourceUserDataDir({
             explicit: process.env.PLUTO_USER_DATA_DIR,
             tempDir: os.tmpdir(),
-            mode: sourceMode,
             productionDir:
               resolveProductionUserDataDir({
                 platform: process.platform,
@@ -52,7 +49,6 @@ export default defineConfig(({ command }) => ({
           return startup(
             [
               '.',
-              `--pluto-source-mode=${sourceMode}`,
               `--user-data-dir=${userDataDir}`,
               ...(remoteDebuggingPort
                 ? [`--remote-debugging-port=${remoteDebuggingPort}`]

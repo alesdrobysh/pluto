@@ -303,6 +303,52 @@ describe('database runtime', () => {
     inspection.close();
   });
 
+  it('rejects an older build with update guidance and preserves the newer database', () => {
+    const root = makeRoot();
+    const migrations = [
+      {
+        tag: '0000_first',
+        when: 100,
+        sql: 'CREATE TABLE durable_marker (value TEXT);',
+      },
+      {
+        tag: '0001_second',
+        when: 200,
+        sql: 'CREATE TABLE newer_marker (value TEXT);',
+      },
+    ];
+    const migrationsFolder = writeMigrations(root, migrations);
+    const databasePath = path.join(root, 'pluto.db');
+    const newer = createDatabaseRuntime({ databasePath, migrationsFolder });
+    const db = newer.initialize();
+    db.prepare('INSERT INTO durable_marker VALUES (?)').run('preserved');
+    db.prepare('INSERT INTO newer_marker VALUES (?)').run('also preserved');
+    newer.close();
+    const before = fs.readFileSync(databasePath);
+    writeMigrations(root, migrations.slice(0, 1));
+    const older = createDatabaseRuntime({ databasePath, migrationsFolder });
+    expect(() => older.initialize()).toThrowError(
+      expect.objectContaining({
+        code: 'database_version_unsupported',
+        details: { migrationHistoryReason: 'newer_build_required' },
+      }),
+    );
+    expect(fs.readFileSync(databasePath)).toEqual(before);
+    const inspection = new Database(databasePath, { readonly: true });
+    expect(
+      inspection.prepare('SELECT value FROM durable_marker').get(),
+    ).toEqual({ value: 'preserved' });
+    expect(inspection.prepare('SELECT value FROM newer_marker').get()).toEqual({
+      value: 'also preserved',
+    });
+    expect(
+      inspection
+        .prepare('SELECT COUNT(*) AS count FROM __drizzle_migrations')
+        .get(),
+    ).toEqual({ count: 2 });
+    inspection.close();
+  });
+
   it('does not reset an established database when a later migration fails', () => {
     const root = makeRoot();
     const migrationsFolder = writeMigrations(root, [
