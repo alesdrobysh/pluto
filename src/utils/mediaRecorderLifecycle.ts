@@ -24,15 +24,23 @@ export const waitForMediaRecorderStop = (
 
     stopCompletion = new Promise((resolve) => {
       const handleStop = () => {
-        recorder.removeEventListener?.('stop', handleStop);
+        try {
+          recorder.removeEventListener?.('stop', handleStop);
+        } catch {
+          /* Stop is still confirmed. */
+        }
         resolve(true);
       };
 
-      recorder.addEventListener('stop', handleStop, { once: true });
       try {
+        recorder.addEventListener('stop', handleStop, { once: true });
         recorder.stop();
       } catch {
-        recorder.removeEventListener?.('stop', handleStop);
+        try {
+          recorder.removeEventListener?.('stop', handleStop);
+        } catch {
+          /* Cleanup failure is reported below. */
+        }
         resolve(false);
       }
     });

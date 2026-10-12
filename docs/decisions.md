@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-12 - Acknowledge audio release independently of recording finalization
+
+- **Status:** Accepted
+- **Extends:** “2026-09-09 - Truthful system capture evidence, paced live ASR queue, and deadline-bound stop” and the 2026-08-11 stop-boundary update.
+- **Decision:** Freeze the meeting clock and revoke capture restart admission at terminal stop. Stop native capture, browser tracks, and the AudioContext independently of recorder events and persistence. Wait for the owned helper's transport close; escalate within a bounded deadline. Preserve lease authority for final journal writes while rejecting recovery restart. A stopped notification requires resource acknowledgement; persistence remains a separate outcome.
+- **Consequences:** Recorder-event loss cannot keep audio active. Failed release remains retryable. Automatic audio probes stay paused until passive app/tab closure or explicit new recording; automatic departure evidence and packaged device-route acceptance remain separate work.
+
 ## Entry Format
 
 ```markdown

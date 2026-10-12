@@ -12,7 +12,9 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const Harness = ({
   stopSessionRef,
 }: {
-  stopSessionRef: MutableRefObject<((reason?: string) => void) | null>;
+  stopSessionRef: MutableRefObject<
+    ((reason?: string) => Promise<boolean>) | null
+  >;
 }) => {
   useAutoEndMonitor({
     isRecording: true,
@@ -29,11 +31,13 @@ afterEach(() => {
 describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
   it('ends through the shared stop-session callback after the call app exits', async () => {
     vi.useFakeTimers();
-    const stopSession = vi.fn();
-    const stopSessionRef = createRef<((reason?: string) => void) | null>();
+    const stopSession = vi.fn(async () => true);
+    const stopSessionRef = createRef<
+      ((reason?: string) => Promise<boolean>) | null
+    >();
     stopSessionRef.current = stopSession;
     let detectionCount = 0;
-    const invoke = vi.fn(async (channel: string) => {
+    const invoke = vi.fn(async (channel: string, _payload?: unknown) => {
       if (channel === 'DETECT_ACTIVE_CALL') {
         detectionCount += 1;
         return detectionCount === 1
@@ -100,8 +104,10 @@ describe('quiet meeting breaks', () => {
     'handles %s after a quiet break without an inactivity deadline',
     async (outcome) => {
       vi.useFakeTimers();
-      const stopSession = vi.fn();
-      const stopSessionRef = createRef<((reason?: string) => void) | null>();
+      const stopSession = vi.fn(async () => true);
+      const stopSessionRef = createRef<
+        ((reason?: string) => Promise<boolean>) | null
+      >();
       stopSessionRef.current = stopSession;
       let count = 0;
       const active = {
@@ -154,4 +160,55 @@ describe('quiet meeting breaks', () => {
       await act(async () => root.unmount());
     },
   );
+});
+
+describe('auto-end shutdown acknowledgement', () => {
+  it('does not announce success for a pending or failed stop, and retries', async () => {
+    vi.useFakeTimers();
+    let settle!: (released: boolean) => void;
+    const stopSession = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const stopSessionRef = { current: stopSession };
+    let polls = 0;
+    const invoke = vi.fn(async (channel: string, _payload?: unknown) => {
+      if (channel !== 'DETECT_ACTIVE_CALL') return true;
+      return ++polls === 1
+        ? {
+            active: true,
+            appName: 'Zoom',
+            sourceApp: 'Zoom',
+            confidence: 'high',
+            reason: 'call-app-running-with-active-audio',
+          }
+        : { active: false, reason: 'no-call-app-running' };
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke },
+    });
+    const root = createRoot(document.createElement('div'));
+    await act(async () =>
+      root.render(createElement(Harness, { stopSessionRef })),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    const completed = () =>
+      invoke.mock.calls.some(
+        ([channel, payload]) =>
+          channel === 'LOG_AUTO_END_EVENT' &&
+          (payload as { reason_code?: string })?.reason_code ===
+            'auto_end_completed',
+      );
+    expect(completed()).toBe(false);
+    await act(async () => settle(false));
+    expect(completed()).toBe(false);
+    await act(async () => vi.advanceTimersByTimeAsync(5000));
+    expect(stopSession).toHaveBeenCalledTimes(2);
+    await act(async () => settle(true));
+    expect(completed()).toBe(true);
+    await act(async () => root.unmount());
+  });
 });

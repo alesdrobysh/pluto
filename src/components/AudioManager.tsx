@@ -42,6 +42,7 @@ import {
   attachCaptureUnloadGuard,
   isCaptureSessionAlreadyActiveError,
 } from '../utils/captureSessionGuard';
+import { stopCaptureResources } from '../utils/captureShutdown';
 import {
   type LiveTranscriptResponsivenessSummary,
   createLiveTranscriptResponsivenessRuntime,
@@ -116,7 +117,7 @@ interface AudioManagerProps {
   fasterNotesEnabled?: boolean;
 
   onStopSessionRef?: React.MutableRefObject<
-    ((endReason?: string) => void) | null
+    ((endReason?: string) => Promise<boolean>) | null
   >;
   onStartSessionRef?: React.MutableRefObject<
     ((calendarEvent?: CalendarEvent) => Promise<CaptureStartResult>) | null
@@ -251,7 +252,11 @@ export const AudioManager = ({
     snapshot: CaptureLifecycleSnapshot,
   ): void => {
     captureLifecycleRef.current = snapshot;
-    onCaptureLifecycleChange?.(snapshot);
+    try {
+      onCaptureLifecycleChange?.(snapshot);
+    } catch {
+      console.warn('[Pluto] Capture UI callback failed');
+    }
   };
 
   useEffect(() => {
@@ -400,7 +405,14 @@ export const AudioManager = ({
   const isRecordingRef = useRef(false);
   const isProcessingRef = useRef(false);
   const stopInFlightRef = useRef(false);
+  const stopPromiseRef = useRef<{
+    meetingId: string;
+    promise: Promise<boolean>;
+  } | null>(null);
+  const nativeReleasedRef = useRef(false);
+  const deferredFinalChunksRef = useRef<Array<() => void>>([]);
   const startInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
   const currentMeetingIdRef = useRef<string | null>(null);
   const confirmedHintKey = transcriptionParticipantHints.join('\u0000');
   const participantHintKey = participants.join('\u0000');
@@ -588,6 +600,9 @@ export const AudioManager = ({
   };
 
   const abortUnstartedCapture = async (meetingId: string) => {
+    stopInFlightRef.current = true;
+    const stopped = await releaseCaptureResources(meetingId);
+    if (!stopped.released) throw new Error('capture_release_failed');
     eouSessionRef.current?.cancel();
     eouSessionRef.current = null;
     meetingContextIngestionRef.current?.close();
@@ -596,11 +611,6 @@ export const AudioManager = ({
     cancelSystemAudioHealthTimeoutRef.current = null;
     nativeAudioUnsubscribeRef.current?.();
     nativeAudioUnsubscribeRef.current = null;
-    try {
-      await window.ipcRenderer.invoke('NATIVE_AUDIO_STOP');
-    } catch {
-      console.warn('[Pluto] Failed to stop unstarted native capture');
-    }
     try {
       await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_ABORT_START', {
         meetingId,
@@ -630,6 +640,7 @@ export const AudioManager = ({
         'RECORDING_READINESS_PREPARE',
         { verifyPermissions: true },
       )) as { ready: boolean; blockers: string[] };
+      if (!mountedRef.current) throw new Error('capture_start_cancelled');
       if (!readiness.ready) {
         console.warn('[Pluto] Recording readiness failed:', readiness.blockers);
         window.dispatchEvent(
@@ -659,6 +670,7 @@ export const AudioManager = ({
           generation: eouGeneration,
           getSetting: (key) => window.ipcRenderer.invoke('GET_SETTING', key),
         });
+      if (!mountedRef.current) throw new Error('capture_start_cancelled');
       onLiveConversation?.(null);
       startTimeRef.current = Date.now();
       stopToValidatedLatencyRef.current =
@@ -850,10 +862,14 @@ export const AudioManager = ({
           currentMeetingIdRef.current === meetingId &&
           captureJournalStateRef.current?.generation ===
             systemCaptureGeneration,
-        stopCapture: () => window.ipcRenderer.invoke('NATIVE_AUDIO_STOP'),
+        stopCapture: () =>
+          window.ipcRenderer.invoke('NATIVE_AUDIO_STOP', {
+            meetingId,
+            intent: 'recovery',
+          }),
         startCapture: () => {
           systemPcmCarryoverBytesRef.current = new Uint8Array(0);
-          return window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+          return window.ipcRenderer.invoke('NATIVE_AUDIO_START', { meetingId });
         },
         onRecovering: () => {
           // Recovery restores future capture; it cannot restore the lost interval.
@@ -875,7 +891,12 @@ export const AudioManager = ({
       );
       cancelSystemAudioHealthTimeoutRef.current = systemLiveness.stop;
       const handler = (_: unknown, chunk: NativeAudioChunk) => {
-        if (!chunk) return;
+        if (
+          !chunk ||
+          currentMeetingIdRef.current !== meetingId ||
+          captureJournalStateRef.current?.generation !== systemCaptureGeneration
+        )
+          return;
         systemAudioChunkSeenRef.current = true;
         let chunkBytes: Uint8Array | null = null;
         if (chunk instanceof Uint8Array) {
@@ -913,7 +934,14 @@ export const AudioManager = ({
           systemPcmCarryoverBytesRef.current,
         );
         systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
-        if (!systemLiveness.received(decoded.samples)) return;
+        // Stop disables recovery timers, but native close still drains buffered PCM.
+        if (stopInFlightRef.current) {
+          if (
+            !decoded.samples.length ||
+            !decoded.samples.every(Number.isFinite)
+          )
+            return;
+        } else if (!systemLiveness.received(decoded.samples)) return;
         captureDiagnosticsRef.current.samplesAccepted += decoded.samples.length;
         if (
           !systemFailureRecorded &&
@@ -953,8 +981,10 @@ export const AudioManager = ({
         unsubscribeChunks();
         unsubscribeFailures();
       };
-      const nativeAudioStartPromise =
-        window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+      const nativeAudioStartPromise = window.ipcRenderer.invoke(
+        'NATIVE_AUDIO_START',
+        { meetingId },
+      );
       void nativeAudioStartPromise.catch(() => undefined);
 
       const vocabularyGeneration = ++vocabularyRequestGenerationRef.current;
@@ -1209,6 +1239,14 @@ export const AudioManager = ({
         };
       }
 
+      if (
+        !mountedRef.current ||
+        stopInFlightRef.current ||
+        currentMeetingIdRef.current !== meetingId
+      ) {
+        for (const track of micStream?.getTracks() ?? []) track.stop();
+        throw new Error('capture_start_cancelled');
+      }
       micStreamRef.current = micStream;
       if (micStream) {
         const micTrack = micStream.getAudioTracks()[0];
@@ -1230,6 +1268,8 @@ export const AudioManager = ({
       )();
       audioContextRef.current = audioContext;
       if (audioContext.state === 'suspended') await audioContext.resume();
+      if (!mountedRef.current || stopInFlightRef.current)
+        throw new Error('capture_start_cancelled');
 
       if (micStream) {
         const micSource = audioContext.createMediaStreamSource(micStream);
@@ -1297,7 +1337,11 @@ export const AudioManager = ({
         console.warn('[Pluto] System audio failed:', sysErr);
       }
 
+      if (!mountedRef.current || stopInFlightRef.current)
+        throw new Error('capture_start_cancelled');
       // 5. Start Recorders Synced
+      nativeReleasedRef.current = false;
+      deferredFinalChunksRef.current = [];
       micChunksRef.current = [];
       systemChunksRef.current = [];
       micChunkIndexRef.current = 0;
@@ -1349,129 +1393,144 @@ export const AudioManager = ({
         );
 
         micRecorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            const index = micChunkIndexRef.current++;
-            const chunkEndSec = getMeetingElapsedSeconds();
-            const chunkStartSec = Math.max(
-              0,
-              Math.min(lastMicChunkBoundarySecRef.current, chunkEndSec),
-            );
-            lastMicChunkBoundarySecRef.current = chunkEndSec;
-            micChunksRef.current.push(event.data);
-            if (index < 3 || event.data.size < 2048) {
-              console.log(
-                `[Pluto] Mic chunk #${index}: ${event.data.size} bytes`,
-              );
-            }
-
-            let micBlobForChunk: Blob | null = null;
-            let micChunkFormat: MicChunkFormat = getMicFormat();
-            if (micPcmChunksRef.current.length > 0) {
-              const totalMicLen = micPcmChunksRef.current.reduce(
-                (acc, chunk) => acc + chunk.length,
+          const acceptChunk = () => {
+            if (
+              currentMeetingIdRef.current !== meetingId ||
+              micRecorderRef.current !== micRecorder
+            )
+              return;
+            if (event.data && event.data.size > 0) {
+              const index = micChunkIndexRef.current++;
+              const chunkEndSec = getMeetingElapsedSeconds();
+              const chunkStartSec = Math.max(
                 0,
+                Math.min(lastMicChunkBoundarySecRef.current, chunkEndSec),
               );
-              const mergedMic = new Float32Array(totalMicLen);
-              let micOffset = 0;
-              for (const chunk of micPcmChunksRef.current) {
-                mergedMic.set(chunk, micOffset);
-                micOffset += chunk.length;
+              lastMicChunkBoundarySecRef.current = chunkEndSec;
+              micChunksRef.current.push(event.data);
+              if (index < 3 || event.data.size < 2048) {
+                console.log(
+                  `[Pluto] Mic chunk #${index}: ${event.data.size} bytes`,
+                );
               }
-              micBlobForChunk = createWavBlob(
-                mergedMic,
-                micPcmSampleRateRef.current,
-                1,
-              );
-              micPcmChunksRef.current = [];
-              micChunkFormat = 'wav';
-            }
 
-            const fallbackMicBlob = event.data;
-            const finalMicBlob = micBlobForChunk || fallbackMicBlob;
-            if (index < 3) {
-              console.log(
-                `[Pluto] Mic chunk #${index} transcription source: format=${micChunkFormat}, bytes=${finalMicBlob.size}`,
-              );
-            }
+              let micBlobForChunk: Blob | null = null;
+              let micChunkFormat: MicChunkFormat = getMicFormat();
+              if (micPcmChunksRef.current.length > 0) {
+                const totalMicLen = micPcmChunksRef.current.reduce(
+                  (acc, chunk) => acc + chunk.length,
+                  0,
+                );
+                const mergedMic = new Float32Array(totalMicLen);
+                let micOffset = 0;
+                for (const chunk of micPcmChunksRef.current) {
+                  mergedMic.set(chunk, micOffset);
+                  micOffset += chunk.length;
+                }
+                micBlobForChunk = createWavBlob(
+                  mergedMic,
+                  micPcmSampleRateRef.current,
+                  1,
+                );
+                micPcmChunksRef.current = [];
+                micChunkFormat = 'wav';
+              }
 
-            if (getMicFormat() === 'webm' && !micWebmInitSegmentRef.current) {
-              void event.data
-                .arrayBuffer()
-                .then((chunkBuffer) => {
-                  const initSegment = extractWebmInitSegment(chunkBuffer);
-                  if (initSegment) {
-                    micWebmInitSegmentRef.current = initSegment;
-                    console.log(
-                      `[Pluto] Captured WebM init segment (${initSegment.byteLength} bytes)`,
+              const fallbackMicBlob = event.data;
+              const finalMicBlob = micBlobForChunk || fallbackMicBlob;
+              if (index < 3) {
+                console.log(
+                  `[Pluto] Mic chunk #${index} transcription source: format=${micChunkFormat}, bytes=${finalMicBlob.size}`,
+                );
+              }
+
+              if (getMicFormat() === 'webm' && !micWebmInitSegmentRef.current) {
+                void event.data
+                  .arrayBuffer()
+                  .then((chunkBuffer) => {
+                    const initSegment = extractWebmInitSegment(chunkBuffer);
+                    if (initSegment) {
+                      micWebmInitSegmentRef.current = initSegment;
+                      console.log(
+                        `[Pluto] Captured WebM init segment (${initSegment.byteLength} bytes)`,
+                      );
+                    }
+                  })
+                  .catch((err) => {
+                    console.warn(
+                      '[Pluto] Failed to inspect mic chunk for WebM init segment:',
+                      err,
                     );
-                  }
-                })
-                .catch((err) => {
-                  console.warn(
-                    '[Pluto] Failed to inspect mic chunk for WebM init segment:',
-                    err,
-                  );
-                });
-            }
-
-            // Package System Audio for this interval
-            let systemBlob: Blob | undefined;
-            const chunkDurationSec = Math.max(0.2, chunkEndSec - chunkStartSec);
-            // Native AudioCap normalizes output to fixed 48kHz Float32 mono PCM.
-            // Keep sample rate fixed at 48000; do not infer from sample count / wall time.
-            systemPcmSampleRateRef.current = 48000;
-            // Flatten pending float chunks
-            const floatChunks = systemPcmChunksRef.current;
-            if (floatChunks.length > 0) {
-              const totalLen = floatChunks.reduce(
-                (acc, c) => acc + c.length,
-                0,
-              );
-              const merged = new Float32Array(totalLen);
-              let offset = 0;
-              for (const c of floatChunks) {
-                merged.set(c, offset);
-                offset += c.length;
+                  });
               }
-              const intervalPcm = trimPcmLeadingOverflow(
-                merged,
-                48000,
-                chunkDurationSec,
-              );
-              captureDiagnosticsRef.current.samplesPackaged +=
-                intervalPcm.length;
-              captureDiagnosticsRef.current.samplesTrimmed +=
-                merged.length - intervalPcm.length;
-              systemBlob = createWavBlob(intervalPcm, 48000, 1);
-              // Clear for next chunk
-              systemPcmChunksRef.current = [];
-            }
 
-            const meetingIdForChunk = currentMeetingIdRef.current;
-            void captureActivitySessionRef.current?.enqueue(async () => {
-              if (meetingIdForChunk) {
-                await appendCaptureJournalBlob({
-                  meetingId: meetingIdForChunk,
-                  source: 'mic',
-                  sequence: index,
-                  chunkStartSec,
-                  chunkEndSec,
-                  format: micChunkFormat,
-                  blob: finalMicBlob,
-                });
-                if (systemBlob) {
+              // Package System Audio for this interval
+              let systemBlob: Blob | undefined;
+              const chunkDurationSec = Math.max(
+                stopInFlightRef.current ? 0 : 0.2,
+                chunkEndSec - chunkStartSec,
+              );
+              // Native AudioCap normalizes output to fixed 48kHz Float32 mono PCM.
+              // Keep sample rate fixed at 48000; do not infer from sample count / wall time.
+              systemPcmSampleRateRef.current = 48000;
+              // Flatten pending float chunks
+              const floatChunks = systemPcmChunksRef.current;
+              if (floatChunks.length > 0) {
+                const totalLen = floatChunks.reduce(
+                  (acc, c) => acc + c.length,
+                  0,
+                );
+                const merged = new Float32Array(totalLen);
+                let offset = 0;
+                for (const c of floatChunks) {
+                  merged.set(c, offset);
+                  offset += c.length;
+                }
+                const intervalPcm = stopInFlightRef.current
+                  ? merged.slice(0, Math.ceil(chunkDurationSec * 48000))
+                  : trimPcmLeadingOverflow(merged, 48000, chunkDurationSec);
+                captureDiagnosticsRef.current.samplesPackaged +=
+                  intervalPcm.length;
+                captureDiagnosticsRef.current.samplesTrimmed +=
+                  merged.length - intervalPcm.length;
+                systemBlob = createWavBlob(intervalPcm, 48000, 1);
+                // Clear for next chunk
+                systemPcmChunksRef.current = [];
+              }
+
+              const meetingIdForChunk = currentMeetingIdRef.current;
+              void captureActivitySessionRef.current?.enqueue(async () => {
+                if (meetingIdForChunk) {
                   await appendCaptureJournalBlob({
                     meetingId: meetingIdForChunk,
-                    source: 'system',
+                    source: 'mic',
                     sequence: index,
                     chunkStartSec,
                     chunkEndSec,
-                    format: 'wav',
-                    blob: systemBlob,
+                    format: micChunkFormat,
+                    blob: finalMicBlob,
                   });
+                  if (systemBlob) {
+                    await appendCaptureJournalBlob({
+                      meetingId: meetingIdForChunk,
+                      source: 'system',
+                      sequence: index,
+                      chunkStartSec,
+                      chunkEndSec,
+                      format: 'wav',
+                      blob: systemBlob,
+                    });
+                  }
                 }
-              }
-            });
+              });
+            }
+          };
+          // The last mic event also packages system PCM. Wait for native close
+          // so buffered pre-stop bytes arrive before that final interval seals.
+          if (stopInFlightRef.current && !nativeReleasedRef.current) {
+            deferredFinalChunksRef.current.push(acceptChunk);
+          } else {
+            acceptChunk();
           }
         };
 
@@ -1497,6 +1556,8 @@ export const AudioManager = ({
           'MEETING_PREP_RECORDING_STARTED',
           meetingId,
         );
+      if (!mountedRef.current || stopInFlightRef.current)
+        throw new Error('capture_start_cancelled');
       onRecordingStarted?.(startTimeRef.current, meetingId);
       isRecordingRef.current = true;
       setIsRecording(true);
@@ -1532,10 +1593,19 @@ export const AudioManager = ({
       meetingContextIngestionRef.current?.close();
       meetingContextIngestionRef.current = null;
       const unstartedMeetingId = currentMeetingIdRef.current;
-      if (
-        unstartedMeetingId &&
-        (!micRecorderRef.current || micRecorderRef.current.state === 'inactive')
-      ) {
+      if (unstartedMeetingId) {
+        stopInFlightRef.current = true;
+        const stopped = await releaseCaptureResources(unstartedMeetingId);
+        if (!stopped.released) {
+          isRecordingRef.current = true;
+          setIsRecording(true);
+          stopInFlightRef.current = false;
+          return {
+            admitted: false,
+            state: 'recording',
+            reason: 'capture_release_failed',
+          };
+        }
         await abortUnstartedCapture(unstartedMeetingId);
       }
       currentMeetingIdRef.current = null;
@@ -1839,48 +1909,118 @@ export const AudioManager = ({
     }, deviceChangeDebounceMs);
   };
 
-  const stopAllTracks = () => {
-    if (
-      typeof navigator !== 'undefined' &&
-      navigator.mediaDevices?.removeEventListener &&
-      activeDeviceChangeListenerRef.current
-    ) {
-      navigator.mediaDevices.removeEventListener(
-        'devicechange',
-        activeDeviceChangeListenerRef.current,
+  const stopAllTracks = (): boolean => {
+    const attempt = (action: () => void) => {
+      try {
+        action();
+      } catch {
+        console.warn('[Pluto] Capture node cleanup failed');
+      }
+    };
+    if (activeDeviceChangeListenerRef.current) {
+      const listener = activeDeviceChangeListenerRef.current;
+      attempt(() =>
+        navigator.mediaDevices?.removeEventListener('devicechange', listener),
       );
       activeDeviceChangeListenerRef.current = null;
     }
-    if (reconfigureDeviceTimeoutRef.current) {
+    if (reconfigureDeviceTimeoutRef.current)
       clearTimeout(reconfigureDeviceTimeoutRef.current);
-      reconfigureDeviceTimeoutRef.current = null;
-    }
-    drainInFlightMicPcm();
-    stopSpeakingSamplerRef.current?.();
+    reconfigureDeviceTimeoutRef.current = null;
+    pendingReconfigureRef.current = false;
+    attempt(drainInFlightMicPcm);
+    attempt(() => stopSpeakingSamplerRef.current?.());
     stopSpeakingSamplerRef.current = null;
     if (micPcmProcessorRef.current) {
       micPcmProcessorRef.current.onaudioprocess = null;
-      micPcmProcessorRef.current.disconnect();
+      attempt(() => micPcmProcessorRef.current?.disconnect());
       micPcmProcessorRef.current = null;
     }
-    if (micPcmSourceRef.current) {
-      micPcmSourceRef.current.disconnect();
-      micPcmSourceRef.current = null;
-    }
-    if (micPcmSinkRef.current) {
-      micPcmSinkRef.current.disconnect();
-      micPcmSinkRef.current = null;
-    }
+    attempt(() => micPcmSourceRef.current?.disconnect());
+    micPcmSourceRef.current = null;
+    attempt(() => micPcmSinkRef.current?.disconnect());
+    micPcmSinkRef.current = null;
     const keepalive = window as unknown as Record<string, unknown>;
     keepalive.__plutoMicProcessor = undefined;
     keepalive.__plutoMicSource = undefined;
-    micPcmChunksRef.current = [];
-    if (micStreamRef.current) {
-      for (const track of micStreamRef.current.getTracks()) {
-        track.stop();
+    let released = true;
+    for (const streamRef of [micStreamRef, visStreamRef]) {
+      let streamReleased = true;
+      for (const track of streamRef.current?.getTracks() ?? []) {
+        try {
+          track.stop();
+        } catch {
+          streamReleased = false;
+        }
       }
-      micStreamRef.current = null;
+      if (streamReleased) streamRef.current = null;
+      else released = false;
     }
+    return released;
+  };
+
+  const closeCaptureContext = async () => {
+    const context = audioContextRef.current;
+    if (context && context.state !== 'closed') await context.close();
+    if (audioContextRef.current === context) audioContextRef.current = null;
+  };
+
+  const releaseCaptureResources = (meetingId: string) => {
+    try {
+      cancelSystemAudioHealthTimeoutRef.current?.();
+    } catch {
+      /* Still release audio. */
+    }
+    cancelSystemAudioHealthTimeoutRef.current = null;
+    return stopCaptureResources({
+      recorder: micRecorderRef.current,
+      stopNative: () =>
+        window.ipcRenderer.invoke('NATIVE_AUDIO_STOP', { meetingId }),
+      releaseTracks: stopAllTracks,
+      closeContext: closeCaptureContext,
+    });
+  };
+
+  const flushCaptureTail = (meetingId: string) => {
+    const chunkEndSec = getMeetingElapsedSeconds();
+    const chunkStartSec = Math.min(
+      lastMicChunkBoundarySecRef.current,
+      chunkEndSec,
+    );
+    const sequence = micChunkIndexRef.current++;
+    for (const [source, chunksRef, rate] of [
+      ['mic', micPcmChunksRef, micPcmSampleRateRef.current],
+      ['system', systemPcmChunksRef, 48000],
+    ] as const) {
+      const chunks = chunksRef.current;
+      chunksRef.current = [];
+      const count = Math.min(
+        chunks.reduce((sum, chunk) => sum + chunk.length, 0),
+        Math.max(0, Math.ceil((chunkEndSec - chunkStartSec) * rate)),
+      );
+      if (!count) continue;
+      const pcm = new Float32Array(count);
+      let offset = 0;
+      for (const chunk of chunks) {
+        const part = chunk.subarray(0, count - offset);
+        pcm.set(part, offset);
+        offset += part.length;
+        if (offset === count) break;
+      }
+      const blob = createWavBlob(pcm, rate, 1);
+      void captureActivitySessionRef.current?.enqueue(() =>
+        appendCaptureJournalBlob({
+          meetingId,
+          source,
+          sequence,
+          chunkStartSec,
+          chunkEndSec,
+          format: 'wav',
+          blob,
+        }).then(() => undefined),
+      );
+    }
+    lastMicChunkBoundarySecRef.current = chunkEndSec;
   };
 
   // --- Helpers ---
@@ -1987,54 +2127,48 @@ export const AudioManager = ({
     activeSpeakerWindowRef.current = null;
     lastSpeakerRef.current = null;
     lastSpeakerTsRef.current = 0;
-    onSpeakingChange?.(null);
+    try {
+      onSpeakingChange?.(null);
+    } catch {
+      console.warn('[Pluto] Speaking UI callback failed');
+    }
   };
 
-  const stopSession = async (endReason?: string) => {
+  const finishSession = async (
+    endReason: string | undefined,
+    acknowledge: (released: boolean) => void,
+  ): Promise<boolean> => {
     const stopSnapshot = beginRecordingFinalization({
       meetingId: currentMeetingIdRef.current,
       stopInFlight: stopInFlightRef.current,
       recordingStartedAtMs: startTimeRef.current,
-      nowMs: Date.now(),
+      nowMs: recordingEndedAtRef.current || Date.now(),
     });
-    if (!stopSnapshot) {
-      console.warn('[Pluto] Ignoring duplicate or orphaned stop request');
-      return;
-    }
-    stopSpeakingMonitor();
+    if (!stopSnapshot) return false;
+    stopInFlightRef.current = true;
+    recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
+    isProcessingRef.current = true;
     startStopToValidatedLatencyAfterAcceptedStop({
       acceptedStop: stopSnapshot,
       accumulator: stopToValidatedLatencyRef.current,
       nowMs: performance.now(),
     });
-
-    stopInFlightRef.current = true;
-    publishCaptureLifecycle({
-      state: 'sealing',
-      meetingId: stopSnapshot.meetingId,
-    });
-    recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
-    isProcessingRef.current = true;
-    console.log(
-      '[Pluto] Stopping session...',
-      endReason ? `(reason: ${endReason})` : '',
-    );
+    const diagnostic = (code: string) => {
+      try {
+        void window.ipcRenderer
+          .invoke('CAPTURE_STOP_DIAGNOSTIC', {
+            meetingId: stopSnapshot.meetingId,
+            code,
+          })
+          .catch(() => {});
+      } catch {
+        /* Diagnostics are best effort. */
+      }
+    };
+    diagnostic('capture_stop_requested');
+    // Start release before invoking any UI callback or awaiting persistence.
+    const resourceStop = releaseCaptureResources(stopSnapshot.meetingId);
     setIsProcessing(true);
-    onFinalizationStarted?.({
-      id: stopSnapshot.meetingId,
-      title: userTitle.trim() || 'Meeting',
-      startedAt: new Date(stopSnapshot.recordingStartedAtMs).toISOString(),
-      endedAt: new Date(stopSnapshot.recordingEndedAtMs).toISOString(),
-      durationSeconds: Math.max(
-        0,
-        Math.round(
-          (stopSnapshot.recordingEndedAtMs -
-            stopSnapshot.recordingStartedAtMs) /
-            1_000,
-        ),
-      ),
-      userNotes,
-    });
 
     const eouSessionAtStop = eouSessionRef.current;
     eouSessionRef.current = null;
@@ -2048,70 +2182,66 @@ export const AudioManager = ({
     let sealedActivityEvidence: CaptureActivityEvidence | null = null;
     let provisionalMeetingPersisted = false;
     let captureOwnershipReleased = false;
+    let resourcesReleased = false;
     const micFormatAtStop = getMicFormat();
 
     try {
-      // Helper to stop a recorder and get its blob
-      const stopRecorder = async (
-        recorder: MediaRecorder | null,
-        chunks: Blob[],
-        mimeTypeOverride?: string | null,
-      ): Promise<Blob | null> => {
-        if (!recorder || recorder.state === 'inactive') {
-          if (chunks.length > 0) {
-            const type =
-              mimeTypeOverride ||
-              recorder?.mimeType ||
-              'audio/webm;codecs=opus';
-            return new Blob(chunks, { type });
-          }
-          return null;
-        }
-
-        const stopped = new Promise<void>((resolve) => {
-          recorder.onstop = () => resolve();
-        });
-        recorder.stop();
-        await stopped;
-
-        if (chunks.length === 0) return null;
-        const type =
-          mimeTypeOverride || recorder?.mimeType || 'audio/webm;codecs=opus';
-        return new Blob(chunks, { type });
-      };
-
-      // Stop Mic Recorder
-      const micBlob = await stopRecorder(
-        micRecorderRef.current,
-        micChunksRef.current,
-        micMimeTypeRef.current,
-      );
-
-      // Stop Native Capture
-      cancelSystemAudioHealthTimeoutRef.current?.();
-      cancelSystemAudioHealthTimeoutRef.current = null;
-      await window.ipcRenderer.invoke('NATIVE_AUDIO_STOP');
+      const stopped = await resourceStop;
+      resourcesReleased = stopped.released;
+      acknowledge(resourcesReleased);
+      if (!resourcesReleased) {
+        diagnostic('capture_release_failed');
+        alert(
+          'Audio could not be fully released. Click End meeting again to retry. Your captured audio is retained.',
+        );
+        return false;
+      }
+      diagnostic('capture_released');
+      nativeReleasedRef.current = true;
       nativeAudioUnsubscribeRef.current?.();
       nativeAudioUnsubscribeRef.current = null;
-
-      // The capture journal owns disk-backed system chunks. Do not retain or
-      // concatenate a second session-length PCM copy in the renderer.
-      if (systemPcmChunksRef.current.length > 0) {
-        systemPcmChunksRef.current = [];
+      for (const accept of deferredFinalChunksRef.current.splice(0)) accept();
+      if (!stopped.recorderCompleted) {
+        diagnostic('recorder_stop_timeout');
+        captureActivitySessionRef.current?.markDurabilityFailure();
       }
-
-      // Stop all tracks
-      stopAllTracks();
-
-      // Reset refs
+      flushCaptureTail(stopSnapshot.meetingId);
+      const micBlob = micChunksRef.current.length
+        ? new Blob(micChunksRef.current, {
+            type: micMimeTypeRef.current || 'audio/webm',
+          })
+        : null;
       micRecorderRef.current = null;
       micMimeTypeRef.current = null;
       micChunksRef.current = [];
       hasMicRecorderRef.current = false;
       hasSystemRecorderRef.current = false;
-
-      // Cleanup capture-time audio resources.
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      publishCaptureLifecycle({
+        state: 'sealing',
+        meetingId: stopSnapshot.meetingId,
+      });
       stopSpeakingMonitor();
+      try {
+        onFinalizationStarted?.({
+          id: stopSnapshot.meetingId,
+          title: userTitle.trim() || 'Meeting',
+          startedAt: new Date(stopSnapshot.recordingStartedAtMs).toISOString(),
+          endedAt: new Date(stopSnapshot.recordingEndedAtMs).toISOString(),
+          durationSeconds: Math.max(
+            0,
+            Math.round(
+              (stopSnapshot.recordingEndedAtMs -
+                stopSnapshot.recordingStartedAtMs) /
+                1000,
+            ),
+          ),
+          userNotes,
+        });
+      } catch {
+        console.warn('[Pluto] Finalization UI callback failed');
+      }
       const frozenDurationSeconds = Math.max(
         0,
         (stopSnapshot.recordingEndedAtMs - stopSnapshot.recordingStartedAtMs) /
@@ -2120,18 +2250,6 @@ export const AudioManager = ({
       await captureActivitySessionRef.current?.closeAt(frozenDurationSeconds);
       speakerTimelineRef.current =
         captureActivitySessionRef.current?.windows() ?? [];
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
-      if (visStreamRef.current) {
-        for (const track of visStreamRef.current.getTracks()) {
-          track.stop();
-        }
-        visStreamRef.current = null;
-      }
-      isRecordingRef.current = false;
-      setIsRecording(false);
 
       await captureActivitySessionRef.current?.drain();
       try {
@@ -2227,7 +2345,7 @@ export const AudioManager = ({
         }
         onSessionComplete?.(degradedMeeting.id);
         alert(getTerminalRecordingFailureMessage());
-        return;
+        return resourcesReleased;
       }
       sealedActivityEvidence = journalSealOutcome.activityEvidence;
       const sealedActivityHandoff = createSealedCaptureActivityHandoff(
@@ -2333,7 +2451,7 @@ export const AudioManager = ({
       );
       if (insertedProvisional === false) {
         onSessionComplete?.(stopSnapshot.meetingId);
-        return;
+        return resourcesReleased;
       }
       provisionalMeetingPersisted = true;
       registerFinalTranscriptionVocabulary(
@@ -2443,7 +2561,7 @@ export const AudioManager = ({
           await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
       );
       onSessionUpdated?.(stopSnapshot.meetingId);
-      return;
+      return resourcesReleased;
     } catch (e) {
       console.error('[Pluto] Processing failed:', e);
       eouSessionAtStop?.cancel();
@@ -2519,12 +2637,44 @@ export const AudioManager = ({
       }
       if (!captureOwnershipReleased) {
         alert(`Failed to process recording: ${(e as Error).message}`);
-        isRecordingRef.current = false;
-        setIsRecording(false);
+        if (resourcesReleased) {
+          isRecordingRef.current = false;
+          setIsRecording(false);
+        }
       }
+      return resourcesReleased;
     } finally {
       meetingContextIngestionAtStop?.close();
-      if (!captureOwnershipReleased) {
+      if (!resourcesReleased) {
+        // Keep the frozen session and End meeting action available for retry.
+        eouSessionRef.current = eouSessionAtStop;
+        stopInFlightRef.current = false;
+        isProcessingRef.current = false;
+        setIsProcessing(false);
+      }
+      if (resourcesReleased && !captureOwnershipReleased) {
+        // Failed sealing must preserve the journal without poisoning the next
+        // recording. Settle admitted writes before surrendering write authority.
+        await Promise.allSettled([
+          Promise.resolve().then(() =>
+            captureActivitySessionRef.current?.drain(),
+          ),
+          Promise.resolve().then(() =>
+            captureJournalMutationCoordinatorRef.current.drain(),
+          ),
+        ]);
+        try {
+          await window.ipcRenderer.invoke(
+            'AUDIO_CAPTURE_RELEASE_AFTER_FAILURE',
+            {
+              meetingId: stopSnapshot.meetingId,
+            },
+          );
+        } catch {
+          console.warn(
+            '[Pluto] Failed to release capture ownership for recovery',
+          );
+        }
         stopInFlightRef.current = false;
         stopToValidatedLatencyRef.current =
           createStopToValidatedLatencyAccumulator();
@@ -2540,6 +2690,25 @@ export const AudioManager = ({
     }
   };
 
+  const stopSession = (endReason?: string): Promise<boolean> => {
+    const meetingId = currentMeetingIdRef.current;
+    if (!meetingId) return Promise.resolve(false);
+    if (stopPromiseRef.current?.meetingId === meetingId)
+      return stopPromiseRef.current.promise;
+    let acknowledge!: (released: boolean) => void;
+    const promise = new Promise<boolean>((resolve) => {
+      acknowledge = resolve;
+    });
+    stopPromiseRef.current = { meetingId, promise };
+    void finishSession(endReason, acknowledge)
+      .then(acknowledge, () => acknowledge(false))
+      .finally(() => {
+        if (stopPromiseRef.current?.promise === promise)
+          stopPromiseRef.current = null;
+      });
+    return promise;
+  };
+
   useEffect(() => {
     return attachCaptureUnloadGuard(window, {
       snapshot: () => captureLifecycleRef.current,
@@ -2551,6 +2720,7 @@ export const AudioManager = ({
 
   // Set up event listeners for external control (e.g., "End Meeting" button)
   useEffect(() => {
+    mountedRef.current = true;
     const handleStopRecording = () => {
       console.log(
         '[Pluto] STOP_RECORDING event received, isRecording:',
@@ -2569,14 +2739,27 @@ export const AudioManager = ({
     window.addEventListener('STOP_RECORDING', handleStopRecording);
     window.addEventListener('START_RECORDING', handleStartRecording);
 
-    const handleMeetingDeleted = (_event: unknown, deletedId: string) => {
+    const handleMeetingDeleted = async (_event: unknown, deletedId: string) => {
       if (deletedId === currentMeetingIdRef.current) {
         console.warn(
           `[Pluto] Active meeting ${deletedId} was deleted. Resetting state.`,
         );
-        // Note: we don't call stopSession because that would try to save.
-        // We just reset local state. The main process handles task cancellation.
+        stopInFlightRef.current = true;
+        const stopped = await releaseCaptureResources(deletedId);
+        if (!stopped.released) {
+          stopInFlightRef.current = false;
+          alert(
+            'Audio could not be fully released. Click End meeting to retry.',
+          );
+          return;
+        }
+        await captureActivitySessionRef.current?.drain();
+        await captureJournalMutationCoordinatorRef.current.drain();
+        await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_ABORT_START', {
+          meetingId: deletedId,
+        });
         currentMeetingIdRef.current = null;
+        isRecordingRef.current = false;
         eouSessionRef.current?.cancel();
         eouSessionRef.current = null;
         meetingContextIngestionRef.current?.close();
@@ -2589,26 +2772,33 @@ export const AudioManager = ({
         isProcessingRef.current = false;
         setIsRecording(false);
         setIsProcessing(false);
-        // Kill active recorders
-        if (
-          micRecorderRef.current &&
-          micRecorderRef.current.state !== 'inactive'
-        ) {
-          micRecorderRef.current.stop();
-        }
-        cancelSystemAudioHealthTimeoutRef.current?.();
-        cancelSystemAudioHealthTimeoutRef.current = null;
         nativeAudioUnsubscribeRef.current?.();
         nativeAudioUnsubscribeRef.current = null;
-        window.ipcRenderer.invoke('NATIVE_AUDIO_STOP').catch(() => {});
+        micRecorderRef.current = null;
+        deferredFinalChunksRef.current = [];
+        publishCaptureLifecycle({ state: 'idle' });
       }
     };
     const unsubscribeMeetingDeleted = window.ipcRenderer.on(
       'MEETING_DELETED',
-      handleMeetingDeleted,
+      (event, deletedId) => {
+        void handleMeetingDeleted(event, deletedId).catch(() => {
+          stopInFlightRef.current = false;
+          console.warn('[Pluto] Deleted meeting cleanup failed');
+          alert(
+            'Meeting cleanup could not finish. Restart Pluto before recording again.',
+          );
+        });
+      },
     );
 
     return () => {
+      mountedRef.current = false;
+      const meetingId = currentMeetingIdRef.current;
+      if (meetingId) {
+        stopInFlightRef.current = true;
+        void releaseCaptureResources(meetingId);
+      }
       if (
         typeof navigator !== 'undefined' &&
         navigator.mediaDevices?.removeEventListener &&

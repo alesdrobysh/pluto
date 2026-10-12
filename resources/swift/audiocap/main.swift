@@ -70,6 +70,10 @@ class AudioCapCLI {
     private var tapStartTime: Date = Date()
     private var watchdogTimer: DispatchSourceTimer?
     private var reconnectWorkItem: DispatchWorkItem?
+    private var routeListeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+    private var signalSources: [DispatchSourceSignal] = []
+    private var parentSource: DispatchSourceProcess?
+    private var stopping = false
     private var watchdogRetries = 0
     private let maxWatchdogRetries = 2
     private var lastFrameTime: Date = Date()
@@ -93,16 +97,15 @@ class AudioCapCLI {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            AudioObjectAddPropertyListenerBlock(
-                AudioObjectID(kAudioObjectSystemObject),
-                &address,
-                controlQueue
-            ) { [weak self] _, _ in
+            let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 guard let self = self, self.isRunning else { return }
-                if selector == kAudioHardwarePropertyDevices && self.isSelfModifyingDevices {
-                    return
-                }
+                if selector == kAudioHardwarePropertyDevices && self.isSelfModifyingDevices { return }
                 self.handleRouteChangedDebounced()
+            }
+            if AudioObjectAddPropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, controlQueue, listener
+            ) == noErr {
+                routeListeners.append((address, listener))
             }
         }
     }
@@ -227,7 +230,7 @@ class AudioCapCLI {
                 let normalized = audioStreamer.resampleTo48k(mono)
                 let frameCount = UInt64(normalized.count)
                 self?.controlQueue.async { [weak self] in
-                    guard let self = self, self.tapGeneration == currentGeneration else { return }
+                    guard let self = self, self.isRunning, self.tapGeneration == currentGeneration else { return }
                     normalized.withUnsafeBytes { bytes in
                         do {
                             try stdout.write(contentsOf: Data(bytes))
@@ -282,7 +285,54 @@ class AudioCapCLI {
         return isGlobal || !pids.isEmpty
     }
     
+    func installShutdownHandlers() {
+        for value in [SIGINT, SIGTERM] {
+            signal(value, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: value, queue: .global())
+            source.setEventHandler { [weak self] in self?.requestStop() }
+            source.resume()
+            signalSources.append(source)
+        }
+        let parent = getppid()
+        if parent <= 1 { exit(1) }
+        let source = DispatchSource.makeProcessSource(identifier: parent, eventMask: .exit, queue: .global())
+        source.setEventHandler { [weak self] in self?.requestStop() }
+        source.resume()
+        parentSource = source
+        if getppid() != parent { requestStop() }
+    }
+
+    private func requestStop() {
+        // Parent loss must remain bounded even if CoreAudio or stdout is stuck.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2.5) { _exit(1) }
+        controlQueue.async { [weak self] in
+            guard let self = self, !self.stopping else { return }
+            self.stopping = true
+            self.isRunning = false
+            self.reconnectWorkItem?.cancel()
+            self.watchdogTimer?.cancel()
+            self.watchdogTimer = nil
+            for (var address, listener) in self.routeListeners {
+                AudioObjectRemovePropertyListenerBlock(
+                    AudioObjectID(kAudioObjectSystemObject), &address, self.controlQueue, listener
+                )
+            }
+            self.routeListeners.removeAll()
+            self.tap?.stop()
+            self.tap = nil
+            self.stopProbeTone()
+            self.emitHealth("stopped")
+            exit(0)
+        }
+    }
+
     func start() {
+        controlQueue.async { self.startCapture() }
+        CFRunLoopRun()
+    }
+
+    private func startCapture() {
+
         isRunning = true
         tapGeneration = 1
         tapFramesReceived = 0
@@ -312,8 +362,6 @@ class AudioCapCLI {
                 Thread.sleep(forTimeInterval: 0.5)
             }
             
-            // Keep runloop alive
-            CFRunLoopRun()
             
         } catch {
             logger.error("Error starting capture: \(error.localizedDescription)")
@@ -322,6 +370,11 @@ class AudioCapCLI {
     }
 
     func probe(durationMs: Int, emitProbeTone: Bool) {
+        controlQueue.async { self.startProbe(durationMs: durationMs, emitProbeTone: emitProbeTone) }
+        CFRunLoopRun()
+    }
+
+    private func startProbe(durationMs: Int, emitProbeTone: Bool) {
         let queue = DispatchQueue(label: "AudioCapProbeQueue")
         var sawNonZero = false
         do {
@@ -359,15 +412,13 @@ class AudioCapCLI {
                 return
             }
 
-            let start = Date()
-            while Date().timeIntervalSince(start) < Double(durationMs) / 1000.0 {
-                CFRunLoopRunInMode(.defaultMode, 0.05, false)
+            controlQueue.asyncAfter(deadline: .now() + Double(durationMs) / 1000.0) {
+                tap.stop()
+                queue.sync {} // Complete the last probe callback before reading its result.
+                self.stopProbeTone()
+                fputs("{\"status\":\"ok\",\"sawNonZero\":\(sawNonZero)}\n", stderr)
+                exit(sawNonZero ? 0 : 2)
             }
-
-            tap.stop()
-            stopProbeTone()
-            fputs("{\"status\":\"ok\",\"sawNonZero\":\(sawNonZero)}\n", stderr)
-            exit(sawNonZero ? 0 : 2)
         } catch {
             stopProbeTone()
             fputs("{\"status\":\"error\",\"message\":\"\(error.localizedDescription)\"}\n", stderr)
@@ -415,12 +466,6 @@ class AudioCapCLI {
             return false
         }
     }
-}
-
-// Trap signals
-signal(SIGINT) { _ in
-    logger.info("Stopping...")
-    exit(0)
 }
 
 func parseTargetPids(arguments: [String]) -> [Int32] {
@@ -489,7 +534,9 @@ if CommandLine.arguments.contains("--test-stopband") {
             durationMs = parsed
         }
     }
+    cli.installShutdownHandlers()
     cli.probe(durationMs: durationMs, emitProbeTone: !probeSilent)
 } else {
+    cli.installShutdownHandlers()
     cli.start()
 }

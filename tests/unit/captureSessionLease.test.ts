@@ -92,3 +92,36 @@ describe('capture session lease registry', () => {
     expect(registry.activeForOwner(22)).toBeNull();
   });
 });
+
+it('revokes restart admission at terminal stop while preserving tail write authority', () => {
+  const lease = createCaptureSessionLeaseRegistry();
+  lease.acquire('meeting-alpha', 11);
+  expect(lease.requireCaptureStartOwner('meeting-alpha', 11)).toBeTruthy();
+  lease.beginCaptureStop('meeting-alpha', 11);
+  lease.beginCaptureStop('meeting-alpha', 11);
+  expect(() => lease.requireCaptureStartOwner('meeting-alpha', 11)).toThrow(
+    CAPTURE_SESSION_NOT_OWNED,
+  );
+  expect(lease.requireRecordingOwner('meeting-alpha', 11)).toBeTruthy();
+  lease.markStopped('meeting-alpha', 11);
+  lease.release('meeting-alpha', 11);
+  lease.acquire('meeting-beta', 11);
+  expect(() => lease.beginCaptureStop('meeting-alpha', 11)).toThrow(
+    CAPTURE_SESSION_NOT_OWNED,
+  );
+  expect(lease.requireCaptureStartOwner('meeting-beta', 11)).toBeTruthy();
+});
+
+it('releases terminal-stop ownership after persistence failure without releasing another meeting', () => {
+  const registry = createCaptureSessionLeaseRegistry();
+  registry.acquire('failed-save', 1);
+  expect(registry.releaseAfterCaptureStop('failed-save', 1)).toBe(false);
+  registry.beginCaptureStop('failed-save', 1);
+  expect(registry.releaseAfterCaptureStop('failed-save', 2)).toBe(false);
+  expect(registry.releaseAfterCaptureStop('failed-save', 1)).toBe(true);
+  registry.acquire('next-meeting', 1);
+  expect(registry.releaseAfterCaptureStop('failed-save', 1)).toBe(false);
+  expect(registry.requireCaptureStartOwner('next-meeting', 1).meetingId).toBe(
+    'next-meeting',
+  );
+});

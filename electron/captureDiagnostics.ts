@@ -23,7 +23,15 @@ type CaptureEvent =
   | 'raw_write_failed'
   | 'repair_write_failed'
   | 'stopped'
-  | 'owner_destroyed';
+  | 'owner_destroyed'
+  | 'capture_stop_requested'
+  | 'capture_released'
+  | 'capture_release_failed'
+  | 'recorder_stop_timeout'
+  | 'native_stop_requested'
+  | 'native_stop_escalated'
+  | 'native_stop_confirmed'
+  | 'native_stop_failed';
 
 const counter = (value: unknown): number | null =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
@@ -121,6 +129,10 @@ export const createCaptureDiagnostics = (input: {
         'native_write_failed',
         'raw_write_failed',
         'repair_write_failed',
+        'native_stop_failed',
+        'capture_release_failed',
+        'capture_released',
+        'recorder_stop_timeout',
       ].includes(value)
     )
       void flush();

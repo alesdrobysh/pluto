@@ -8,7 +8,9 @@ const TOAST_AUTO_DISMISS_MS = 30_000;
 type UseAutoEndMonitorArgs = {
   isRecording: boolean;
   autoEndEnabled: boolean;
-  stopSessionRef: MutableRefObject<((endReason?: string) => void) | null>;
+  stopSessionRef: MutableRefObject<
+    ((endReason?: string) => Promise<boolean>) | null
+  >;
 };
 
 type AutoEndState = {
@@ -33,6 +35,8 @@ export const useAutoEndMonitor = ({
   const trackedAppRef = useRef<string | null>(null);
   const trackedSourceAppRef = useRef<string | null>(null);
   const pollInFlightRef = useRef(false);
+  const recordingGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
   const dismissTimeoutRef = useRef<number | null>(null);
 
   const clearGraceTimer = useCallback(() => {
@@ -64,6 +68,7 @@ export const useAutoEndMonitor = ({
       return;
     }
 
+    const generation = ++recordingGenerationRef.current;
     let cancelled = false;
     let stopRequested = false;
 
@@ -132,7 +137,7 @@ export const useAutoEndMonitor = ({
             });
 
             graceActiveRef.current = true;
-            const finish = () => {
+            const finish = async () => {
               if (cancelled) return;
               stopRequested = true;
               graceTimerRef.current = null;
@@ -143,20 +148,33 @@ export const useAutoEndMonitor = ({
                 `[AutoEnd] Grace expired, ending session (${endReasonStr})`,
               );
 
+              const appNameAtStop = trackedAppRef.current;
+              let released = false;
+              try {
+                released =
+                  (await stopSessionRef.current?.(endReasonStr)) === true;
+              } catch {
+                /* Failed shutdown is retryable and must not announce success. */
+              }
+              if (!released) {
+                stopRequested = false;
+                return;
+              }
+              if (
+                !mountedRef.current ||
+                recordingGenerationRef.current !== generation
+              )
+                return;
               void window.ipcRenderer.invoke('LOG_AUTO_END_EVENT', {
                 reason_code: 'auto_end_completed',
-                app_name: trackedAppRef.current,
+                app_name: appNameAtStop,
                 grace_seconds: graceSeconds,
               });
-
-              if (stopSessionRef.current) {
-                stopSessionRef.current(endReasonStr);
-              }
 
               setState({
                 autoEndTriggered: true,
                 autoEndReason: reasonCode,
-                autoEndAppName: trackedAppRef.current,
+                autoEndAppName: appNameAtStop,
               });
 
               dismissTimeoutRef.current = window.setTimeout(() => {
@@ -164,7 +182,7 @@ export const useAutoEndMonitor = ({
               }, TOAST_AUTO_DISMISS_MS);
             };
             if (graceMs === 0) {
-              finish();
+              void finish();
             } else {
               graceTimerRef.current = window.setTimeout(finish, graceMs);
             }
@@ -196,7 +214,9 @@ export const useAutoEndMonitor = ({
   }, [isRecording, autoEndEnabled]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       if (dismissTimeoutRef.current !== null) {
         window.clearTimeout(dismissTimeoutRef.current);
       }
