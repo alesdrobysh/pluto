@@ -312,3 +312,9 @@ demo data; the answers are authored examples, not a live model benchmark.
 Capture these browser scenes, never the installed app with a personal profile.
 The People preview currently needs its fixture contract updated before it is
 suitable for marketing captures.
+
+### Recording shutdown checks
+
+`node scripts/verify_recording_shutdown.mjs /tmp/pluto-recording-shutdown.json` runs a disposable Electron host with synthetic audio, real MediaRecorder/AudioContext resources, and an owned helper process. It checks normal shutdown and a suppressed recorder stop event without opening the microphone or the production profile.
+
+`python3 scripts/verify_native_capture_health.py /tmp/pluto-native-health.json` compiles baseline/current AudioCap sources and taps only a muted synthetic playback process. It checks transport continuity and graceful exit; system-audio permission is required. Neither check saves captured audio. These checks supplement, rather than replace, packaged playback/device-route acceptance in the recording shutdown plan.

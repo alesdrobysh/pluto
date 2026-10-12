@@ -190,7 +190,7 @@ describe('AudioManager Parakeet EOU wiring', () => {
 
   it('claims a synchronous start lock before asynchronous readiness', () => {
     const startIndex = source.indexOf('const startSession = async ()');
-    const stopIndex = source.indexOf('const stopSession = async', startIndex);
+    const stopIndex = source.indexOf('const finishSession = async', startIndex);
     const startSession = source.slice(startIndex, stopIndex);
     const guardIndex = source.indexOf(
       "captureLifecycleRef.current.state !== 'idle'",
@@ -263,16 +263,16 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(lifecycleIndex).toBeGreaterThan(recordingStateIndex);
   });
 
-  it('publishes the frozen meeting preview before finalization work', () => {
-    const stopIndex = source.indexOf('const stopSession = async');
+  it('publishes the frozen meeting preview after capture release', () => {
+    const stopIndex = source.indexOf('const finishSession = async');
     const previewIndex = source.indexOf('onFinalizationStarted?.({', stopIndex);
     const recorderStopIndex = source.indexOf(
-      'const micBlob = await stopRecorder',
+      'const stopped = await resourceStop;',
       stopIndex,
     );
 
     expect(previewIndex).toBeGreaterThan(stopIndex);
-    expect(previewIndex).toBeLessThan(recorderStopIndex);
+    expect(previewIndex).toBeGreaterThan(recorderStopIndex);
   });
 
   it('does not synthesize silent PCM for empty system intervals and preserves truthful missing evidence', () => {

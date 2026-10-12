@@ -92,3 +92,22 @@ describe('capture session lease registry', () => {
     expect(registry.activeForOwner(22)).toBeNull();
   });
 });
+
+it('revokes restart admission at terminal stop while preserving tail write authority', () => {
+  const lease = createCaptureSessionLeaseRegistry();
+  lease.acquire('meeting-alpha', 11);
+  expect(lease.requireCaptureStartOwner('meeting-alpha', 11)).toBeTruthy();
+  lease.beginCaptureStop('meeting-alpha', 11);
+  lease.beginCaptureStop('meeting-alpha', 11);
+  expect(() => lease.requireCaptureStartOwner('meeting-alpha', 11)).toThrow(
+    CAPTURE_SESSION_NOT_OWNED,
+  );
+  expect(lease.requireRecordingOwner('meeting-alpha', 11)).toBeTruthy();
+  lease.markStopped('meeting-alpha', 11);
+  lease.release('meeting-alpha', 11);
+  lease.acquire('meeting-beta', 11);
+  expect(() => lease.beginCaptureStop('meeting-alpha', 11)).toThrow(
+    CAPTURE_SESSION_NOT_OWNED,
+  );
+  expect(lease.requireCaptureStartOwner('meeting-beta', 11)).toBeTruthy();
+});

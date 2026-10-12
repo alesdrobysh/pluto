@@ -61,7 +61,7 @@ describe('capture session production ownership boundary', () => {
       "'AUDIO_SAVE_AND_CONVERT'",
     );
 
-    expect(nativeStartHandler).toContain('recordingForOwner(');
+    expect(nativeStartHandler).toContain('requireCaptureStartOwner(');
     expect(nativeStartHandler).toContain(
       "captureOwner.send('NATIVE_AUDIO_CHUNK', chunk, Date.now())",
     );
@@ -78,7 +78,9 @@ describe('capture session production ownership boundary', () => {
 
   it('releases an owner whose webContents is destroyed', () => {
     expect(main).toContain("owner.once('destroyed'");
-    expect(main).toContain('captureSessionLease.releaseOwner(owner.id)');
+    expect(main).toContain("owner.once('render-process-gone'");
+    expect(main).toContain('captureSessionLease.beginCaptureStop(');
+    expect(main).toContain('captureSessionLease.release(');
   });
 
   it('releases an unstarted capture after microphone setup fails', () => {
@@ -122,7 +124,7 @@ describe('capture session production ownership boundary', () => {
     const startSession = sliceBetween(
       audioManager,
       'const startSession = async (',
-      'const stopSession = async (',
+      'const finishSession = async (',
     );
     const conflictIndex = startSession.indexOf(
       'isCaptureSessionAlreadyActiveError(journalErr)',

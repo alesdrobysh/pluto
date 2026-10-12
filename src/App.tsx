@@ -445,7 +445,9 @@ function App() {
   }, []);
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
-  const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
+  const stopSessionRef = useRef<
+    ((endReason?: string) => Promise<boolean>) | null
+  >(null);
   const startSessionRef = useRef<
     ((event?: CalendarEvent) => Promise<CaptureStartResult>) | null
   >(null);
