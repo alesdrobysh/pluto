@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   UpdateApplyResult,
   UpdateInfo,
@@ -60,16 +60,27 @@ export const useAppUpdate = () => {
     checkedAt: Date.now(),
   });
   const [isChecking, setIsChecking] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
+  const [requestPending, setRequestPending] = useState(false);
+  const requestRef = useRef(false);
+  const statusRevisionRef = useRef(0);
+  const activePhase = status.update?.phase;
+  const isUpdating =
+    requestPending ||
+    (!!activePhase && activePhase !== 'failed' && activePhase !== 'complete');
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    getUpdateStatus().then((initial) => {
-      if (mounted && initial) setStatus(initial);
-    });
+    let receivedStatus = false;
+    getUpdateStatus()
+      .then((initial) => {
+        if (mounted && !receivedStatus && initial) setStatus(initial);
+      })
+      .catch(() => {});
 
     const unsubscribe = subscribeToUpdateStatus((newStatus) => {
+      receivedStatus = true;
+      statusRevisionRef.current += 1;
       if (mounted) setStatus(newStatus);
     });
 
@@ -84,23 +95,32 @@ export const useAppUpdate = () => {
   const handleCheckNow = async () => {
     setIsChecking(true);
     try {
+      const revision = statusRevisionRef.current;
       const result = await checkForUpdates();
-      setStatus(result);
+      if (revision === statusRevisionRef.current) setStatus(result);
     } finally {
       setIsChecking(false);
     }
   };
 
   const handleApplyUpdate = async () => {
+    if (requestRef.current || isUpdating) return;
+    requestRef.current = true;
     setUpdateError(null);
-    setIsUpdating(true);
+    setRequestPending(true);
     try {
       const result = await applyUpdate();
       if (!result.started) setUpdateError(result.error);
+      else {
+        const revision = statusRevisionRef.current;
+        const latest = await getUpdateStatus();
+        if (revision === statusRevisionRef.current) setStatus(latest);
+      }
     } catch (error) {
       setUpdateError(error instanceof Error ? error.message : String(error));
     } finally {
-      setIsUpdating(false);
+      requestRef.current = false;
+      setRequestPending(false);
     }
   };
 
@@ -108,7 +128,8 @@ export const useAppUpdate = () => {
     status,
     isChecking,
     isUpdating,
-    updateError,
+    updateError:
+      status.update?.phase === 'failed' ? status.update.message : updateError,
     checkNow: handleCheckNow,
     applyUpdate: handleApplyUpdate,
     openReleaseUrl,
