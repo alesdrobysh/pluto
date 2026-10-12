@@ -3241,6 +3241,32 @@ app.whenReady().then(async () => {
     },
   );
 
+  ipcMain.handle(
+    'AUDIO_CAPTURE_RELEASE_AFTER_FAILURE',
+    async (event, { meetingId } = {}) => {
+      const active = captureSessionLease.activeForOwner(event.sender.id);
+      if (active?.meetingId !== meetingId || nativeAudioProcess) return false;
+      await stopParakeetLiveRecording(meetingId);
+      if (
+        !captureSessionLease.releaseAfterCaptureStop(meetingId, event.sender.id)
+      )
+        return false;
+      // Preserve the journal unchanged for recovery; this releases runtime ownership only.
+      liveMeetingContextIndex.flush(meetingId);
+      liveMeetingContextIndex.clear(meetingId, { retainCheckpoint: true });
+      incrementalNotesCoordinator.cancel(meetingId);
+      knowledgeSynthesisPause.release('capture');
+      if (
+        captureDiagnosticSession &&
+        captureDiagnosticSession.meetingId === meetingId
+      ) {
+        void captureDiagnosticSession.report.stop();
+        captureDiagnosticSession = null;
+      }
+      return true;
+    },
+  );
+
   ipcMain.handle('AUDIO_CAPTURE_JOURNAL_STOP', async (event, request = {}) => {
     const normalizedMeetingId = String(request.meetingId || '');
     captureSessionLease.requireRecordingOwner(

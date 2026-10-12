@@ -2653,6 +2653,28 @@ export const AudioManager = ({
         setIsProcessing(false);
       }
       if (resourcesReleased && !captureOwnershipReleased) {
+        // Failed sealing must preserve the journal without poisoning the next
+        // recording. Settle admitted writes before surrendering write authority.
+        await Promise.allSettled([
+          Promise.resolve().then(() =>
+            captureActivitySessionRef.current?.drain(),
+          ),
+          Promise.resolve().then(() =>
+            captureJournalMutationCoordinatorRef.current.drain(),
+          ),
+        ]);
+        try {
+          await window.ipcRenderer.invoke(
+            'AUDIO_CAPTURE_RELEASE_AFTER_FAILURE',
+            {
+              meetingId: stopSnapshot.meetingId,
+            },
+          );
+        } catch {
+          console.warn(
+            '[Pluto] Failed to release capture ownership for recovery',
+          );
+        }
         stopInFlightRef.current = false;
         stopToValidatedLatencyRef.current =
           createStopToValidatedLatencyAccumulator();

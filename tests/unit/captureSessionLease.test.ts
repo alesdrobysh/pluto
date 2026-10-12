@@ -111,3 +111,17 @@ it('revokes restart admission at terminal stop while preserving tail write autho
   );
   expect(lease.requireCaptureStartOwner('meeting-beta', 11)).toBeTruthy();
 });
+
+it('releases terminal-stop ownership after persistence failure without releasing another meeting', () => {
+  const registry = createCaptureSessionLeaseRegistry();
+  registry.acquire('failed-save', 1);
+  expect(registry.releaseAfterCaptureStop('failed-save', 1)).toBe(false);
+  registry.beginCaptureStop('failed-save', 1);
+  expect(registry.releaseAfterCaptureStop('failed-save', 2)).toBe(false);
+  expect(registry.releaseAfterCaptureStop('failed-save', 1)).toBe(true);
+  registry.acquire('next-meeting', 1);
+  expect(registry.releaseAfterCaptureStop('failed-save', 1)).toBe(false);
+  expect(registry.requireCaptureStartOwner('next-meeting', 1).meetingId).toBe(
+    'next-meeting',
+  );
+});

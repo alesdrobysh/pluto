@@ -93,6 +93,17 @@ export const createCaptureSessionLeaseRegistry = () => {
       return true;
     },
 
+    releaseAfterCaptureStop(meetingId: string, ownerId: number) {
+      if (
+        !captureStopRequested ||
+        active?.meetingId !== meetingId ||
+        active.ownerId !== ownerId
+      )
+        return false;
+      active = null;
+      return true;
+    },
+
     releaseOwner(ownerId: number) {
       if (active?.ownerId !== ownerId) return null;
       const released = { ...active };
