@@ -41,14 +41,21 @@ print(String(data: try JSONSerialization.data(withJSONObject: result), encoding:
 `,
     );
     const executable = join(directory, 'test');
-    execFileSync('xcrun', [
-      'swiftc',
-      'resources/swift/audiocap/ProcessTap.swift',
-      harness,
-      '-o',
-      executable,
-    ]);
-    const result = JSON.parse(execFileSync(executable, { encoding: 'utf8' }));
+    // Cold Swift compilation on CI can exceed Vitest's five-second default.
+    execFileSync(
+      'xcrun',
+      [
+        'swiftc',
+        'resources/swift/audiocap/ProcessTap.swift',
+        harness,
+        '-o',
+        executable,
+      ],
+      { timeout: 30_000 },
+    );
+    const result = JSON.parse(
+      execFileSync(executable, { encoding: 'utf8', timeout: 5_000 }),
+    );
     expect(result).toEqual({
       global: true,
       exclusions: [41, 42],
@@ -65,4 +72,4 @@ print(String(data: try JSONSerialization.data(withJSONObject: result), encoding:
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, 40_000);
