@@ -48,7 +48,13 @@ export type DeparturePhase =
 export type DepartureSession = { meetingId: string; generation: string };
 export type DepartureStopRequest = DepartureSession & {
   requestId: string;
-  reason: 'app_terminated' | 'ui_departure' | 'tab_closed' | 'user_confirmed' | 'calendar_quiet_timeout' | 'calendar_user_confirmed';
+  reason:
+    | 'app_terminated'
+    | 'ui_departure'
+    | 'tab_closed'
+    | 'user_confirmed'
+    | 'calendar_quiet_timeout'
+    | 'calendar_user_confirmed';
   provider: DepartureProvider | null;
   sourceId: string | null;
   appName: string | null;

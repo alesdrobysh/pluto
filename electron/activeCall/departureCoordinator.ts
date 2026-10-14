@@ -102,7 +102,10 @@ export class DepartureCoordinator {
     this.lastObservation = now;
     // An OS termination notification for the bound application instance is
     // positive departure evidence even if an unrelated audio read failed.
-    if (this.status.source && snapshot.terminated.includes(this.status.source.id)) {
+    if (
+      this.status.source &&
+      snapshot.terminated.includes(this.status.source.id)
+    ) {
       this.requestStop('app_terminated');
       return;
     }
@@ -309,7 +312,13 @@ export class DepartureCoordinator {
     this.log('user_kept_recording');
   }
   requestStop(
-    reason: 'app_terminated' | 'ui_departure' | 'tab_closed' | 'user_confirmed' | 'calendar_quiet_timeout' | 'calendar_user_confirmed',
+    reason:
+      | 'app_terminated'
+      | 'ui_departure'
+      | 'tab_closed'
+      | 'user_confirmed'
+      | 'calendar_quiet_timeout'
+      | 'calendar_user_confirmed',
   ) {
     if (this.claimed || this.status.stop || this.status.phase === 'stopped')
       return;

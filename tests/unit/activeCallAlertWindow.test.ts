@@ -271,7 +271,14 @@ describe('activeCallAlertWindow', () => {
     const endedWindow = vi.mocked(BrowserWindow).mock.results.at(-1)?.value;
     expect(endedWindow.loadFile).toHaveBeenCalledWith(
       expect.stringContaining('active-call-alert.html'),
-      { query: { type: 'ended', detail: 'Meet tab closed', durationMs: '30000', theme: 'dark' } },
+      {
+        query: {
+          type: 'ended',
+          detail: 'Meet tab closed',
+          durationMs: '30000',
+          theme: 'dark',
+        },
+      },
     );
     const check = createActiveCallAlertController({
       preloadPath: '/preload.js',

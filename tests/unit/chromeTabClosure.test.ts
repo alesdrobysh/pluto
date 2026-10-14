@@ -38,8 +38,12 @@ describe('exact Chrome Meet tab closure', () => {
     const open = snapshot([{ id: 'tab-1', meetingKey: callKey }]);
     expect(tracker.observe(open, 'chrome-instance', 0)).toBe('unknown');
     expect(tracker.observe(open, 'chrome-instance', 1_000)).toBe('unknown');
-    expect(tracker.observe(open, 'chrome-instance', 2_000, true)).toBe('unknown');
-    expect(tracker.observe(open, 'chrome-instance', 2_999, true)).toBe('unknown');
+    expect(tracker.observe(open, 'chrome-instance', 2_000, true)).toBe(
+      'unknown',
+    );
+    expect(tracker.observe(open, 'chrome-instance', 2_999, true)).toBe(
+      'unknown',
+    );
     expect(tracker.observe(open, 'chrome-instance', 3_000, true)).toBe('bound');
     expect(tracker.tracking).toBe(true);
     expect(tracker.observe(open, 'chrome-instance', 4_000)).toBe('unknown');
@@ -102,7 +106,9 @@ describe('exact Chrome Meet tab closure', () => {
     const replaced = new ChromeTabClosureTracker();
     replaced.observe(open, 'chrome-instance', 0, true);
     replaced.observe(open, 'chrome-instance', 1_000, true);
-    expect(replaced.observe(snapshot([]), 'chrome-instance', 2_000)).toBe('unknown');
+    expect(replaced.observe(snapshot([]), 'chrome-instance', 2_000)).toBe(
+      'unknown',
+    );
     expect(
       replaced.observe(
         snapshot([{ id: 'next-tab', meetingKey: 'another-meeting' }]),
@@ -111,6 +117,8 @@ describe('exact Chrome Meet tab closure', () => {
       ),
     ).toBe('unknown');
     expect(replaced.tracking).toBe(false);
-    expect(replaced.observe(snapshot([]), 'chrome-instance', 5_000)).toBe('unknown');
+    expect(replaced.observe(snapshot([]), 'chrome-instance', 5_000)).toBe(
+      'unknown',
+    );
   });
 });

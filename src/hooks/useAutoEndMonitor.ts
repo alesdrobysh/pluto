@@ -111,10 +111,11 @@ export const useAutoEndMonitor = ({
         if (released && accepted && latestMeeting.current === meetingId) {
           let external = false;
           try {
-            external = await window.ipcRenderer.invoke('SHOW_MEETING_ENDED_ALERT', {
-              reason: request.reason,
-              appName: request.appName,
-            }) === true;
+            external =
+              (await window.ipcRenderer.invoke('SHOW_MEETING_ENDED_ALERT', {
+                reason: request.reason,
+                appName: request.appName,
+              })) === true;
           } catch {
             /* Fall back to the in-app notice. */
           }
@@ -123,10 +124,16 @@ export const useAutoEndMonitor = ({
           } else {
             setToast({ reason: request.reason, appName: request.appName });
             if (toastTimer.current) clearTimeout(toastTimer.current);
-            toastTimer.current = setTimeout(() => {
-              toastTimer.current = null;
-              setToast(null);
-            }, request.reason === 'calendar_quiet_timeout' || request.reason === 'calendar_user_confirmed' ? 30_000 : 8_000);
+            toastTimer.current = setTimeout(
+              () => {
+                toastTimer.current = null;
+                setToast(null);
+              },
+              request.reason === 'calendar_quiet_timeout' ||
+                request.reason === 'calendar_user_confirmed'
+                ? 30_000
+                : 8_000,
+            );
           }
         }
       } catch {
@@ -156,7 +163,13 @@ export const useAutoEndMonitor = ({
       off();
       if (!executing) end();
     };
-  }, [isRecording, meetingId, autoEndEnabled, stopSessionRef, dismissAutoEndToast]);
+  }, [
+    isRecording,
+    meetingId,
+    autoEndEnabled,
+    stopSessionRef,
+    dismissAutoEndToast,
+  ]);
 
   useEffect(
     () => () => {

@@ -29,7 +29,12 @@ export const createActiveCallAlertController = ({
   rendererDist,
 }: ActiveCallAlertControllerOptions) => {
   let activeCallAlertWin: BrowserWindow | null = null;
-  let currentAlertType: 'call' | 'calendar' | 'ended' | 'calendar-end-check' | null = null;
+  let currentAlertType:
+    | 'call'
+    | 'calendar'
+    | 'ended'
+    | 'calendar-end-check'
+    | null = null;
   let loadedAlertWin: BrowserWindow | null = null;
 
   const enforceAlertBounds = (win: BrowserWindow, x: number, y: number) => {
@@ -238,9 +243,12 @@ export const createActiveCallAlertController = ({
         url.searchParams.set(key, value);
       void alertWin.loadURL(url.toString());
     } else {
-      void alertWin.loadFile(path.join(rendererDist, 'active-call-alert.html'), {
-        query,
-      });
+      void alertWin.loadFile(
+        path.join(rendererDist, 'active-call-alert.html'),
+        {
+          query,
+        },
+      );
     }
   };
 
@@ -254,9 +262,12 @@ export const createActiveCallAlertController = ({
         url.searchParams.set(key, value);
       void alertWin.loadURL(url.toString());
     } else {
-      void alertWin.loadFile(path.join(rendererDist, 'active-call-alert.html'), {
-        query,
-      });
+      void alertWin.loadFile(
+        path.join(rendererDist, 'active-call-alert.html'),
+        {
+          query,
+        },
+      );
     }
   };
 

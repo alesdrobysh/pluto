@@ -17,10 +17,7 @@ vi.mock('electron', () => ({
 }));
 vi.mock('../../electron/activeCall/nativeCallMonitor', () => ({
   NativeCallMonitor: class {
-    constructor(
-      _executable: string,
-      activity: (snapshot: unknown) => void,
-    ) {
+    constructor(_executable: string, activity: (snapshot: unknown) => void) {
       mocks.activity = activity;
     }
     start() {
@@ -179,7 +176,9 @@ describe('departure IPC authority', () => {
         });
         await vi.advanceTimersByTimeAsync(1_000);
         if (sequence === 9)
-          expect((owner.send.mock.lastCall?.[1] as DepartureStatus).stop).toBeNull();
+          expect(
+            (owner.send.mock.lastCall?.[1] as DepartureStatus).stop,
+          ).toBeNull();
         if (sequence === 10) tabs = [];
       }
       const status = owner.send.mock.lastCall?.[1] as DepartureStatus;
@@ -198,7 +197,8 @@ describe('departure IPC authority', () => {
     let tabs = [{ id: 'tab-1', meetingKey: 'meeting-key' }];
     const service = registerDepartureService({
       executable: () => '/private/tmp/audiocap',
-      getSetting: (name) => name === 'browser_call_detection_enabled' ? 'true' : null,
+      getSetting: (name) =>
+        name === 'browser_call_detection_enabled' ? 'true' : null,
       setSetting: () => undefined,
       requireRecordingOwner: () => undefined,
       requireCaptureStartOwner: () => undefined,
@@ -215,16 +215,18 @@ describe('departure IPC authority', () => {
           sequence,
           healthy: true,
           discontinuity: false,
-          sources: [{
-            id: 'com.google.Chrome:100:launch',
-            bundleId: 'com.google.Chrome',
-            pid: 100,
-            name: 'Google Chrome',
-            version: '155',
-            input: false,
-            output: false,
-            audioGeneration: 'audio-1',
-          }],
+          sources: [
+            {
+              id: 'com.google.Chrome:100:launch',
+              bundleId: 'com.google.Chrome',
+              pid: 100,
+              name: 'Google Chrome',
+              version: '155',
+              input: false,
+              output: false,
+              audioGeneration: 'audio-1',
+            },
+          ],
           terminated: [],
         });
         await vi.advanceTimersByTimeAsync(1_000);
@@ -243,7 +245,8 @@ describe('departure IPC authority', () => {
     const inspectBrowserTabs = vi.fn(async () => ({ healthy: true, tabs: [] }));
     const service = registerDepartureService({
       executable: () => '/private/tmp/audiocap',
-      getSetting: (name) => name === 'browser_call_detection_enabled' ? 'true' : null,
+      getSetting: (name) =>
+        name === 'browser_call_detection_enabled' ? 'true' : null,
       setSetting: () => undefined,
       requireRecordingOwner: () => undefined,
       requireCaptureStartOwner: () => undefined,
@@ -254,19 +257,32 @@ describe('departure IPC authority', () => {
       call<DepartureStatus>(IPC.begin, 'meeting-unverified-tab');
       for (let sequence = 1; sequence <= 8; sequence++) {
         mocks.activity?.({
-          kind: 'activity', version: 1, epoch: 'helper-1', sequence,
-          healthy: true, discontinuity: false,
-          sources: [{
-            id: 'com.google.Chrome:100:launch', bundleId: 'com.google.Chrome',
-            pid: 100, name: 'Google Chrome', version: '155',
-            input: true, output: true, audioGeneration: 'audio-1',
-          }],
+          kind: 'activity',
+          version: 1,
+          epoch: 'helper-1',
+          sequence,
+          healthy: true,
+          discontinuity: false,
+          sources: [
+            {
+              id: 'com.google.Chrome:100:launch',
+              bundleId: 'com.google.Chrome',
+              pid: 100,
+              name: 'Google Chrome',
+              version: '155',
+              input: true,
+              output: true,
+              audioGeneration: 'audio-1',
+            },
+          ],
           terminated: [],
         });
         await vi.advanceTimersByTimeAsync(1_000);
       }
       expect(inspectBrowserTabs).not.toHaveBeenCalled();
-      expect((owner.send.mock.lastCall?.[1] as DepartureStatus).stop).toBeNull();
+      expect(
+        (owner.send.mock.lastCall?.[1] as DepartureStatus).stop,
+      ).toBeNull();
     } finally {
       service.stop();
     }
@@ -309,18 +325,29 @@ describe('departure IPC authority', () => {
           source.output = false;
         }
         mocks.activity?.({
-          kind: 'activity', version: 1, epoch: 'helper-1', sequence: second,
-          healthy: true, discontinuity: false, sources: [source], terminated: [],
+          kind: 'activity',
+          version: 1,
+          epoch: 'helper-1',
+          sequence: second,
+          healthy: true,
+          discontinuity: false,
+          sources: [source],
+          terminated: [],
         });
         await vi.advanceTimersByTimeAsync(1_000);
       }
       const status = owner.send.mock.lastCall?.[1] as DepartureStatus;
       expect(onCalendarCheck).toHaveBeenCalledWith(
-        expect.objectContaining({ meetingId: 'calendar-meeting' }), true,
+        expect.objectContaining({ meetingId: 'calendar-meeting' }),
+        true,
       );
       expect(status.stop?.reason).toBe('calendar_quiet_timeout');
-      expect(call<boolean>(IPC.claim, session, status.stop?.requestId)).toBe(true);
-      expect(call<boolean>(IPC.acknowledge, session, status.stop?.requestId, true)).toBe(true);
+      expect(call<boolean>(IPC.claim, session, status.stop?.requestId)).toBe(
+        true,
+      );
+      expect(
+        call<boolean>(IPC.acknowledge, session, status.stop?.requestId, true),
+      ).toBe(true);
     } finally {
       service.stop();
     }
@@ -349,8 +376,13 @@ describe('departure IPC authority', () => {
     try {
       call<DepartureStatus>(IPC.begin, 'calendar-warning-lost');
       const source = {
-        id: 'us.zoom.xos:100:launch', bundleId: 'us.zoom.xos', pid: 100,
-        name: 'Zoom', version: '1', input: true, output: true,
+        id: 'us.zoom.xos:100:launch',
+        bundleId: 'us.zoom.xos',
+        pid: 100,
+        name: 'Zoom',
+        version: '1',
+        input: true,
+        output: true,
         audioGeneration: 'audio-1',
       };
       for (let second = 1; second <= 150; second++) {
@@ -359,18 +391,28 @@ describe('departure IPC authority', () => {
           source.output = false;
         }
         mocks.activity?.({
-          kind: 'activity', version: 1, epoch: 'helper-1', sequence: second,
-          healthy: true, discontinuity: false, sources: [source], terminated: [],
+          kind: 'activity',
+          version: 1,
+          epoch: 'helper-1',
+          sequence: second,
+          healthy: true,
+          discontinuity: false,
+          sources: [source],
+          terminated: [],
         });
         await vi.advanceTimersByTimeAsync(1_000);
       }
       expect(onCalendarCheck).toHaveBeenCalledWith(
-        expect.objectContaining({ meetingId: 'calendar-warning-lost' }), true,
+        expect.objectContaining({ meetingId: 'calendar-warning-lost' }),
+        true,
       );
       expect(onCalendarCheck).toHaveBeenCalledWith(
-        expect.objectContaining({ meetingId: 'calendar-warning-lost' }), false,
+        expect.objectContaining({ meetingId: 'calendar-warning-lost' }),
+        false,
       );
-      expect((owner.send.mock.lastCall?.[1] as DepartureStatus).stop).toBeNull();
+      expect(
+        (owner.send.mock.lastCall?.[1] as DepartureStatus).stop,
+      ).toBeNull();
     } finally {
       service.stop();
     }

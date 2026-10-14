@@ -3614,43 +3614,58 @@ app.whenReady().then(async () => {
       if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id)
         return false;
       const reason = payload?.reason;
-      const detail = reason === 'tab_closed'
-        ? 'Meet tab closed'
-        : reason === 'calendar_quiet_timeout' || reason === 'calendar_user_confirmed'
-          ? 'Calendar ended; no call audio'
-          : reason === 'ui_departure'
-            ? 'Call departure confirmed'
-            : reason === 'app_terminated'
-              ? `${String(payload?.appName || 'Call app').slice(0, 60)} closed`
-              : 'Recording saved';
+      const detail =
+        reason === 'tab_closed'
+          ? 'Meet tab closed'
+          : reason === 'calendar_quiet_timeout' ||
+              reason === 'calendar_user_confirmed'
+            ? 'Calendar ended; no call audio'
+            : reason === 'ui_departure'
+              ? 'Call departure confirmed'
+              : reason === 'app_terminated'
+                ? `${String(payload?.appName || 'Call app').slice(0, 60)} closed`
+                : 'Recording saved';
       activeCallAlertController.showMeetingEnded(
         detail,
-        reason === 'calendar_quiet_timeout' || reason === 'calendar_user_confirmed' ? 30_000 : 8_000,
+        reason === 'calendar_quiet_timeout' ||
+          reason === 'calendar_user_confirmed'
+          ? 30_000
+          : 8_000,
         db.getSetting('theme') || 'system',
         win.getBounds(),
       );
       return true;
     },
   );
-  ipcMain.on('MEETING_ENDED_ALERT_ACTION', (event, payload?: { action?: string }) => {
-    if (!activeCallAlertController.owns(event.sender.id, 'ended')) return;
-    if (payload?.action === 'reopen' && win && !win.isDestroyed()) {
-      if (!win.isVisible()) win.show();
-      win.focus();
-      win.webContents.send('MEETING_ENDED_REOPEN');
-    }
-    activeCallAlertController.close();
-  });
-  ipcMain.on('CALENDAR_END_CHECK_ACTION', (event, payload?: { action?: string }) => {
-    if (
-      !activeCallAlertController.owns(event.sender.id, 'calendar-end-check') ||
-      !calendarCheckSession
-    ) return;
-    if (payload?.action === 'keep')
-      departureService.keepCalendarCheck(calendarCheckSession);
-    else if (payload?.action === 'end')
-      departureService.endCalendarCheck(calendarCheckSession);
-  });
+  ipcMain.on(
+    'MEETING_ENDED_ALERT_ACTION',
+    (event, payload?: { action?: string }) => {
+      if (!activeCallAlertController.owns(event.sender.id, 'ended')) return;
+      if (payload?.action === 'reopen' && win && !win.isDestroyed()) {
+        if (!win.isVisible()) win.show();
+        win.focus();
+        win.webContents.send('MEETING_ENDED_REOPEN');
+      }
+      activeCallAlertController.close();
+    },
+  );
+  ipcMain.on(
+    'CALENDAR_END_CHECK_ACTION',
+    (event, payload?: { action?: string }) => {
+      if (
+        !activeCallAlertController.owns(
+          event.sender.id,
+          'calendar-end-check',
+        ) ||
+        !calendarCheckSession
+      )
+        return;
+      if (payload?.action === 'keep')
+        departureService.keepCalendarCheck(calendarCheckSession);
+      else if (payload?.action === 'end')
+        departureService.endCalendarCheck(calendarCheckSession);
+    },
+  );
 
   ipcMain.on(
     'CALENDAR_PROMPT_ALERT_ACTION',

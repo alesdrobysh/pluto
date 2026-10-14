@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { type WebContents, ipcMain, shell } from 'electron';
 import {
+  ChromeTabClosureTracker,
+  type ChromeTabSnapshot,
+  inspectChromeTabs,
+} from './chromeTabClosure';
+import {
   ACCEPTED_DEPARTURE_LAYOUTS,
   inspectDeparture,
   providerForBundle,
   safeLayout,
 } from './departureAdapters';
-import {
-  ChromeTabClosureTracker,
-  type ChromeTabSnapshot,
-  inspectChromeTabs,
-} from './chromeTabClosure';
 import { DepartureCoordinator } from './departureCoordinator';
 import { type DepartureSession, DEPARTURE_IPC as IPC } from './departureTypes';
 import { NativeCallMonitor } from './nativeCallMonitor';
@@ -50,7 +50,12 @@ export function registerDepartureService(deps: {
     diagnosticCount: number;
   } | null = null;
   const diagnostic = (code: string) => {
-    if (!current || current.diagnosticCount >= 24 || current.lastDiagnosticCode === code) return;
+    if (
+      !current ||
+      current.diagnosticCount >= 24 ||
+      current.lastDiagnosticCode === code
+    )
+      return;
     current.lastDiagnosticCode = code;
     current.diagnosticCount++;
     deps.log({ reason_code: `departure_probe:${code}` });
@@ -121,7 +126,8 @@ export function registerDepartureService(deps: {
         if (
           source?.bundleId === 'com.google.Chrome' &&
           (source.input === true || source.output === true)
-        ) current!.chromeAudioObserved = true;
+        )
+          current!.chromeAudioObserved = true;
         publish();
       },
       () => {
@@ -140,7 +146,8 @@ export function registerDepartureService(deps: {
         stop();
         return;
       }
-      let calendar: ReturnType<NonNullable<typeof deps.getCalendarEvent>> = null;
+      let calendar: ReturnType<NonNullable<typeof deps.getCalendarEvent>> =
+        null;
       try {
         calendar = deps.getCalendarEvent?.(meetingId) ?? null;
       } catch {
@@ -149,10 +156,14 @@ export function registerDepartureService(deps: {
       const start = calendar ? Date.parse(calendar.start) : Number.NaN;
       const end = calendar ? Date.parse(calendar.end) : Number.NaN;
       coordinator.setCalendarEnd(
-        calendar && !calendar.isAllDay && !calendar.isCancelled &&
-          Number.isFinite(start) && Number.isFinite(end) &&
+        calendar &&
+          !calendar.isAllDay &&
+          !calendar.isCancelled &&
+          Number.isFinite(start) &&
+          Number.isFinite(end) &&
           start <= active.startedAt + 15 * 60_000 &&
-          end > active.startedAt && end > start &&
+          end > active.startedAt &&
+          end > start &&
           end - start <= 8 * 60 * 60_000
           ? end
           : null,
@@ -163,7 +174,10 @@ export function registerDepartureService(deps: {
         active.calendarCheckShown = checkShown;
         active.calendarCheckStartedAt = checkShown ? performance.now() : null;
         try {
-          if (deps.onCalendarCheck?.(coordinator.status, checkShown) !== true && checkShown) {
+          if (
+            deps.onCalendarCheck?.(coordinator.status, checkShown) !== true &&
+            checkShown
+          ) {
             coordinator.keepRecording();
             active.calendarCheckShown = false;
             diagnostic('calendar_warning_unavailable');
@@ -198,8 +212,7 @@ export function registerDepartureService(deps: {
       if (!browserTrackingEnabled) {
         tabTracker.reset();
         active.chromeAudioObserved = false;
-      }
-      else if (!active.tabInspecting && !coordinator.status.stop) {
+      } else if (!active.tabInspecting && !coordinator.status.stop) {
         active.tabInspecting = true;
         const revision = coordinator.revision();
         void (deps.inspectBrowserTabs ?? inspectChromeTabs)()
@@ -213,11 +226,11 @@ export function registerDepartureService(deps: {
             )
               return;
             const observation = tabTracker.observe(
-                snapshot,
-                source.id,
-                performance.now(),
-                active.chromeAudioObserved,
-              );
+              snapshot,
+              source.id,
+              performance.now(),
+              active.chromeAudioObserved,
+            );
             if (!snapshot.healthy) diagnostic('browser_inspection_unavailable');
             if (observation === 'bound') diagnostic('meet_tab_bound');
             if (observation === 'closed') {
@@ -246,11 +259,7 @@ export function registerDepartureService(deps: {
       coordinator.status.inspection = accepted
         ? 'ready'
         : 'awaiting_acceptance';
-      if (
-        !accepted ||
-        active.inspecting ||
-        !coordinator.inspectionDue()
-      )
+      if (!accepted || active.inspecting || !coordinator.inspectionDue())
         return;
       active.inspecting = true;
       const revision = coordinator.revision();

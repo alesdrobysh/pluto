@@ -82,7 +82,11 @@ describe('ActiveCallAlertWindow component', () => {
   });
 
   it('shows the ended notice with a Reopen action', async () => {
-    window.history.replaceState({}, '', '/?type=ended&detail=Meet+tab+closed&durationMs=30000');
+    window.history.replaceState(
+      {},
+      '',
+      '/?type=ended&detail=Meet+tab+closed&durationMs=30000',
+    );
     const root = createRoot(container);
     await act(async () => root.render(<ActiveCallAlertWindow />));
     expect(container.textContent).toContain('Meeting ended');

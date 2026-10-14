@@ -433,11 +433,15 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     return event;
   };
 
-  const getPendingRecordingEvent = (meetingId: string): CalendarEvent | null => {
+  const getPendingRecordingEvent = (
+    meetingId: string,
+  ): CalendarEvent | null => {
     const row = sql
-      .prepare('SELECT event_json FROM meeting_calendar_pending_selection WHERE meeting_id = ?')
+      .prepare(
+        'SELECT event_json FROM meeting_calendar_pending_selection WHERE meeting_id = ?',
+      )
       .get(meetingId) as EventRow | undefined;
-    return row ? JSON.parse(row.event_json) as CalendarEvent : null;
+    return row ? (JSON.parse(row.event_json) as CalendarEvent) : null;
   };
 
   const applyRecordingSelection = (

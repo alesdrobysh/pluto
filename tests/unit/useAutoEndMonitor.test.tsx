@@ -84,8 +84,16 @@ function setup(stop: (reason?: string) => Promise<boolean>, external = false) {
       await Promise.resolve();
     });
   };
-  return { root, Harness, emit, invoke, getHook: () => hook, reopen,
-    triggerReopen: () => listeners.get('MEETING_ENDED_REOPEN')?.(null, baseStatus) };
+  return {
+    root,
+    Harness,
+    emit,
+    invoke,
+    getHook: () => hook,
+    reopen,
+    triggerReopen: () =>
+      listeners.get('MEETING_ENDED_REOPEN')?.(null, baseStatus),
+  };
 }
 
 afterEach(() => {
@@ -153,7 +161,10 @@ describe('useAutoEndMonitor bridge', () => {
 
   it('shows an external notice after release and routes Reopen back to Pluto', async () => {
     const { root, Harness, emit, invoke, getHook, reopen, triggerReopen } =
-      setup(vi.fn(async () => true), true);
+      setup(
+        vi.fn(async () => true),
+        true,
+      );
     await act(async () => root.render(createElement(Harness)));
     await emit(confirmed());
     expect(invoke).toHaveBeenCalledWith('SHOW_MEETING_ENDED_ALERT', {

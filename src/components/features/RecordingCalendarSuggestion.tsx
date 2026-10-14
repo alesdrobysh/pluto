@@ -33,7 +33,11 @@ export const RecordingCalendarSuggestion = ({
     className="mb-6 shrink-0 rounded-xl border border-pro-accent/25 bg-pro-accent/10 p-3 text-pro-text-main"
   >
     <div className="flex items-center gap-2">
-      <Sparkles aria-hidden="true" size={16} className="shrink-0 text-pro-accent" />
+      <Sparkles
+        aria-hidden="true"
+        size={16}
+        className="shrink-0 text-pro-accent"
+      />
       <span className="min-w-0 flex-1 text-sm font-medium text-pro-accent">
         Suggested meeting
       </span>

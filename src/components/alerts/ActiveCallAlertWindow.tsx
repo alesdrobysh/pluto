@@ -97,11 +97,12 @@ const getAlertData = (): AlertData => {
 
 export const ActiveCallAlertWindow = () => {
   const alertData = useMemo(getAlertData, []);
-  const lifetimeMs = alertData.type === 'ended'
-    ? alertData.durationMs
-    : alertData.type === 'calendar-end-check'
-      ? 20_000
-      : LIFETIME_MS;
+  const lifetimeMs =
+    alertData.type === 'ended'
+      ? alertData.durationMs
+      : alertData.type === 'calendar-end-check'
+        ? 20_000
+        : LIFETIME_MS;
   const [theme, setTheme] = useState(() => resolveAlertTheme());
   useLayoutEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -304,7 +305,13 @@ export const ActiveCallAlertWindow = () => {
       <div className="left-block">
         <div className="meta">
           <p className="title" title={isCalendar ? alertData.title : undefined}>
-            {isEnded ? 'Meeting ended' : isCalendarEndCheck ? 'Still in the meeting?' : isCalendar ? alertData.title : 'Call detected'}
+            {isEnded
+              ? 'Meeting ended'
+              : isCalendarEndCheck
+                ? 'Still in the meeting?'
+                : isCalendar
+                  ? alertData.title
+                  : 'Call detected'}
           </p>
           {isCalendar ? (
             <div className="subtitle-row">
@@ -341,10 +348,18 @@ export const ActiveCallAlertWindow = () => {
       <div className="actions">
         {isCalendarEndCheck ? (
           <>
-            <button type="button" className="prepare-brief" onClick={handleDismiss}>
+            <button
+              type="button"
+              className="prepare-brief"
+              onClick={handleDismiss}
+            >
               Keep recording
             </button>
-            <button type="button" className="take-notes" onClick={handleCalendarEndNow}>
+            <button
+              type="button"
+              className="take-notes"
+              onClick={handleCalendarEndNow}
+            >
               End now
             </button>
           </>
@@ -384,7 +399,13 @@ export const ActiveCallAlertWindow = () => {
         type="button"
         className="close-alert"
         aria-label={
-          isCalendarEndCheck ? 'Keep recording' : isEnded ? 'Dismiss meeting ended alert' : isCalendar ? 'Dismiss meeting prompt' : 'Dismiss call detected alert'
+          isCalendarEndCheck
+            ? 'Keep recording'
+            : isEnded
+              ? 'Dismiss meeting ended alert'
+              : isCalendar
+                ? 'Dismiss meeting prompt'
+                : 'Dismiss call detected alert'
         }
         onClick={handleDismiss}
       >

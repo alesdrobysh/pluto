@@ -89,7 +89,9 @@ export function inspectChromeTabs(): Promise<ChromeTabSnapshot> {
     child.stderr.resume();
     child.on('error', () => finish({ healthy: false, tabs: [] }));
     child.on('close', (code) =>
-      finish(code === 0 ? parseChromeTabs(output) : { healthy: false, tabs: [] }),
+      finish(
+        code === 0 ? parseChromeTabs(output) : { healthy: false, tabs: [] },
+      ),
     );
   });
 }

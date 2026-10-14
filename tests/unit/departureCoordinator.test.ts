@@ -123,7 +123,9 @@ describe('confirmed departure policy', () => {
     coordinator.setCalendarEnd(5_000);
     observe([source(undefined, false, false)]);
     advance(121_000);
-    observe([source(undefined, false, false), source('other', null, null)], { healthy: false });
+    observe([source(undefined, false, false), source('other', null, null)], {
+      healthy: false,
+    });
     expect(coordinator.status.calendarCheck).toBeNull();
     expect(coordinator.status.stop).toBeNull();
   });
@@ -288,7 +290,10 @@ describe('confirmed departure policy', () => {
       sequence: 1,
       healthy: true,
       discontinuity: false,
-      sources: [chrome, { ...source('zoom:400:launch', false, false), pid: 400 }],
+      sources: [
+        chrome,
+        { ...source('zoom:400:launch', false, false), pid: 400 },
+      ],
       terminated: [],
     });
     now = 4_000;
@@ -299,7 +304,10 @@ describe('confirmed departure policy', () => {
       sequence: 2,
       healthy: true,
       discontinuity: false,
-      sources: [chrome, { ...source('zoom:400:launch', false, false), pid: 400 }],
+      sources: [
+        chrome,
+        { ...source('zoom:400:launch', false, false), pid: 400 },
+      ],
       terminated: [],
     });
     expect(coordinator.status.source?.id).toBe(chrome.id);
