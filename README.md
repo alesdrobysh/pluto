@@ -22,7 +22,8 @@ Record without a bot, transcribe on your Mac, and return to the people, projects
 and follow-ups that matter.
 
 <a id="see-pluto-in-action"></a>
-<video src="https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d" width="960" controls></video>
+
+https://github.com/user-attachments/assets/edbfcc31-2b37-4648-b18a-c0b14b11973d
 
 ## Features
 
