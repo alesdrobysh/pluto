@@ -493,6 +493,10 @@ func parseTargetPids(arguments: [String]) -> [Int32] {
 let includeSelf = CommandLine.arguments.contains("--probe-include-self")
 let probeSilent = CommandLine.arguments.contains("--probe-silent")
 let targetPids = parseTargetPids(arguments: CommandLine.arguments)
+if CommandLine.arguments.contains("--monitor-calls") {
+    CallActivityMonitor().run()
+    exit(0)
+}
 let cli = AudioCapCLI(includeSelf: includeSelf, targetPids: targetPids.isEmpty ? nil : targetPids)
 
 if CommandLine.arguments.contains("--test-stopband") {

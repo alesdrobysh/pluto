@@ -66,6 +66,36 @@ describe('ActiveCallAlertWindow component', () => {
     expect(window.close).toHaveBeenCalled();
   });
 
+  it('shows the calendar-end warning outside Pluto with Keep recording and End now', async () => {
+    window.history.replaceState({}, '', '/?type=calendar-end-check');
+    const root = createRoot(container);
+    await act(async () => root.render(<ActiveCallAlertWindow />));
+    expect(container.textContent).toContain('Still in the meeting?');
+    expect(container.textContent).toContain('Keep recording');
+    await act(async () => {
+      (container.querySelector('.prepare-brief') as HTMLButtonElement).click();
+    });
+    expect(sendMock).toHaveBeenCalledWith('CALENDAR_END_CHECK_ACTION', {
+      action: 'keep',
+    });
+    await act(async () => root.unmount());
+  });
+
+  it('shows the ended notice with a Reopen action', async () => {
+    window.history.replaceState({}, '', '/?type=ended&detail=Meet+tab+closed&durationMs=30000');
+    const root = createRoot(container);
+    await act(async () => root.render(<ActiveCallAlertWindow />));
+    expect(container.textContent).toContain('Meeting ended');
+    expect(container.textContent).toContain('Meet tab closed');
+    await act(async () => {
+      (container.querySelector('.take-notes') as HTMLButtonElement).click();
+    });
+    expect(sendMock).toHaveBeenCalledWith('MEETING_ENDED_ALERT_ACTION', {
+      action: 'reopen',
+    });
+    await act(async () => root.unmount());
+  });
+
   it('renders calendar prompt notification with meeting details and sends record action', async () => {
     const startIso = new Date(Date.now() + 120_000).toISOString(); // 2m from now
     window.history.replaceState(

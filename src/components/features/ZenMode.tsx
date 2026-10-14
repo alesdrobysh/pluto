@@ -8,10 +8,7 @@ import {
 import type { MeetingAskPlutoConversationMessage } from '../../types/askPluto';
 import { LiveTranscript } from './LiveTranscript';
 import { MeetingAskPlutoDock } from './MeetingAskPlutoDock';
-import {
-  RecordingCalendarSuggestion,
-  type RecordingCalendarSuggestionProps,
-} from './RecordingCalendarSuggestion';
+import type { RecordingCalendarSuggestionProps } from './RecordingCalendarSuggestion';
 import { RecordingCaptureBar } from './RecordingCaptureBar';
 import { RecordingMeetingRail } from './RecordingMeetingRail';
 import {
@@ -139,9 +136,6 @@ export const ZenMode = ({
         onBackHome={onBackHome}
         onFinish={onEndMeeting}
       />
-      {calendarSuggestion && (
-        <RecordingCalendarSuggestion {...calendarSuggestion} />
-      )}
       <div className="recording-workspace-grid">
         <RecordingMeetingRail
           title={meetingTitle}
@@ -158,6 +152,7 @@ export const ZenMode = ({
           notes={currentNotes}
           onNotesChange={setCurrentNotes}
           calendarEvent={calendarEvent}
+          calendarSuggestion={calendarSuggestion}
           onOpenMeeting={onOpenMeeting}
         />
         <LiveTranscript

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { DEPARTURE_IPC } from '../../../electron/activeCall/departureTypes';
 import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
 import type {
   CloudProviderId,
@@ -336,6 +337,10 @@ export const SettingsTab = ({
   >('idle');
   const [browserCallDetectionEnabled, setBrowserCallDetectionEnabled] =
     useState(false);
+  const [departureAccessibility, setDepartureAccessibility] = useState<{
+    enabled: boolean;
+    acceptedProviders: string[];
+  } | null>(null);
   const [automaticCommitmentReminders, setAutomaticCommitmentReminders] =
     useState(true);
   const [commitmentReminderPreviews, setCommitmentReminderPreviews] =
@@ -390,7 +395,19 @@ export const SettingsTab = ({
     void window.ipcRenderer
       .invoke('GET_SETTING', 'browser_call_detection_enabled')
       .then((value) => setBrowserCallDetectionEnabled(value === 'true'));
+    void window.ipcRenderer
+      .invoke(DEPARTURE_IPC.preferences)
+      .then(setDepartureAccessibility)
+      .catch(() => setDepartureAccessibility(null));
   }, []);
+  const updateDepartureAccessibility = (
+    action: 'enable' | 'disable' | 'open',
+  ) => {
+    void window.ipcRenderer
+      .invoke(DEPARTURE_IPC.preferences, action)
+      .then(setDepartureAccessibility)
+      .catch(() => setDepartureAccessibility(null));
+  };
   const [audioRetention, setAudioRetention] =
     useState<AudioRetentionSnapshot | null>(null);
   const [audioRetentionError, setAudioRetentionError] = useState(false);
@@ -1044,7 +1061,7 @@ export const SettingsTab = ({
 
             <SettingsRow
               label="Auto-end recording"
-              helper="Stop automatically when call closure is detected. Quiet breaks and the scheduled end time do not stop recording."
+              helper="Stop on confirmed call departure. For a linked calendar meeting, two minutes after its end with both call audio paths quiet starts a 20-second cancellable warning. Ad-hoc calls and quiet breaks before the calendar end keep recording."
               actionControl
             >
               <Toggle
@@ -1059,7 +1076,7 @@ export const SettingsTab = ({
 
             <SettingsRow
               label="Detect calls in browser tabs"
-              helper="Use browser tabs to recognize meetings and detect when they end. Enabling this asks macOS for permission to control your browser."
+              helper="Use browser tabs to help identify calls. Exact-tab automatic stopping is paused until call identity passes packaged acceptance; macOS may ask for browser Automation permission."
               actionControl
             >
               <Toggle
@@ -1073,6 +1090,30 @@ export const SettingsTab = ({
                   );
                 }}
               />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Inspect call departure with Accessibility"
+              helper="Optional for detecting a post-call screen while the meeting app or tab remains open. UI adapters remain disabled until packaged acceptance."
+              actionControl
+            >
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs underline"
+                  onClick={() => updateDepartureAccessibility('open')}
+                >
+                  Open macOS Settings
+                </button>
+                <Toggle
+                  checked={departureAccessibility?.enabled === true}
+                  onChange={() =>
+                    updateDepartureAccessibility(
+                      departureAccessibility?.enabled ? 'disable' : 'enable',
+                    )
+                  }
+                />
+              </div>
             </SettingsRow>
 
             <SettingsRow

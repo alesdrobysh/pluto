@@ -420,6 +420,49 @@ describe('recording workspace components', () => {
     );
   });
 
+  it('keeps the calendar suggestion inside the left meeting rail', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToStaticMarkup(
+      <ZenMode
+        isStarting={false}
+        isProcessing={false}
+        onEndMeeting={() => {}}
+        onBackHome={() => {}}
+        meetingTitle="Meeting"
+        setMeetingTitle={() => {}}
+        meetingParticipants={[]}
+        setMeetingParticipants={() => {}}
+        participantInput=""
+        setParticipantInput={() => {}}
+        currentNotes=""
+        setCurrentNotes={() => {}}
+        liveTranscript={[]}
+        captureHealth={{
+          microphone: 'healthy',
+          systemAudio: 'healthy',
+          captureDurability: 'healthy',
+        }}
+        liveTranscriptIntegrity="healthy"
+        recordingStartedAtMs={null}
+        calendarSuggestion={{
+          events: [],
+          selectedOccurrenceKey: '',
+          busy: false,
+          error: null,
+          onSelect: () => {},
+          onAdd: () => {},
+          onDismiss: () => {},
+        }}
+      />,
+    );
+
+    const suggestion = container.querySelector(
+      '[aria-label="Suggested calendar meeting"]',
+    );
+    expect(suggestion?.closest('.recording-rail')).not.toBeNull();
+    expect(suggestion?.closest('.recording-workspace-grid')).not.toBeNull();
+  });
+
   it('updates the recording meeting title from the heading', () => {
     const container = document.createElement('div');
     const root = createRoot(container);

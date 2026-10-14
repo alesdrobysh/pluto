@@ -9,6 +9,14 @@ const getEndReasonDetail = (
   reason: string | null,
   appName: string | null,
 ): string => {
+  if (reason === 'ui_departure')
+    return appName ? `Left the call in ${appName}` : 'Call departure confirmed';
+  if (reason === 'tab_closed') return 'Meet tab closed';
+  if (reason === 'calendar_quiet_timeout' || reason === 'calendar_user_confirmed')
+    return 'Calendar ended; call audio quiet';
+  if (reason === 'app_terminated')
+    return appName ? `${appName} closed` : 'Call app closed';
+  if (reason === 'user_confirmed') return 'Ended at your request';
   if (reason === 'call_app_exited') {
     return appName ? `${appName} closed` : 'Call app closed';
   }

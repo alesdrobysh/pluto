@@ -2,6 +2,7 @@ import { PanelLeft, Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { openMeetingPrep } from './api/meetingPrep';
+import { CallDepartureNotice } from './components/ui/CallDepartureNotice';
 import { resolveCaptureAction } from './services/captureLifecycle';
 import './App.css';
 
@@ -610,10 +611,19 @@ function App() {
     autoEndReason,
     autoEndAppName,
     dismissAutoEndToast,
+    departureStatus,
+    selectSource,
+    keepRecording,
+    confirmEnd,
   } = useAutoEndMonitor({
     isRecording,
+    meetingId: captureLifecycle.meetingId,
     autoEndEnabled,
     stopSessionRef,
+    onReopen: () => {
+      if (!isRecording && startSessionRef.current)
+        void startSessionRef.current();
+    },
   });
 
   const handleCopySummary = (text: string) => {
@@ -2780,6 +2790,14 @@ function App() {
         }}
       />
 
+      {isRecording && departureStatus && (
+        <CallDepartureNotice
+          status={departureStatus}
+          onSelect={selectSource}
+          onKeep={keepRecording}
+          onEnd={confirmEnd}
+        />
+      )}
       {autoEndTriggered && (
         <AutoEndToast
           reason={autoEndReason}

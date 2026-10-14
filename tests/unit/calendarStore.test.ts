@@ -384,6 +384,8 @@ describe('calendar store', () => {
       'confirmed-recording',
       overlapping.occurrenceKey,
     );
+    expect(store.getPendingRecordingEvent('confirmed-recording')?.occurrenceKey)
+      .toBe(overlapping.occurrenceKey);
     store.replaceEvents({
       revision: 2,
       cacheStart: '2026-08-16T00:00:00.000Z',
@@ -393,6 +395,8 @@ describe('calendar store', () => {
     });
     // Recreate the store to simulate a renderer/app restart before recovery saves the meeting.
     const recoveredStore = createCalendarStore(sql);
+    expect(recoveredStore.getPendingRecordingEvent('confirmed-recording')?.end)
+      .toBe(overlapping.end);
     sql
       .prepare('INSERT INTO meetings (id, title) VALUES (?, ?)')
       .run('confirmed-recording', 'My custom title');

@@ -49,6 +49,8 @@ import {
 } from '../src/utils/ollamaModels';
 import { readProjectDisplayTitle } from '../src/utils/projectBriefing';
 import { parseTranscriptSegments } from '../src/utils/transcript';
+import { registerDepartureService } from './activeCall/departureService';
+import type { DepartureSession } from './activeCall/departureTypes';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   AUDIO_STORAGE_BUDGET_SETTING,
@@ -3444,6 +3446,50 @@ app.whenReady().then(async () => {
     });
   };
 
+  let calendarCheckSession: DepartureSession | null = null;
+  const departureService = registerDepartureService({
+    executable: getAudioCapExecPath,
+    getSetting: db.getSetting,
+    setSetting: db.setSetting,
+    getCalendarEvent: (meetingId) =>
+      db.meetingPrepStore.forMeeting(meetingId)?.event ??
+      db.calendarStore.getPendingRecordingEvent(meetingId) ??
+      db.calendarStore.getMeetingContext(meetingId)?.event ??
+      null,
+    onCalendarCheck: (session, active) => {
+      if (active) {
+        calendarCheckSession = {
+          meetingId: session.meetingId,
+          generation: session.generation,
+        };
+        activeCallAlertController.showCalendarEndCheck(
+          db.getSetting('theme') || 'system',
+          win && !win.isDestroyed() ? win.getBounds() : undefined,
+        );
+        return true;
+      }
+      calendarCheckSession = null;
+      activeCallAlertController.closeCalendarEndCheck();
+      return true;
+    },
+    isCalendarCheckVisible: () =>
+      activeCallAlertController.isCalendarEndCheckVisible(),
+    requireRecordingOwner: (meetingId, ownerId) =>
+      captureSessionLease.requireRecordingOwner(meetingId, ownerId),
+    requireCaptureStartOwner: (meetingId, ownerId) =>
+      captureSessionLease.requireCaptureStartOwner(meetingId, ownerId),
+    log: (event) => {
+      try {
+        db.logAutoEndEvent(event);
+      } catch {
+        /* Best effort. */
+      }
+    },
+  });
+  app.once('before-quit', departureService.stop);
+  powerMonitor.on('suspend', departureService.invalidate);
+  powerMonitor.on('resume', departureService.invalidate);
+
   const detectActiveCall = createActiveCallDetector({
     runAudioProbe,
     browserInspectionEnabled: () =>
@@ -3560,6 +3606,50 @@ app.whenReady().then(async () => {
   ipcMain.handle('HIDE_CALENDAR_PROMPT_ALERT', async () => {
     activeCallAlertController.closeCalendarPrompt();
     return true;
+  });
+
+  ipcMain.handle(
+    'SHOW_MEETING_ENDED_ALERT',
+    (event, payload?: { reason?: string; appName?: string }) => {
+      if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id)
+        return false;
+      const reason = payload?.reason;
+      const detail = reason === 'tab_closed'
+        ? 'Meet tab closed'
+        : reason === 'calendar_quiet_timeout' || reason === 'calendar_user_confirmed'
+          ? 'Calendar ended; no call audio'
+          : reason === 'ui_departure'
+            ? 'Call departure confirmed'
+            : reason === 'app_terminated'
+              ? `${String(payload?.appName || 'Call app').slice(0, 60)} closed`
+              : 'Recording saved';
+      activeCallAlertController.showMeetingEnded(
+        detail,
+        reason === 'calendar_quiet_timeout' || reason === 'calendar_user_confirmed' ? 30_000 : 8_000,
+        db.getSetting('theme') || 'system',
+        win.getBounds(),
+      );
+      return true;
+    },
+  );
+  ipcMain.on('MEETING_ENDED_ALERT_ACTION', (event, payload?: { action?: string }) => {
+    if (!activeCallAlertController.owns(event.sender.id, 'ended')) return;
+    if (payload?.action === 'reopen' && win && !win.isDestroyed()) {
+      if (!win.isVisible()) win.show();
+      win.focus();
+      win.webContents.send('MEETING_ENDED_REOPEN');
+    }
+    activeCallAlertController.close();
+  });
+  ipcMain.on('CALENDAR_END_CHECK_ACTION', (event, payload?: { action?: string }) => {
+    if (
+      !activeCallAlertController.owns(event.sender.id, 'calendar-end-check') ||
+      !calendarCheckSession
+    ) return;
+    if (payload?.action === 'keep')
+      departureService.keepCalendarCheck(calendarCheckSession);
+    else if (payload?.action === 'end')
+      departureService.endCalendarCheck(calendarCheckSession);
   });
 
   ipcMain.on(

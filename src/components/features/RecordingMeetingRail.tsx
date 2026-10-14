@@ -10,6 +10,10 @@ import { getEntitiesByType, upsertEntity } from '../../api/knowledgeGraph';
 import { isGenericSpeakerLabel } from '../../utils/speakerReview';
 import { SearchSelect, type SearchSelectOption } from '../ui/SearchSelect';
 import { SavedMeetingPrep } from './MeetingPrepEditor';
+import {
+  RecordingCalendarSuggestion,
+  type RecordingCalendarSuggestionProps,
+} from './RecordingCalendarSuggestion';
 
 const MEETING_TITLE_MAX_LENGTH = 64;
 export const RECORDING_SCRATCHPAD_STORAGE_KEY = 'pluto.recording-scratchpad';
@@ -25,6 +29,7 @@ type Props = {
   notes: string;
   onNotesChange: (value: string) => void;
   calendarEvent?: CalendarEvent | null;
+  calendarSuggestion?: RecordingCalendarSuggestionProps | null;
   onOpenMeeting?: (id: string) => void;
   people?: IdentityPerson[];
   disabled?: boolean;
@@ -43,6 +48,7 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
       notes,
       onNotesChange,
       calendarEvent = null,
+      calendarSuggestion = null,
       onOpenMeeting,
       people: propPeople,
       disabled = false,
@@ -216,6 +222,9 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
         tabIndex={-1}
       >
         <div className="recording-rail-content">
+          {calendarSuggestion && (
+            <RecordingCalendarSuggestion {...calendarSuggestion} />
+          )}
           <header className="rail-heading">
             <div className="rail-heading__status">
               <h2

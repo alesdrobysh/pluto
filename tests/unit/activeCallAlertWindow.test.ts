@@ -19,6 +19,7 @@ vi.mock('electron', () => ({
     this.setFullScreen = vi.fn();
     this.unmaximize = vi.fn();
     this.showInactive = vi.fn();
+    this.close = vi.fn();
     this.webContents = { once: vi.fn() };
     this.loadURL = vi.fn();
     this.loadFile = vi.fn();
@@ -255,5 +256,41 @@ describe('activeCallAlertWindow', () => {
     controller.closeCallAlert();
 
     expect(callWindow.close).toHaveBeenCalled();
+  });
+
+  it('opens the ended notice and calendar warning outside the main window', async () => {
+    const { BrowserWindow } = await import('electron');
+    const { createActiveCallAlertController } = await import(
+      '../../electron/windows/activeCallAlertWindow'
+    );
+    const ended = createActiveCallAlertController({
+      preloadPath: '/preload.js',
+      rendererDist: '/dist',
+    });
+    ended.showMeetingEnded('Meet tab closed', 30_000, 'dark');
+    const endedWindow = vi.mocked(BrowserWindow).mock.results.at(-1)?.value;
+    expect(endedWindow.loadFile).toHaveBeenCalledWith(
+      expect.stringContaining('active-call-alert.html'),
+      { query: { type: 'ended', detail: 'Meet tab closed', durationMs: '30000', theme: 'dark' } },
+    );
+    const check = createActiveCallAlertController({
+      preloadPath: '/preload.js',
+      rendererDist: '/dist',
+    });
+    check.showCalendarEndCheck('light');
+    const checkWindow = vi.mocked(BrowserWindow).mock.results.at(-1)?.value;
+    expect(checkWindow.loadFile).toHaveBeenCalledWith(
+      expect.stringContaining('active-call-alert.html'),
+      { query: { type: 'calendar-end-check', theme: 'light' } },
+    );
+    expect(check.isCalendarEndCheckVisible()).toBe(false);
+    const loaded = checkWindow.webContents.once.mock.calls.find(
+      ([eventName]: [string]) => eventName === 'did-finish-load',
+    )?.[1];
+    checkWindow.isVisible.mockReturnValue(true);
+    loaded?.();
+    expect(check.isCalendarEndCheckVisible()).toBe(true);
+    check.show('Zoom', 'light');
+    expect(check.isCalendarEndCheckVisible()).toBe(false);
   });
 });

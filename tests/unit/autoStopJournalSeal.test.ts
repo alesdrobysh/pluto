@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { autoEndDecision } from '../../src/autoEnd/decision';
+import { DepartureCoordinator } from '../../electron/activeCall/departureCoordinator';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -10,20 +10,56 @@ import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivity
 
 describe('auto-stop triggering and journal sealing contract', () => {
   it('preserves the confirmed call-exit reason through journal sealing and persistence', async () => {
-    const action = autoEndDecision({
-      poll: {
-        active: false,
-        appName: null,
-        confidence: 'low',
-        reason: 'no-call-app-running',
-      },
-      trackedApp: 'Zoom',
-      graceActive: false,
+    let now = 0;
+    const decision = new DepartureCoordinator(
+      { meetingId: 'meeting-autostop-1', generation: 'generation-1' },
+      () => now,
+    );
+    const call = {
+      id: 'zoom:1:launch',
+      bundleId: 'us.zoom.xos',
+      pid: 1,
+      name: 'Zoom',
+      version: '1',
+      input: true,
+      output: true,
+      audioGeneration: 'audio-1',
+    };
+    decision.observe({
+      kind: 'activity',
+      version: 1,
+      epoch: 'helper-1',
+      sequence: 1,
+      healthy: true,
+      discontinuity: false,
+      sources: [call],
+      terminated: [],
     });
-    expect(action.type).toBe('start_grace');
-    if (action.type !== 'start_grace')
-      throw new Error('Expected confirmed call exit');
-    const endReason = `auto:${action.reasonCode}`;
+    now = 3_000;
+    decision.observe({
+      kind: 'activity',
+      version: 1,
+      epoch: 'helper-1',
+      sequence: 2,
+      healthy: true,
+      discontinuity: false,
+      sources: [call],
+      terminated: [],
+    });
+    decision.observe({
+      kind: 'activity',
+      version: 1,
+      epoch: 'helper-1',
+      sequence: 3,
+      healthy: true,
+      discontinuity: false,
+      sources: [],
+      terminated: [call.id],
+    });
+    const request = decision.status.stop;
+    expect(request?.reason).toBe('app_terminated');
+    expect(decision.claim(request!.requestId)).toBe(true);
+    const endReason = `auto:${request!.reason}:${request!.provider}`;
 
     // 2. Begin recording finalization with snapshot
     const recordingStartedAtMs = 600_000;
@@ -91,7 +127,9 @@ describe('auto-stop triggering and journal sealing contract', () => {
 
     expect(persistFn).toHaveBeenCalledTimes(1);
     const savedMeeting = persistFn.mock.calls[0]?.[0];
-    expect(savedMeeting.end_reason).toBe('auto:call_app_exited');
+    expect(decision.acknowledge(request!.requestId, true)).toBe(true);
+    expect(decision.status.phase).toBe('stopped');
+    expect(savedMeeting.end_reason).toBe('auto:app_terminated:zoom');
     expect(savedMeeting.duration_seconds).toBe(400);
   });
 });
