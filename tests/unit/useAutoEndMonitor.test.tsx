@@ -15,6 +15,7 @@ const baseStatus: DepartureStatus = {
   generation: 'generation-1',
   phase: 'joined',
   source: null,
+  sourceConfirmed: false,
   candidates: [],
   unavailable: false,
   sessionAmbiguous: false,

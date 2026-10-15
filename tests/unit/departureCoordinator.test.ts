@@ -63,6 +63,7 @@ function rig() {
   observe([source()]);
   advance(3_000);
   observe([source()]);
+  coordinator.select(source().id);
   return { coordinator, advance, observe };
 }
 
@@ -362,6 +363,89 @@ describe('confirmed departure policy', () => {
     expect(coordinator.status.stop).toBeNull();
     observe([source()], { terminated: ['zoom:100:launch'] });
     expect(coordinator.status.stop?.reason).toBe('app_terminated');
+  });
+
+  it('does not stop when output-only Chrome playback is mistaken for a call', () => {
+    let time = 0;
+    const coordinator = new DepartureCoordinator(
+      { meetingId: 'local-recording', generation: 'g1' },
+      () => time,
+    );
+    const chrome = {
+      ...source('chrome:300:launch', false, true),
+      bundleId: 'com.google.Chrome',
+      name: 'Google Chrome',
+      pid: 300,
+    };
+    const activity = (sequence: number, terminated: string[] = []) =>
+      coordinator.observe({
+        kind: 'activity', version: 1, epoch: 'helper-1', sequence,
+        healthy: true, discontinuity: false,
+        sources: terminated.length ? [] : [chrome], terminated,
+      });
+    activity(1);
+    time = 4_000;
+    activity(2);
+    expect(coordinator.status.source?.id).toBe(chrome.id);
+    expect(coordinator.status.sourceConfirmed).toBe(false);
+    activity(3, [chrome.id]);
+    expect(coordinator.status.stop).toBeNull();
+    expect(coordinator.status.checkIn).toBe(true);
+  });
+
+  it('lets the user replace a provisional audio source before confirming the call', () => {
+    let time = 0;
+    const provisional = new DepartureCoordinator(
+      { meetingId: 'recording-2', generation: 'g2' },
+      () => time,
+    );
+    const chrome = {
+      ...source('chrome:300:launch', false, true),
+      bundleId: 'com.google.Chrome', name: 'Google Chrome', pid: 300,
+    };
+    const zoom = source('zoom:400:launch');
+    const snapshot = (sequence: number, sources: CallSource[], terminated: string[] = []) =>
+      provisional.observe({
+        kind: 'activity', version: 1, epoch: 'helper-1', sequence,
+        healthy: true, discontinuity: false, sources, terminated,
+      });
+    snapshot(1, [chrome]);
+    time = 4_000;
+    snapshot(2, [chrome]);
+    expect(provisional.status.source?.id).toBe(chrome.id);
+    snapshot(3, [chrome, zoom]);
+    expect(provisional.select(zoom.id)).toBe(true);
+    expect(provisional.status.sourceConfirmed).toBe(true);
+    snapshot(4, [zoom], [chrome.id]);
+    expect(provisional.status.stop).toBeNull();
+  });
+
+  it('cannot reclaim a calendar timeout after monitoring fails or audio resumes', () => {
+    const { coordinator, advance, observe } = rig();
+    coordinator.setCalendarEnd(5_000);
+    observe([source(undefined, false, false)]);
+    for (let second = 0; second < 142; second++) {
+      advance(1_000);
+      observe([source(undefined, false, false)]);
+    }
+    const firstRequest = coordinator.status.stop?.requestId;
+    expect(firstRequest).toBeTruthy();
+    advance(4_000);
+    expect(coordinator.claim(firstRequest!)).toBe(false);
+    observe([source(undefined, true, true)]);
+    expect(coordinator.status.stop).toBeNull();
+    expect(coordinator.claim(firstRequest!)).toBe(false);
+
+    observe([source(undefined, false, false)]);
+    for (let second = 0; second < 141; second++) {
+      advance(1_000);
+      observe([source(undefined, false, false)]);
+    }
+    const secondRequest = coordinator.status.stop?.requestId;
+    expect(secondRequest).toBeTruthy();
+    observe([source(undefined, false, true)]);
+    expect(coordinator.status.stop).toBeNull();
+    expect(coordinator.claim(secondRequest!)).toBe(false);
   });
 
   it('retains exact application termination despite an unrelated failed audio read', () => {

@@ -335,6 +335,8 @@ describe('departure IPC authority', () => {
           terminated: [],
         });
         await vi.advanceTimersByTimeAsync(1_000);
+        if (second === 4)
+          expect(call<boolean>(IPC.select, session, source.id)).toBe(true);
       }
       const status = owner.send.mock.lastCall?.[1] as DepartureStatus;
       expect(onCalendarCheck).toHaveBeenCalledWith(
@@ -374,7 +376,7 @@ describe('departure IPC authority', () => {
       isCalendarCheckVisible: () => false,
     });
     try {
-      call<DepartureStatus>(IPC.begin, 'calendar-warning-lost');
+      const session = call<DepartureStatus>(IPC.begin, 'calendar-warning-lost');
       const source = {
         id: 'us.zoom.xos:100:launch',
         bundleId: 'us.zoom.xos',
@@ -401,6 +403,8 @@ describe('departure IPC authority', () => {
           terminated: [],
         });
         await vi.advanceTimersByTimeAsync(1_000);
+        if (second === 4)
+          expect(call<boolean>(IPC.select, session, source.id)).toBe(true);
       }
       expect(onCalendarCheck).toHaveBeenCalledWith(
         expect.objectContaining({ meetingId: 'calendar-warning-lost' }),

@@ -15,7 +15,8 @@ export function CallDepartureNotice({
   const activeCandidates = status.candidates.filter(
     (candidate) => candidate.input === true || candidate.output === true,
   );
-  const selectable = !status.source && activeCandidates.length > 1;
+  const selectable = !status.sourceConfirmed && activeCandidates.length > 1;
+  const confirmSource = status.source && !status.sourceConfirmed && !selectable;
   const message = status.sessionAmbiguous
     ? 'Call identity is uncertain. Automatic stopping is unavailable; recording continues.'
     : status.unavailable
@@ -24,6 +25,8 @@ export function CallDepartureNotice({
         ? 'Still in the meeting? Recording continues until you end it.'
         : selectable
           ? 'Which call are you recording?'
+          : confirmSource
+            ? `Is this recording a ${status.source?.name} call?`
           : null;
   if (!message) return null;
   return (
@@ -46,6 +49,15 @@ export function CallDepartureNotice({
             </button>
           ))}
         </div>
+      )}
+      {confirmSource && (
+        <button
+          type="button"
+          className="rounded border border-pro-border px-3 py-2 text-sm"
+          onClick={() => onSelect(status.source!.id)}
+        >
+          Confirm call
+        </button>
       )}
       {(status.checkIn || status.unavailable || status.sessionAmbiguous) && (
         <div className="flex gap-3 text-sm">

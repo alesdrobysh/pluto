@@ -62,6 +62,8 @@ export type DepartureStopRequest = DepartureSession & {
 export type DepartureStatus = DepartureSession & {
   phase: DeparturePhase;
   source: CallSource | null;
+  /** Explicit user confirmation; app-wide audio alone is only a suggestion. */
+  sourceConfirmed: boolean;
   candidates: CallSource[];
   unavailable: boolean;
   sessionAmbiguous: boolean;

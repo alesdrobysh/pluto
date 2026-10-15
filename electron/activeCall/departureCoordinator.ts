@@ -40,6 +40,7 @@ export class DepartureCoordinator {
       ...session,
       phase: 'untracked',
       source: null,
+      sourceConfirmed: false,
       candidates: [],
       unavailable: false,
       sessionAmbiguous: false,
@@ -75,6 +76,7 @@ export class DepartureCoordinator {
   }
   invalidate(preserveJoinedSession = false) {
     this.evidenceRevision++;
+    this.cancelPendingCalendarStop();
     this.resetConfirmation();
     if (!preserveJoinedSession) {
       if (this.joinedSession) {
@@ -100,13 +102,22 @@ export class DepartureCoordinator {
     this.epoch = snapshot.epoch;
     this.sequence = snapshot.sequence;
     this.lastObservation = now;
-    // An OS termination notification for the bound application instance is
-    // positive departure evidence even if an unrelated audio read failed.
+    // Termination proves departure only after this app was confirmed as the
+    // recorded call. App-wide audio by itself may be unrelated playback.
     if (
       this.status.source &&
       snapshot.terminated.includes(this.status.source.id)
     ) {
-      this.requestStop('app_terminated');
+      if (this.status.sourceConfirmed || (this.joinedSession && !this.sessionAmbiguous))
+        this.requestStop('app_terminated');
+      else {
+        this.status.source = null;
+        this.status.sourceConfirmed = false;
+        this.status.phase = 'untracked';
+        this.status.checkIn = true;
+        this.prompted = true;
+        this.log('unconfirmed_app_terminated');
+      }
       return;
     }
     if (!snapshot.healthy || snapshot.discontinuity || changedEpoch) {
@@ -147,7 +158,7 @@ export class DepartureCoordinator {
       active.length === 1 &&
       now - (this.candidateSince.get(active[0].id) ?? now) >= 3000
     )
-      this.select(active[0].id);
+      this.bind(active[0].id);
     const bound = this.status.source;
     if (!bound) return;
     const current = snapshot.sources.find((source) => source.id === bound.id);
@@ -174,6 +185,7 @@ export class DepartureCoordinator {
     if (current.input === false && current.output === false) {
       this.calendarQuietSince ??= now;
     } else {
+      this.cancelPendingCalendarStop();
       this.calendarQuietSince = null;
       this.cancelCalendarCheck();
     }
@@ -184,7 +196,7 @@ export class DepartureCoordinator {
     } else this.quietSince ??= now;
     this.tick();
   }
-  select(sourceId: string) {
+  private bind(sourceId: string) {
     if (this.status.source || this.claimed) return false;
     const source = this.status.candidates.find(
       (candidate) => candidate.id === sourceId,
@@ -196,6 +208,23 @@ export class DepartureCoordinator {
     this.status.phase = 'joined';
     this.previousInput = source.input;
     this.log('source_bound');
+    return true;
+  }
+  select(sourceId: string) {
+    if (this.claimed) return false;
+    if (this.status.source?.id !== sourceId && this.status.source) {
+      if (this.status.sourceConfirmed || this.joinedSession || this.status.stop)
+        return false;
+      this.status.source = null;
+      this.previousInput = null;
+      this.calendarQuietSince = null;
+      this.cancelCalendarCheck();
+    }
+    if (!this.status.source && !this.bind(sourceId)) return false;
+    if (this.status.source?.id !== sourceId) return false;
+    this.status.sourceConfirmed = true;
+    this.evidenceRevision++;
+    this.log('source_confirmed');
     return true;
   }
   /** The inspection service calls this only for a fresh request in this generation. */
@@ -273,6 +302,7 @@ export class DepartureCoordinator {
       this.calendarEndAt !== null &&
       this.wallNow() >= this.calendarEndAt + 120_000 &&
       this.status.source &&
+      this.status.sourceConfirmed &&
       !this.joinedSession &&
       this.calendarQuietSince !== null &&
       this.now() - this.calendarQuietSince >= 120_000 &&
@@ -304,6 +334,7 @@ export class DepartureCoordinator {
   }
   keepRecording() {
     if (this.claimed) return;
+    this.cancelPendingCalendarStop();
     this.resetConfirmation();
     this.status.checkIn = false;
     this.calendarCheckSuppressed = true;
@@ -340,6 +371,7 @@ export class DepartureCoordinator {
 
   setCalendarEnd(endAt: number | null) {
     if (endAt === this.calendarEndAt) return;
+    this.cancelPendingCalendarStop();
     this.calendarEndAt = endAt;
     this.cancelCalendarCheck();
     this.calendarQuietSince = null;
@@ -348,6 +380,12 @@ export class DepartureCoordinator {
   private cancelCalendarCheck() {
     this.calendarCheckAt = null;
     this.status.calendarCheck = null;
+  }
+  private cancelPendingCalendarStop() {
+    if (this.claimed || this.status.stop?.reason !== 'calendar_quiet_timeout') return;
+    this.status.stop = null;
+    this.status.phase = this.status.source ? 'joined' : 'untracked';
+    this.log('calendar_stop_invalidated');
   }
   claim(requestId: string) {
     if (this.claimed || this.status.stop?.requestId !== requestId) return false;

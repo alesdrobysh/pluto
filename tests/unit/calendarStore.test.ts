@@ -112,6 +112,29 @@ describe('calendar store', () => {
     expect(store.listEvents(input.cacheStart, input.cacheEnd)).toHaveLength(1);
   });
 
+  it('uses the refreshed occurrence for stop timing while keeping the saved selection', () => {
+    const store = createCalendarStore(sql);
+    store.selectCalendar(calendar);
+    const input = {
+      calendarIdentifier: calendar.identifier,
+      revision: 1,
+      cacheStart: '2026-08-16T00:00:00.000Z',
+      cacheEnd: '2026-09-30T00:00:00.000Z',
+      readAt: '2026-08-30T16:00:00.000Z',
+      events: [calendarEvent],
+    };
+    store.replaceEvents(input);
+    store.confirmRecordingSelection('meeting-a', calendarEvent.occurrenceKey);
+    const extended = { ...calendarEvent, end: '2026-08-30T19:30:00.000Z' };
+    store.replaceEvents({ ...input, revision: 2, events: [extended] });
+    expect(store.getPendingRecordingEvent('meeting-a')?.end).toBe(calendarEvent.end);
+    expect(store.getCurrentEvent(calendarEvent.occurrenceKey)?.end).toBe(extended.end);
+    store.replaceEvents({ ...input, revision: 3, events: [{ ...extended, isCancelled: true }] });
+    expect(store.getCurrentEvent(calendarEvent.occurrenceKey)).toBeNull();
+    store.replaceEvents({ ...input, revision: 4, events: [] });
+    expect(store.getCurrentEvent(calendarEvent.occurrenceKey)).toBeNull();
+  });
+
   it('associates a strong time match without overwriting a user choice', () => {
     const store = createCalendarStore(sql);
     store.selectCalendar(calendar);

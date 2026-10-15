@@ -3451,11 +3451,17 @@ app.whenReady().then(async () => {
     executable: getAudioCapExecPath,
     getSetting: db.getSetting,
     setSetting: db.setSetting,
-    getCalendarEvent: (meetingId) =>
-      db.meetingPrepStore.forMeeting(meetingId)?.event ??
-      db.calendarStore.getPendingRecordingEvent(meetingId) ??
-      db.calendarStore.getMeetingContext(meetingId)?.event ??
-      null,
+    getCalendarEvent: (meetingId) => {
+      const linked =
+        db.meetingPrepStore.forMeeting(meetingId)?.event ??
+        db.calendarStore.getPendingRecordingEvent(meetingId) ??
+        db.calendarStore.getMeetingContext(meetingId)?.event;
+      if (!linked) return null;
+      const current = db.calendarStore.getCurrentEvent(linked.occurrenceKey);
+      return current?.calendarIdentifier === linked.calendarIdentifier
+        ? current
+        : null;
+    },
     onCalendarCheck: (session, active) => {
       if (active) {
         calendarCheckSession = {

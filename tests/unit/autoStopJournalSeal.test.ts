@@ -46,6 +46,7 @@ describe('auto-stop triggering and journal sealing contract', () => {
       sources: [call],
       terminated: [],
     });
+    expect(decision.select(call.id)).toBe(true);
     decision.observe({
       kind: 'activity',
       version: 1,
