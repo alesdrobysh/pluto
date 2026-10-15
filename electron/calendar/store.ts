@@ -433,6 +433,37 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     return event;
   };
 
+  const getPendingRecordingEvent = (
+    meetingId: string,
+  ): CalendarEvent | null => {
+    const row = sql
+      .prepare(
+        'SELECT event_json FROM meeting_calendar_pending_selection WHERE meeting_id = ?',
+      )
+      .get(meetingId) as EventRow | undefined;
+    return row ? (JSON.parse(row.event_json) as CalendarEvent) : null;
+  };
+
+  /** Live cache state for stop decisions; saved meeting snapshots remain historical. */
+  const getCurrentEvent = (occurrenceKey: string): CalendarEvent | null => {
+    const state = getState();
+    if (!state.enabled || !state.selectedCalendars.length) return null;
+    const row = sql
+      .prepare(
+        'SELECT event_json FROM calendar_events WHERE occurrence_key = ?',
+      )
+      .get(occurrenceKey) as EventRow | undefined;
+    if (!row) return null;
+    const event = JSON.parse(row.event_json) as CalendarEvent;
+    return !event.isAllDay &&
+      !event.isCancelled &&
+      state.selectedCalendars.some(
+        (calendar) => calendar.identifier === event.calendarIdentifier,
+      )
+      ? event
+      : null;
+  };
+
   const applyRecordingSelection = (
     meetingId: string,
   ): MeetingCalendarContext | null =>
@@ -539,6 +570,8 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     matchActiveEvent,
     listActiveCandidates,
     confirmRecordingSelection,
+    getPendingRecordingEvent,
+    getCurrentEvent,
     applyRecordingSelection,
     reconcileRecordingSelections,
     setMeetingContext,

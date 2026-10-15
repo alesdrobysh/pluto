@@ -150,7 +150,7 @@ describe('SettingsTab', () => {
       root.render(<SettingsTab {...defaultProps} initialTab="meetings" />),
     );
     expect(container.textContent).toContain(
-      'Quiet breaks and the scheduled end time do not stop recording.',
+      'Ad-hoc calls and quiet breaks before the calendar end keep recording.',
     );
     expect(container.textContent).not.toContain(
       'Auto-stop on prolonged silence',

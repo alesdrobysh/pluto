@@ -12,5 +12,7 @@ swiftc "${PROJECT_ROOT}"/resources/swift/audiocap/*.swift \
   -sdk "${SDKROOT}" \
   -o "${PROJECT_ROOT}/resources/bin/audiocap" \
   -framework CoreAudio \
+  -framework AppKit \
+  -framework ApplicationServices \
   -framework AudioToolbox \
   -framework AVFoundation
