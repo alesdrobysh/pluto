@@ -379,9 +379,14 @@ describe('confirmed departure policy', () => {
     };
     const activity = (sequence: number, terminated: string[] = []) =>
       coordinator.observe({
-        kind: 'activity', version: 1, epoch: 'helper-1', sequence,
-        healthy: true, discontinuity: false,
-        sources: terminated.length ? [] : [chrome], terminated,
+        kind: 'activity',
+        version: 1,
+        epoch: 'helper-1',
+        sequence,
+        healthy: true,
+        discontinuity: false,
+        sources: terminated.length ? [] : [chrome],
+        terminated,
       });
     activity(1);
     time = 4_000;
@@ -401,13 +406,25 @@ describe('confirmed departure policy', () => {
     );
     const chrome = {
       ...source('chrome:300:launch', false, true),
-      bundleId: 'com.google.Chrome', name: 'Google Chrome', pid: 300,
+      bundleId: 'com.google.Chrome',
+      name: 'Google Chrome',
+      pid: 300,
     };
     const zoom = source('zoom:400:launch');
-    const snapshot = (sequence: number, sources: CallSource[], terminated: string[] = []) =>
+    const snapshot = (
+      sequence: number,
+      sources: CallSource[],
+      terminated: string[] = [],
+    ) =>
       provisional.observe({
-        kind: 'activity', version: 1, epoch: 'helper-1', sequence,
-        healthy: true, discontinuity: false, sources, terminated,
+        kind: 'activity',
+        version: 1,
+        epoch: 'helper-1',
+        sequence,
+        healthy: true,
+        discontinuity: false,
+        sources,
+        terminated,
       });
     snapshot(1, [chrome]);
     time = 4_000;

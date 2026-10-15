@@ -449,7 +449,9 @@ export const createCalendarStore = (sql: SqlDatabase) => {
     const state = getState();
     if (!state.enabled || !state.selectedCalendars.length) return null;
     const row = sql
-      .prepare('SELECT event_json FROM calendar_events WHERE occurrence_key = ?')
+      .prepare(
+        'SELECT event_json FROM calendar_events WHERE occurrence_key = ?',
+      )
       .get(occurrenceKey) as EventRow | undefined;
     if (!row) return null;
     const event = JSON.parse(row.event_json) as CalendarEvent;

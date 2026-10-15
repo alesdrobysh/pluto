@@ -127,9 +127,17 @@ describe('calendar store', () => {
     store.confirmRecordingSelection('meeting-a', calendarEvent.occurrenceKey);
     const extended = { ...calendarEvent, end: '2026-08-30T19:30:00.000Z' };
     store.replaceEvents({ ...input, revision: 2, events: [extended] });
-    expect(store.getPendingRecordingEvent('meeting-a')?.end).toBe(calendarEvent.end);
-    expect(store.getCurrentEvent(calendarEvent.occurrenceKey)?.end).toBe(extended.end);
-    store.replaceEvents({ ...input, revision: 3, events: [{ ...extended, isCancelled: true }] });
+    expect(store.getPendingRecordingEvent('meeting-a')?.end).toBe(
+      calendarEvent.end,
+    );
+    expect(store.getCurrentEvent(calendarEvent.occurrenceKey)?.end).toBe(
+      extended.end,
+    );
+    store.replaceEvents({
+      ...input,
+      revision: 3,
+      events: [{ ...extended, isCancelled: true }],
+    });
     expect(store.getCurrentEvent(calendarEvent.occurrenceKey)).toBeNull();
     store.replaceEvents({ ...input, revision: 4, events: [] });
     expect(store.getCurrentEvent(calendarEvent.occurrenceKey)).toBeNull();

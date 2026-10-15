@@ -108,7 +108,10 @@ export class DepartureCoordinator {
       this.status.source &&
       snapshot.terminated.includes(this.status.source.id)
     ) {
-      if (this.status.sourceConfirmed || (this.joinedSession && !this.sessionAmbiguous))
+      if (
+        this.status.sourceConfirmed ||
+        (this.joinedSession && !this.sessionAmbiguous)
+      )
         this.requestStop('app_terminated');
       else {
         this.status.source = null;
@@ -382,7 +385,8 @@ export class DepartureCoordinator {
     this.status.calendarCheck = null;
   }
   private cancelPendingCalendarStop() {
-    if (this.claimed || this.status.stop?.reason !== 'calendar_quiet_timeout') return;
+    if (this.claimed || this.status.stop?.reason !== 'calendar_quiet_timeout')
+      return;
     this.status.stop = null;
     this.status.phase = this.status.source ? 'joined' : 'untracked';
     this.log('calendar_stop_invalidated');

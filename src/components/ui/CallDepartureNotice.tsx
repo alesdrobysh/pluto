@@ -27,7 +27,7 @@ export function CallDepartureNotice({
           ? 'Which call are you recording?'
           : confirmSource
             ? `Is this recording a ${status.source?.name} call?`
-          : null;
+            : null;
   if (!message) return null;
   return (
     <aside
