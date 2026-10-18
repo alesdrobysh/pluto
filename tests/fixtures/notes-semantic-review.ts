@@ -12,6 +12,7 @@ export interface NotesSemanticReviewCase {
   expected: {
     kinds: string[];
     maxActionItems: number;
+    maxDecisionItems: number;
     forbiddenAnywhere?: string[];
     forbiddenInActions?: string[];
     forbiddenInOverview?: string[];
@@ -48,6 +49,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       evidence: [
         { lineIndex: 0, quote: 'Juniper and Kestrel' },
         { lineIndex: 2, quote: "I'll coordinate how that progresses" },
@@ -75,6 +77,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 2,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: 'October 20, 2026',
@@ -98,6 +101,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 2,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: 'October 22, 2026',
@@ -121,6 +125,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: null,
@@ -144,6 +149,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: null,
@@ -167,6 +173,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: null,
@@ -190,6 +197,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: null,
@@ -213,6 +221,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: null,
@@ -236,6 +245,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 2,
+      maxDecisionItems: 0,
       evidence: [{ lineIndex: 0, quote: 'I still own updating the runbook' }],
       kinds: ['action'],
       owner: 'Maya Hart',
@@ -260,6 +270,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 2,
+      maxDecisionItems: 0,
       evidence: [
         { lineIndex: 0, quote: 'Riley still owns sending the test checklist' },
       ],
@@ -286,6 +297,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: 'October 20, 2026',
@@ -309,6 +321,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Maya Hart',
       due: 'October 20',
@@ -332,6 +345,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 1,
       evidence: [
         { lineIndex: 0, quote: 'I will verify backup restore' },
         {
@@ -362,6 +376,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Me',
       due: null,
@@ -385,6 +400,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Me',
       due: null,
@@ -408,6 +424,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Me',
       due: null,
@@ -431,6 +448,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Me',
       due: null,
@@ -454,6 +472,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       kinds: ['point', 'question'],
       owner: null,
       due: null,
@@ -477,6 +496,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       kinds: ['point', 'question'],
       owner: null,
       due: null,
@@ -500,6 +520,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['arranging the review'],
       kinds: ['point', 'question'],
       owner: null,
@@ -524,6 +545,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['Arrange the review'],
       kinds: ['point', 'question'],
       owner: null,
@@ -548,6 +570,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       kinds: ['point', 'question'],
       owner: null,
       due: null,
@@ -571,6 +594,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Me',
       due: null,
@@ -594,6 +618,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['about the work'],
       kinds: ['action'],
       owner: 'Remote Speaker 2',
@@ -618,6 +643,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['about the work'],
       kinds: ['action'],
       owner: 'Remote Speaker 2',
@@ -642,6 +668,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['about the work'],
       kinds: ['action'],
       owner: 'Remote Speaker 2',
@@ -666,6 +693,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Remote Speaker 2',
       due: null,
@@ -689,6 +717,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['about the work'],
       kinds: ['action'],
       owner: 'Speaker 12',
@@ -713,6 +742,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Speaker 12',
       due: null,
@@ -736,6 +766,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['about the work', 'Speaker 1'],
       kinds: ['point'],
       owner: null,
@@ -760,6 +791,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['about the work', 'Speaker 1'],
       kinds: ['point'],
       owner: null,
@@ -800,6 +832,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
         'the task to schedule time with Riley to review and design onboarding is accepted',
       ],
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action', 'point'],
       ambiguousAcceptance: true,
       owner: 'Me',
@@ -825,6 +858,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Me',
       due: null,
@@ -848,6 +882,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action', 'point'],
       ambiguousAcceptance: true,
       owner: 'Me',
@@ -872,6 +907,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Riley',
       due: 'Monday',
@@ -895,6 +931,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       kinds: ['point'],
       owner: null,
       due: null,
@@ -918,6 +955,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Me',
       due: 'tomorrow at ten',
@@ -941,6 +979,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['Speaker R0'],
       kinds: ['point'],
       owner: null,
@@ -965,6 +1004,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['Speaker R0', 'R0 stated', 'R0 admitted'],
       kinds: ['point'],
       owner: null,
@@ -989,6 +1029,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['Speaker R0', 'R0 stated', 'R0 admitted'],
       kinds: ['point'],
       owner: null,
@@ -1013,6 +1054,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['Speaker R0', 'R0 stated', 'R0 admitted'],
       kinds: ['point'],
       owner: null,
@@ -1037,6 +1079,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['Speaker R0', 'R0 stated', 'R0 admitted'],
       kinds: ['point'],
       owner: null,
@@ -1061,6 +1104,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: 'Marta',
       due: null,
@@ -1083,6 +1127,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       evidence: [
         { lineIndex: 0, quote: 'Let me put' },
         { lineIndex: 1, quote: 'the review' },
@@ -1105,6 +1150,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     claim: { kind: 'action', text: 'Book the review', owner: 'Me', due: null },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       forbiddenAnywhere: ['Speaker 1'],
       evidence: [
         { lineIndex: 0, quote: 'I will' },
@@ -1133,6 +1179,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       evidence: [
         { lineIndex: 0, quote: 'send the pilot checklist' },
         { lineIndex: 1, quote: 'Yes, by Monday' },
@@ -1155,6 +1202,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     claim: { kind: 'action', text: 'Send the outline', owner: null, due: null },
     expected: {
       maxActionItems: 1,
+      maxDecisionItems: 0,
       kinds: ['action'],
       owner: null,
       due: null,
@@ -1179,6 +1227,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     },
     expected: {
       maxActionItems: 0,
+      maxDecisionItems: 0,
       kinds: ['point'],
       owner: null,
       due: null,
@@ -1204,6 +1253,7 @@ for (const id of ['combined-plan-and-promise', 'unsupported-relative-date']) {
     ),
     expected: {
       ...original.expected,
+      maxDecisionItems: 0,
       kinds: ['action'],
       ambiguousAcceptance: false,
     },

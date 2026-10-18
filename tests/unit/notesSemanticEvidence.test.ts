@@ -287,3 +287,118 @@ describe('tentative scope oracle', () => {
     );
   });
 });
+
+describe('source-audited decision bounds', () => {
+  it('rejects a tentative design decision added beside a valid calendar undertaking', () => {
+    const gold = notesSemanticReviewCases.find(
+      (row) => row.id === 'combined-plan-and-promise',
+    )!;
+    const calendar: NotesItem = {
+      ...item,
+      text: 'Schedule time with Riley depending on how we feel about the plan',
+      owner: 'Me',
+      due: null,
+    };
+    const design: NotesItem = {
+      ...calendar,
+      id: 'semantic-addition:0',
+      kind: 'decision',
+      text: 'Riley will design the experience',
+      owner: null,
+    };
+    expect(
+      scoreNotesSemanticCollection([calendar, design], gold.expected),
+    ).toEqual(['excess_decisions']);
+    expect(
+      scoreNotesSemanticCollection(
+        [
+          calendar,
+          {
+            ...design,
+            kind: 'point',
+            text: 'Riley was suggested to design the experience',
+          },
+        ],
+        gold.expected,
+      ),
+    ).toEqual([]);
+  });
+
+  it('allows the source-selected deadline change even though the original claim is an action', () => {
+    const gold = notesSemanticReviewCases.find(
+      (row) => row.id === 'revised-deadline',
+    )!;
+    const notesSource = createNotesSource(JSON.stringify(gold.lines));
+    const sources = notesSource.segments.map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    const action: NotesItem = {
+      ...item,
+      text: 'Verify backup restore by October 23, 2026',
+      owner: 'Jordan Vale',
+      due: 'October 23, 2026',
+      sources,
+    };
+    const decision: NotesItem = {
+      id: 'deadline-change',
+      kind: 'decision',
+      text: 'Move the backup restore deadline to October 23, 2026',
+      owner: null,
+      due: null,
+      sources,
+    };
+    expect(
+      scoreNotesSemanticEvidence(notesSource, decision, 'deadline-change', [
+        {
+          lineIndex: 0,
+          quote: 'move my backup restore deadline to October 23, 2026',
+        },
+      ]),
+    ).toEqual([]);
+    expect(
+      scoreNotesSemanticCollection([action, decision], gold.expected),
+    ).toEqual([]);
+    expect(
+      scoreNotesSemanticCollection(
+        [action, decision, { ...decision, id: 'extra-decision' }],
+        gold.expected,
+      ),
+    ).toEqual(['excess_decisions']);
+  });
+
+  it('rejects invalid configured decision bounds and preserves callers without one', () => {
+    for (const maxDecisionItems of [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ])
+      expect(() =>
+        scoreNotesSemanticCollection([item], {
+          maxActionItems: 1,
+          maxDecisionItems,
+        }),
+      ).toThrow('invalid_gold_decision_limit');
+    expect(
+      scoreNotesSemanticCollection(
+        [{ ...item, kind: 'decision', owner: null, due: null }],
+        { maxActionItems: 0 },
+      ),
+    ).toEqual([]);
+  });
+
+  it('declares a decision limit for every source case, including both derived definite promises', () => {
+    expect(notesSemanticReviewCases).toHaveLength(50);
+    for (const gold of notesSemanticReviewCases) {
+      expect(Number.isInteger(gold.expected.maxDecisionItems)).toBe(true);
+      expect(gold.expected.maxDecisionItems).toBeGreaterThanOrEqual(0);
+    }
+    expect(
+      notesSemanticReviewCases
+        .filter((row) => row.expected.maxDecisionItems > 0)
+        .map((row) => [row.id, row.expected.maxDecisionItems]),
+    ).toEqual([['revised-deadline', 1]]);
+  });
+});

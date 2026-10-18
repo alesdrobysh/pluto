@@ -42,6 +42,7 @@ export const scoreNotesSemanticCollection = (
   items: NotesItem[],
   expected: {
     maxActionItems: number;
+    maxDecisionItems?: number;
     forbiddenAnywhere?: string[];
     forbiddenInActions?: string[];
     forbiddenInOverview?: string[];
@@ -50,11 +51,23 @@ export const scoreNotesSemanticCollection = (
 ): string[] => {
   if (!Number.isInteger(expected.maxActionItems) || expected.maxActionItems < 0)
     throw new Error('invalid_gold_action_limit');
+  if (
+    expected.maxDecisionItems !== undefined &&
+    (!Number.isInteger(expected.maxDecisionItems) ||
+      expected.maxDecisionItems < 0)
+  )
+    throw new Error('invalid_gold_decision_limit');
   const failures =
     items.filter((item) => item.kind === 'action').length >
     expected.maxActionItems
       ? ['excess_actions']
       : [];
+  if (
+    expected.maxDecisionItems !== undefined &&
+    items.filter((item) => item.kind === 'decision').length >
+      expected.maxDecisionItems
+  )
+    failures.push('excess_decisions');
   for (const phrase of expected.forbiddenAnywhere ?? []) {
     if (
       items.some((item) =>
