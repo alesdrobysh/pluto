@@ -13,6 +13,8 @@ describe('Ask Pluto model settings surface', () => {
     expect(settings).toContain('Quick chat override (optional)');
     expect(settings).toContain('Local model');
     expect(settings).toContain('OLLAMA_GENERAL_MODEL');
-    expect(settings).toContain('Quick answers use your local model by default.');
+    expect(settings).toContain(
+      'Quick answers use your local model by default.',
+    );
   });
 });

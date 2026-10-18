@@ -215,11 +215,19 @@ test('signed CI validation fails closed without credentials and cannot publish',
     'APPLE_APP_SPECIFIC_PASSWORD',
     'APPLE_TEAM_ID',
   ];
-  const empty = Object.fromEntries(keys.map((key) => [key, '']));
-  const absent = spawnSync('bash', ['-c', script], {
-    env: empty,
-    encoding: 'utf8',
-  });
+  const empty = {
+    ...process.env,
+    ...Object.fromEntries(keys.map((key) => [key, ''])),
+  };
+  empty.BASH_ENV = undefined;
+  const absent = spawnSync(
+    '/bin/bash',
+    ['--noprofile', '--norc', '-c', script],
+    {
+      env: empty,
+      encoding: 'utf8',
+    },
+  );
   assert.equal(absent.status, 1);
   assert.ok(
     absent.stderr.includes('Missing required signing credential: CSC_LINK'),
@@ -227,17 +235,25 @@ test('signed CI validation fails closed without credentials and cannot publish',
   const provided = Object.fromEntries(
     keys.map((key) => [key, 'fictional-secret']),
   );
-  const accepted = spawnSync('bash', ['-c', script], {
-    env: provided,
-    encoding: 'utf8',
-  });
+  const accepted = spawnSync(
+    '/bin/bash',
+    ['--noprofile', '--norc', '-c', script],
+    {
+      env: { ...empty, ...provided },
+      encoding: 'utf8',
+    },
+  );
   assert.equal(accepted.status, 0);
   assert.equal(accepted.stdout + accepted.stderr, '');
   for (const key of keys) {
-    const missingOne = spawnSync('bash', ['-c', script], {
-      env: { ...provided, [key]: '' },
-      encoding: 'utf8',
-    });
+    const missingOne = spawnSync(
+      '/bin/bash',
+      ['--noprofile', '--norc', '-c', script],
+      {
+        env: { ...empty, ...provided, [key]: '' },
+        encoding: 'utf8',
+      },
+    );
     assert.equal(missingOne.status, 1);
     assert.ok(missingOne.stderr.includes(key));
     assert.ok(!missingOne.stderr.includes('fictional-secret'));
