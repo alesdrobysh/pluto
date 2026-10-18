@@ -131,6 +131,83 @@ const installFetchMock = (
 };
 
 describe('UnifiedLLMProvider', () => {
+  it('sends the source-bound notes review schema to Ollama', async () => {
+    const sourceText = 'I will send the outline after legal approves.';
+    const source = createNotesSource(
+      JSON.stringify({ segments: [{ speaker: 'Milo', text: sourceText }] }),
+    );
+    const span = { segment: 0, start: 0, end: sourceText.length };
+    const responses = [
+      {
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Outline', sources: [span] },
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline after legal approves',
+                sources: [span],
+                owner: 'Milo',
+                due: null,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        reviews: {
+          I0: {
+            kind: 'accepted_action',
+            text: 'Send the outline after legal approves',
+            owner: 'Milo',
+            due: null,
+            sources: ['R0'],
+          },
+        },
+        additions: [],
+        overview: null,
+      },
+    ];
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchMock = installFetchMock((_url, init) => {
+      bodies.push(parseRequestBody(init));
+      return jsonResponse({
+        message: { content: JSON.stringify(responses.shift()) },
+        done: true,
+        done_reason: 'stop',
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'custom:latest',
+    });
+
+    const analysis = await provider.generateStructuredAnalysis('', '', 'auto', {
+      source,
+      contextTokens: 16384,
+      hierarchyAuditStrategy: 'deterministic_only',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(bodies[1]).toMatchObject({
+      model: 'custom:latest',
+      keep_alive: '2h',
+      think: false,
+      format: {
+        type: 'object',
+        required: ['reviews', 'additions', 'overview'],
+        properties: { reviews: { required: ['I0'] } },
+      },
+    });
+    expect(analysis.all_action_items).toEqual([
+      expect.objectContaining({
+        text: 'Send the outline after legal approves',
+        assignee: 'Milo',
+      }),
+    ]);
+  });
+
   it('routes an indexed source through exactly one writer and one audit with the configured model', async () => {
     const sourceText = 'I will send the outline.';
     const source = createNotesSource(
