@@ -40,7 +40,13 @@ export const scoreNotesSemanticEvidence = (
 
 export const scoreNotesSemanticCollection = (
   items: NotesItem[],
-  expected: { maxActionItems: number; forbiddenAnywhere?: string[] },
+  expected: {
+    maxActionItems: number;
+    forbiddenAnywhere?: string[];
+    forbiddenInActions?: string[];
+    forbiddenInOverview?: string[];
+  },
+  overview?: { text: string } | null,
 ): string[] => {
   if (!Number.isInteger(expected.maxActionItems) || expected.maxActionItems < 0)
     throw new Error('invalid_gold_action_limit');
@@ -56,6 +62,20 @@ export const scoreNotesSemanticCollection = (
       )
     )
       failures.push(`unsupported_text:${phrase}`);
+  }
+  for (const phrase of expected.forbiddenInActions ?? []) {
+    if (
+      items.some(
+        (item) =>
+          item.kind === 'action' &&
+          item.text.toLowerCase().includes(phrase.toLowerCase()),
+      )
+    )
+      failures.push(`unsupported_action_text:${phrase}`);
+  }
+  for (const phrase of expected.forbiddenInOverview ?? []) {
+    if (overview?.text.toLowerCase().includes(phrase.toLowerCase()))
+      failures.push(`unsupported_overview_text:${phrase}`);
   }
   return failures;
 };

@@ -246,3 +246,44 @@ describe('semantic collection oracle', () => {
     ]);
   });
 });
+
+describe('tentative scope oracle', () => {
+  it('rejects accepted design scope in actions and overview while allowing an independent tentative point', () => {
+    const gold = notesSemanticReviewCases.find(
+      (row) => row.id === 'definite-combined-plan-and-promise',
+    )!;
+    const tentative = {
+      ...item,
+      kind: 'point' as const,
+      owner: null,
+      text: 'It was suggested to have Riley design the experience, but this work was not assigned.',
+    };
+    const calendar = {
+      ...item,
+      text: 'Schedule time with Riley once legal approves the plan',
+    };
+    expect(
+      scoreNotesSemanticCollection([calendar, tentative], gold.expected, {
+        text: 'Design was suggested; only the calendar follow-up was accepted.',
+      }),
+    ).toEqual([]);
+    expect(
+      scoreNotesSemanticCollection(
+        [
+          {
+            ...calendar,
+            text: 'Schedule time with Riley and have Riley design the experience',
+          },
+        ],
+        gold.expected,
+      ),
+    ).toContain('unsupported_action_text:have Riley design the experience');
+    expect(
+      scoreNotesSemanticCollection([calendar], gold.expected, {
+        text: 'The speaker will schedule time with Riley to review onboarding and have Riley design the experience once legal approves.',
+      }),
+    ).toContain(
+      'unsupported_overview_text:the speaker will schedule time with Riley to review onboarding and have Riley design the experience',
+    );
+  });
+});

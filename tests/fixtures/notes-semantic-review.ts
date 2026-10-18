@@ -13,6 +13,8 @@ export interface NotesSemanticReviewCase {
     kinds: string[];
     maxActionItems: number;
     forbiddenAnywhere?: string[];
+    forbiddenInActions?: string[];
+    forbiddenInOverview?: string[];
     owner: string | null;
     due: string | null;
     required: string[];
@@ -789,6 +791,14 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
       due: null,
     },
     expected: {
+      forbiddenInActions: [
+        'have Riley design the experience',
+        'meet with Riley to design onboarding',
+      ],
+      forbiddenInOverview: [
+        'the speaker will schedule time with Riley to review onboarding and have Riley design the experience',
+        'the task to schedule time with Riley to review and design onboarding is accepted',
+      ],
       maxActionItems: 1,
       kinds: ['action', 'point'],
       ambiguousAcceptance: true,
