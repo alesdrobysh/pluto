@@ -1266,19 +1266,17 @@ it('does not borrow settlement from an unrelated task and retains an explicitly 
   const id = accepted.draft.sections[0]!.items[0]!.id;
   const reviewed = await reviewSourceBoundNotes(accepted, async () =>
     JSON.stringify({
-      unchanged: { point: [], question: [] },
-      additions: [],
-      overview: null,
-      resolutions: [
-        {
-          id: 'I0',
+      reviews: {
+        I0: {
           kind: 'accepted_action',
           text: 'Send the outline',
           owner: null,
           due: null,
           sources: ['R0'],
         },
-      ],
+      },
+      additions: [],
+      overview: null,
     }),
   );
   expect(projectAuditedNotes(reviewed).all_action_items).toHaveLength(1);
@@ -1335,7 +1333,15 @@ it('keeps only the promised action and preserves the tentative plan as source di
   const result = projectAuditedNotes(
     await reviewSourceBoundNotes(accepted, async () =>
       JSON.stringify({
-        unchanged: { point: [], question: [] },
+        reviews: {
+          I0: {
+            kind: 'accepted_action',
+            text: 'Schedule calendar time with Riley. Only after legal approves.',
+            owner: 'Me',
+            due: null,
+            sources: ['R0', 'R1', 'R2'],
+          },
+        },
         additions: [
           {
             kind: 'point',
@@ -1346,16 +1352,6 @@ it('keeps only the promised action and preserves the tentative plan as source di
           },
         ],
         overview: null,
-        resolutions: [
-          {
-            id: 'I0',
-            kind: 'accepted_action',
-            text: 'Schedule calendar time with Riley. Only after legal approves.',
-            owner: 'Me',
-            due: null,
-            sources: ['R0', 'R1', 'R2'],
-          },
-        ],
       }),
     ),
   );
