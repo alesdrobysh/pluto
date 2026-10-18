@@ -688,6 +688,11 @@ export class UnifiedLLMProvider implements LLMProvider {
                     prompt,
                     contextTokens:
                       this.providerType === 'chatgpt' ? 32768 : 20480,
+                    maxOutputTokens:
+                      this.providerType === 'ollama' &&
+                      usesGemmaMtpDefaults(model)
+                        ? 4096
+                        : 2048,
                   });
                   options.onStage?.('notesAudit');
                   return this.generateText({

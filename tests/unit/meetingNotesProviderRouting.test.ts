@@ -864,3 +864,61 @@ it.each([false, true])(
     }
   },
 );
+
+it.each([
+  ['ollama', 'gemma4:12b-mlx', 4096],
+  ['ollama', 'registry.ollama.ai/library/gemma4:12b-mlx', 4096],
+  ['ollama', 'gemma4:12b', 2048],
+  ['ollama', 'private/gemma4:12b-mlx', 2048],
+  ['chatgpt', 'gemma4:12b-mlx', 2048],
+] as const)(
+  'keeps review capacity specific to the selected provider and model: %s / %s',
+  async (type, model, outputTokens) => {
+    const fixture = makeDirectNotesFixture();
+    const provider = new UnifiedLLMProvider(type, {
+      ollama_model: model,
+      chatgpt_model: 'gpt-5.6-terra',
+    });
+    const generate = vi
+      .spyOn(provider as never, 'generateText')
+      .mockImplementation(async (value) => {
+        const request = value as {
+          task: string;
+          prompt: string;
+          notesBudget?: { contextTokens: number; outputTokens: number };
+        };
+        if (request.task === 'notesWriter')
+          return JSON.stringify(fixture.draft);
+        expect(request.task).toBe('notesAudit');
+        expect(request.notesBudget).toEqual({
+          contextTokens: type === 'chatgpt' ? 32768 : 20480,
+          outputTokens,
+        });
+        const data = JSON.parse(request.prompt.split('\n').at(-1)!);
+        return JSON.stringify({
+          reviews: {
+            [data.draft.items[0][0]]: {
+              kind: 'accepted_action',
+              text: 'Send the outline',
+              owner: 'Milo',
+              due: null,
+              sources: ['R0'],
+            },
+          },
+          additions: [],
+          overview: null,
+        });
+      });
+    const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+      source: fixture.source,
+      hierarchyAuditStrategy: 'deterministic_only',
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.all_action_items).toEqual([
+      expect.objectContaining(fixture.expectedAction),
+    ]);
+    expect(result.quality.issues).not.toContain(
+      'semantic_notes_review_unavailable',
+    );
+  },
+);

@@ -95,12 +95,15 @@ export const calculateNotesRequestBudget = ({
 export const calculateNotesReviewBudget = ({
   prompt,
   contextTokens,
-}: { prompt: string; contextTokens: number }): {
+  maxOutputTokens = 2048,
+}: { prompt: string; contextTokens: number; maxOutputTokens?: number }): {
   num_ctx: number;
   num_predict: number;
 } => {
+  if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1024)
+    throw new MeetingNotesError('notes_context_exhausted');
   const outputTokens = Math.min(
-    2048,
+    maxOutputTokens,
     contextTokens - estimateNotesTokens(prompt) - 512,
   );
   if (outputTokens < 1024)

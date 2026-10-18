@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   acceptEditedNotes,
-  applySourceBoundSemanticReview,
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
 import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
@@ -75,9 +74,9 @@ const replay = (
   );
 
 describe('source-bound semantic duplicate identity', () => {
-  it('folds an explicitly identified narrative into a reconstructed task, preserving its owner, condition and evidence', async () => {
+  it('folds a reconstructed narrative into an identical task, preserving owner, condition and evidence', async () => {
     const notes = fixture();
-    const reviewed = await replay(notes, { duplicate_of: 'I1' });
+    const reviewed = await replay(notes, action);
     expect(reviewed.draft.sections[0]!.items.map((item) => item.id)).toEqual([
       'task',
     ]);
@@ -98,75 +97,38 @@ describe('source-bound semantic duplicate identity', () => {
     );
   });
 
-  it('keeps both items when no semantic duplicate identity is supplied', async () => {
-    const reviewed = await replay(fixture(), { ...action, owner: null });
-    expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
-  });
-
   it.each([
-    { duplicate_of: 'I0' },
-    { duplicate_of: 'I9' },
-    { duplicate_of: 1 },
-    { duplicate_of: 'I1', text: 'extra field' },
-  ])('preserves the original on an invalid identity: %j', async (alias) => {
-    const reviewed = await replay(fixture(), alias);
+    { owner: null },
+    { text: 'Coordinate the pilot only after security approval' },
+    { sources: ['R0', 'R1'] },
+    { kind: 'point', owner: null },
+  ])('preserves differing structured facts: %j', async (difference) => {
+    const reviewed = await replay(fixture(), { ...action, ...difference });
+    expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
+  });
+
+  it.each([false, true])(
+    'protects original commitments, including after guard demotion: %s',
+    async (demoted) => {
+      const notes = fixture('action');
+      expect(notes.reviewOriginals?.get('narrative')?.kind).toBe('action');
+      if (demoted) {
+        notes.draft.sections[0]!.items[0]!.kind = 'point';
+        notes.draft.sections[0]!.items[0]!.owner = null;
+      }
+      const reviewed = await replay(notes, action);
+      expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
+    },
+  );
+
+  it('retains evidence and identity when a candidate fails owner validation', async () => {
+    const reviewed = await replay(fixture(), { ...action, owner: 'Ari' });
     expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
     expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
   });
 
-  it('never folds an original commitment through a narrative shortcut', async () => {
-    const reviewed = await replay(fixture('action'), { duplicate_of: 'I1' });
+  it('keeps independently worded narratives without a complete reconstructed match', async () => {
+    const reviewed = await replay(fixture(), 'point');
     expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
-    expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
-  });
-
-  it('protects an original action even after a deterministic guard demotes it', async () => {
-    const notes = fixture('action');
-    expect(notes.reviewOriginals?.get('narrative')?.kind).toBe('action');
-    notes.draft.sections[0]!.items[0]!.kind = 'point';
-    notes.draft.sections[0]!.items[0]!.owner = null;
-    const reviewed = await replay(notes, { duplicate_of: 'I1' });
-    expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
-    expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
-  });
-
-  it('validates narrative protection at the shared audit boundary too', () => {
-    const notes = fixture('action');
-    expect(() =>
-      applySourceBoundSemanticReview(notes, [], {
-        sourceSpans: notes.draft.sections[0]!.items[1]!.sources,
-        additions: [],
-        narrativeDuplicates: [{ id: 'narrative', retainedId: 'task' }],
-      }),
-    ).toThrow('invalid_notes_audit');
-    expect(notes.draft.sections[0]!.items).toHaveLength(2);
-  });
-
-  it('keeps a narrative with source evidence absent from the retained task', async () => {
-    const reviewed = await replay(fixture('point', true), {
-      duplicate_of: 'I1',
-    });
-    expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
-    expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
-  });
-
-  it('does not follow duplicate chains or cycles', async () => {
-    const reviewed = await replay(
-      fixture(),
-      { duplicate_of: 'I1' },
-      { duplicate_of: 'I0' },
-    );
-    expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
-    expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
-  });
-
-  it('keeps the narrative if the retained task fails owner validation', async () => {
-    const reviewed = await replay(
-      fixture(),
-      { duplicate_of: 'I1' },
-      { ...action, owner: 'Ari' },
-    );
-    expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
-    expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
   });
 });

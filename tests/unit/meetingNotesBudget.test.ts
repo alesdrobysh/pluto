@@ -256,3 +256,37 @@ it('bounds the complete-source review output without widening context or admitti
     calculateNotesReviewBudget({ prompt, contextTokens: input + 512 + 1023 }),
   ).toThrow('notes_context_exhausted');
 });
+
+it('allows a larger local review response while retaining the context safety reserve', () => {
+  expect(
+    calculateNotesReviewBudget({
+      prompt: 'Short source.',
+      contextTokens: 20480,
+      maxOutputTokens: 4096,
+    }),
+  ).toEqual({ num_ctx: 20480, num_predict: 4096 });
+  const prompt = 'Ordinary conversation with several separate words. '.repeat(
+    650,
+  );
+  const contextTokens = estimateNotesTokens(prompt) + 512 + 2500;
+  expect(
+    calculateNotesReviewBudget({
+      prompt,
+      contextTokens,
+      maxOutputTokens: 4096,
+    }),
+  ).toEqual({ num_ctx: contextTokens, num_predict: 2500 });
+});
+
+it.each([0, 512, Number.NaN, Number.POSITIVE_INFINITY, 4096.5])(
+  'rejects an invalid review output ceiling: %s',
+  (maxOutputTokens) => {
+    expect(() =>
+      calculateNotesReviewBudget({
+        prompt: 'Source.',
+        contextTokens: 20480,
+        maxOutputTokens,
+      }),
+    ).toThrow('notes_context_exhausted');
+  },
+);

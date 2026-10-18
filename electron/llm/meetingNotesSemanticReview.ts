@@ -87,11 +87,7 @@ export const reviewSourceBoundNotes = async (
   // Structured outputs cap citation and verdict enums at 1,000 total values.
   if (
     data.length > maxSourceCharacters ||
-    source.length +
-      reviewIds.length +
-      narrativeShortcuts.filter(Boolean).length +
-      4 >
-      1000
+    source.length + narrativeShortcuts.filter(Boolean).length + 4 > 1000
   )
     return unavailable('semantic_notes_review_capacity');
   const nullable = (maxLength: number) => ({
@@ -148,7 +144,6 @@ export const reviewSourceBoundNotes = async (
     'Citations: use exact supplied Rn passage IDs covering every clause of each corrected or added statement. Cite both the earlier request and the accepting promise when together they establish the task, recipient, scope or timing. An acceptance alone cannot support an object or deadline stated only in an earlier request. A later reminder about approval cannot replace the passage naming the recipient. Every proper name, quantity, condition and date needs its actual evidence. Never cite a requester as the accepting owner. Use chronological source order; do not invent IDs, speech or facts. Draft claims and fictional examples are not source evidence.',
     'Return reviews FIRST: an object with one required entry for EVERY draft id. Each entry is a complete corrected item {kind,text,owner,due,sources}. Reconstruct EVERY accepted_action and settled_choice from source, including accurate wording. For an independently verified, accurately worded narrative claim with complete evidence anchors, the entry may instead be the string "point" or "question". Never omit an id or place an existing claim only in additions. Then compare the corrected draft against the full source and return additions for missing accepted work, settled choices, material facts, tentative alternatives and unresolved matters. Include tentative context removed by a correction as separate point additions. Classify missing accepted work as accepted_action. Do not duplicate covered material. overview is null only if unchanged and accurate, otherwise {text,sources} correcting it. Writer kinds/owners/deadlines are deliberately withheld. Follow the response schema. Use JSON null, never the string "null", for absent fields. Every item states source facts, never editorial commentary.',
     `One-word shortcuts are permitted ONLY for these unchanged narrative entries, and must match their listed kind: ${JSON.stringify(Object.fromEntries(reviewIds.flatMap((id, index) => (narrativeShortcuts[index] ? [[id, narrativeShortcuts[index]]] : []))))}. Eligibility does not certify accuracy: verify the complete wording and evidence independently. Every other entry requires a complete reconstructed item, including when its final kind is point or question. Do not reuse an imperative task as a status explanation.`,
-    'For an eligible unchanged narrative that only repeats another reviewed item, return {duplicate_of: retained draft id} instead. The retained entry must be a complete independently verified item, cover all of the repeated entry’s source anchors, and preserve all its facts, scope and conditions. Never fold independent work, different actors or a narrative with additional facts. Never use this shortcut for an original action/decision or reference another duplicate. Repeated discussion of an accepted task belongs in that task once, with its supported owner.',
     'Final acceptance check: an unsent or unfinished task does not itself establish a future responsibility. Fictional contrasts: "I have not delivered the outline" alone is a point describing status, owner null; "I have not delivered the outline; I will deliver it tomorrow" is an accepted_action with the recorded speaker as owner and tomorrow as due. Read the source, not the draft, to decide whether any undertaking exists. Correct an unsupported draft action into a complete status point; do not omit its id. Apply this distinction equally to additions and resolutions.',
     data,
   ].join('\n');
@@ -159,9 +154,6 @@ export const reviewSourceBoundNotes = async (
         $defs: {
           sourceId: { type: 'string', enum: source.map((row) => row.id) },
           reviewItem: itemSchema,
-          ...(reviewIds.length
-            ? { reviewId: { type: 'string', enum: reviewIds } }
-            : {}),
         },
         type: 'object',
         additionalProperties: false,
@@ -179,14 +171,6 @@ export const reviewSourceBoundNotes = async (
                       anyOf: [
                         { type: 'string', enum: [narrativeShortcuts[index]] },
                         { $ref: '#/$defs/reviewItem' },
-                        {
-                          type: 'object',
-                          additionalProperties: false,
-                          required: ['duplicate_of'],
-                          properties: {
-                            duplicate_of: { $ref: '#/$defs/reviewId' },
-                          },
-                        },
                       ],
                     }
                   : { $ref: '#/$defs/reviewItem' },
@@ -267,7 +251,6 @@ export const reviewSourceBoundNotes = async (
     const replacements: NotesItem[] = [];
     const additions: NotesItem[] = [];
     const held: string[] = [];
-    const duplicateCandidates: { id: string; retainedReviewId: unknown }[] = [];
     const resolveSources = (labels: unknown): SourceSpan[] => {
       if (
         !Array.isArray(labels) ||
@@ -379,19 +362,6 @@ export const reviewSourceBoundNotes = async (
     for (const [id, result] of Object.entries(parsed.reviews)) {
       const original = items[reviewIds.indexOf(id)];
       if (!original) throw new Error('invalid_semantic_review');
-      if (result && typeof result === 'object' && 'duplicate_of' in result) {
-        if (
-          Object.keys(result).length !== 1 ||
-          !narrativeShortcuts[reviewIds.indexOf(id)]
-        )
-          held.push(original.id);
-        else
-          duplicateCandidates.push({
-            id: original.id,
-            retainedReviewId: result.duplicate_of,
-          });
-        continue;
-      }
       if (result === 'point' || result === 'question') {
         if (narrativeShortcuts[reviewIds.indexOf(id)] !== result)
           held.push(original.id);
@@ -409,40 +379,6 @@ export const reviewSourceBoundNotes = async (
       )
         replacements.push(replacement);
     }
-    const narrativeDuplicates: { id: string; retainedId: string }[] = [];
-    for (const { id, retainedReviewId } of duplicateCandidates) {
-      const index =
-        typeof retainedReviewId === 'string'
-          ? reviewIds.indexOf(retainedReviewId)
-          : -1;
-      const retained = items[index];
-      const original = items.find((item) => item.id === id)!;
-      const resolved =
-        replacements.find((item) => item.id === retained?.id) ?? retained;
-      const retainedResult =
-        typeof retainedReviewId === 'string'
-          ? parsed.reviews[retainedReviewId]
-          : null;
-      if (
-        !retained ||
-        retained.id === id ||
-        held.includes(retained.id) ||
-        !retainedResult ||
-        typeof retainedResult !== 'object' ||
-        'duplicate_of' in retainedResult ||
-        !original.sources.every((span) =>
-          resolved!.sources.some(
-            (scope) =>
-              scope.segment === span.segment &&
-              scope.start <= span.start &&
-              scope.end >= span.end,
-          ),
-        )
-      )
-        held.push(id);
-      else narrativeDuplicates.push({ id, retainedId: retained.id });
-    }
-    const duplicateIds = new Set(narrativeDuplicates.map((item) => item.id));
     for (const [index, result] of parsed.additions.entries()) {
       let serial = index;
       while (
@@ -453,14 +389,11 @@ export const reviewSourceBoundNotes = async (
       const addition = resolveItem(result, `semantic-addition:${serial}`);
       if (addition) {
         const prior = [
-          ...items
-            .filter((item) => !duplicateIds.has(item.id))
-            .map(
-              (item) =>
-                replacements.find(
-                  (replacement) => replacement.id === item.id,
-                ) ?? item,
-            ),
+          ...items.map(
+            (item) =>
+              replacements.find((replacement) => replacement.id === item.id) ??
+              item,
+          ),
           ...additions,
         ].find(
           (item) =>
@@ -528,7 +461,6 @@ export const reviewSourceBoundNotes = async (
       sourceSpans,
       additions,
       overview,
-      narrativeDuplicates,
     });
     if (!held.length)
       reviewed.issues = reviewed.issues?.filter(

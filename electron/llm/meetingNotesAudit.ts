@@ -1421,7 +1421,6 @@ export const applySourceBoundSemanticReview = (
     sourceSpans: SourceSpan[];
     additions: NotesItem[];
     overview?: SupportedText;
-    narrativeDuplicates?: { id: string; retainedId: string }[];
   },
 ): AuditedNotes => {
   if (!reviewedResults.has(audited))
@@ -1465,33 +1464,37 @@ export const applySourceBoundSemanticReview = (
     });
   }
   if (byId.size) throw new MeetingNotesError('invalid_notes_audit');
-  const duplicates = coverage?.narrativeDuplicates ?? [];
-  const duplicateIds = new Set(duplicates.map((item) => item.id));
-  const originalItems = audited.draft.sections.flatMap(
-    (section) => section.items,
+  const originals = new Map(
+    audited.draft.sections
+      .flatMap((section) => section.items)
+      .map((item) => [item.id, item]),
   );
-  const retainedItems = next.draft.sections.flatMap((section) => section.items);
-  if (duplicateIds.size !== duplicates.length)
-    throw new MeetingNotesError('invalid_notes_audit');
-  for (const { id, retainedId } of duplicates) {
-    const original = originalItems.find((item) => item.id === id);
-    const retained = retainedItems.find((item) => item.id === retainedId);
-    if (
-      !original ||
-      !retained ||
-      duplicateIds.has(retainedId) ||
-      !isUnchangedNotesNarrative(audited, original) ||
-      replacements.some((item) => item.id === id) ||
-      !original.sources.every((span) =>
-        retained.sources.some(
-          (scope) =>
-            scope.segment === span.segment &&
-            scope.start <= span.start &&
-            scope.end >= span.end,
-        ),
-      )
+  const finalItems = next.draft.sections.flatMap((section) => section.items);
+  const replacementIds = new Set(replacements.map((item) => item.id));
+  const duplicateIds = new Set<string>();
+  const records = new Map<string, NotesItem>();
+  // Prefer commitments; only fold reconstructed narratives with identical facts and evidence.
+  for (const item of [
+    ...finalItems.filter(
+      (item) => !isUnchangedNotesNarrative(audited, originals.get(item.id)!),
+    ),
+    ...finalItems,
+  ]) {
+    const key = JSON.stringify({
+      kind: item.kind,
+      text: item.text,
+      owner: item.owner,
+      due: item.due,
+      sources: item.sources,
+    });
+    const retained = records.get(key);
+    if (!retained) records.set(key, item);
+    else if (
+      retained.id !== item.id &&
+      replacementIds.has(item.id) &&
+      isUnchangedNotesNarrative(audited, originals.get(item.id)!)
     )
-      throw new MeetingNotesError('invalid_notes_audit');
+      duplicateIds.add(item.id);
   }
   for (const section of next.draft.sections)
     section.items = section.items.filter((item) => !duplicateIds.has(item.id));
@@ -1554,7 +1557,7 @@ export const applySourceBoundSemanticReview = (
   next.semanticChangeCount =
     (audited.semanticChangeCount ?? 0) +
     replacements.length +
-    duplicates.length +
+    duplicateIds.size +
     (coverage?.additions.length ?? 0) +
     (coverage?.overview ? 1 : 0);
   reviewedResults.add(next);
