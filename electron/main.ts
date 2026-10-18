@@ -47,7 +47,6 @@ import {
   OLLAMA_GENERAL_MODEL,
   resolveConfiguredOllamaModel,
 } from '../src/utils/ollamaModels';
-import { checkOllamaReadiness } from './llm/ollamaReadiness';
 import { readProjectDisplayTitle } from '../src/utils/projectBriefing';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { registerDepartureService } from './activeCall/departureService';
@@ -139,6 +138,7 @@ import {
 } from './intelligence/askPlutoSemanticScope';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
+import { checkOllamaReadiness } from './llm/ollamaReadiness';
 import {
   createLocalArtifactRecord,
   extractArtifactContent,
