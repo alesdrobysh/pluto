@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react';
 import type { ChatGPTStatus } from '../../../electron/chatgpt/types';
+import type { OllamaReadiness } from '../../../electron/llm/ollamaReadiness';
 import { CLOUD_CONSENT_VERSION } from '../../../electron/llm/providerCatalog';
 import chatGPTLogo from '../../assets/brand/chatgpt.svg';
+import { OllamaReadinessStatus } from '../features/OllamaReadinessStatus';
 
 export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
   const [provider, setProvider] = useState<'ollama' | 'chatgpt' | null>(null);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [localReadiness, setLocalReadiness] = useState<OllamaReadiness | null>(
+    null,
+  );
   const invoke = (channel: string, ...args: unknown[]) =>
     window.ipcRenderer.invoke(channel, ...args);
 
@@ -40,8 +45,14 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
     };
   }, []);
 
-  const continueSetup = async () => {
+  const continueSetup = async (recordingOnly = false) => {
     if (!provider) return;
+    if (
+      provider === 'ollama' &&
+      !recordingOnly &&
+      localReadiness?.status !== 'ready'
+    )
+      return;
     setBusy(true);
     setError('');
     try {
@@ -146,6 +157,11 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
           </span>
         </label>
       </fieldset>
+      {provider === 'ollama' ? (
+        <div className="mt-4">
+          <OllamaReadinessStatus onReadiness={setLocalReadiness} />
+        </div>
+      ) : null}
       {provider === 'chatgpt' ? (
         <p className="mt-4 text-[13px] leading-5 text-pro-text-muted">
           By continuing with ChatGPT, you allow relevant transcript text, notes,
@@ -159,8 +175,13 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
       </p>
       <div className="mt-7 flex flex-wrap items-center gap-3">
         <button
+          id="intelligence-continue"
           type="button"
-          disabled={!provider || busy}
+          disabled={
+            !provider ||
+            busy ||
+            (provider === 'ollama' && localReadiness?.status !== 'ready')
+          }
           onClick={() => void continueSetup()}
           className="inline-flex min-h-12 min-w-48 items-center justify-center gap-2 rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold text-[oklch(0.965_0.008_85)] transition-colors hover:bg-[oklch(0.31_0.045_258)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -179,6 +200,16 @@ export function IntelligenceSetup({ onComplete }: { onComplete: () => void }) {
                 ? 'Use Ollama'
                 : 'Choose an option'}
         </button>
+        {provider === 'ollama' && localReadiness?.status !== 'ready' ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void continueSetup(true)}
+            className="rounded-lg px-3 py-2 text-sm font-medium text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-40"
+          >
+            Continue with recording
+          </button>
+        ) : null}
         {busy && provider === 'chatgpt' && !connected ? (
           <button
             type="button"

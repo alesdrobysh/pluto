@@ -43,6 +43,7 @@ import { CalendarSettings } from './CalendarSettings';
 import { ChatGPTIntelligenceSettings } from './ChatGPTIntelligenceSettings';
 import { ChatGptConnectionSettings } from './ChatGptConnectionSettings';
 import { IdentitySettings } from './IdentitySettings';
+import { OllamaReadinessStatus } from './OllamaReadinessStatus';
 import { ReportProblemButton } from './ReportProblemButton';
 
 interface SettingsTabProps {
@@ -322,6 +323,10 @@ export const SettingsTab = ({
     }
   }, [initialTab]);
   const [ollamaFastModel, setOllamaFastModel] = useState('');
+  const [localModelSaveStatus, setLocalModelSaveStatus] = useState<
+    'idle' | 'editing' | 'saving' | 'error'
+  >('idle');
+  const localModelSave = useRef(Promise.resolve(true));
   const [credentialDraft, setCredentialDraft] = useState('');
   const [credentialEditing, setCredentialEditing] = useState(false);
   const [credentialStatus, setCredentialStatus] = useState<
@@ -496,6 +501,27 @@ export const SettingsTab = ({
 
   const persistSetting = (key: string, value: string) => {
     void window.ipcRenderer.invoke('SET_SETTING', { key, value });
+  };
+
+  const saveLocalModel = (
+    key: 'ollama_model' | 'ollama_fast_model',
+    value: string,
+  ) => {
+    setLocalModelSaveStatus('editing');
+    localModelSave.current = window.ipcRenderer
+      .invoke('SET_SETTING', { key, value })
+      .then(
+        () => true,
+        () => false,
+      );
+  };
+  const finishLocalModelEdit = async () => {
+    if (localModelSaveStatus !== 'editing') return;
+    const save = localModelSave.current;
+    setLocalModelSaveStatus('saving');
+    const saved = await save;
+    if (save === localModelSave.current)
+      setLocalModelSaveStatus(saved ? 'idle' : 'error');
   };
 
   useEffect(() => {
@@ -1271,6 +1297,27 @@ export const SettingsTab = ({
             {llmProvider === 'ollama' ? (
               <>
                 <SettingsRow
+                  label="Local intelligence status"
+                  helper="Checks Ollama and your selected models without generating an answer or downloading anything."
+                >
+                  {localModelSaveStatus === 'idle' ? (
+                    <OllamaReadinessStatus />
+                  ) : (
+                    <p
+                      role={
+                        localModelSaveStatus === 'error' ? 'alert' : 'status'
+                      }
+                      className="text-[13px] leading-5 text-pro-text-muted"
+                    >
+                      {localModelSaveStatus === 'error'
+                        ? 'Could not save your local model. Edit the selection and try again.'
+                        : localModelSaveStatus === 'saving'
+                          ? 'Saving your local model…'
+                          : 'Finish editing your model to check local intelligence.'}
+                    </p>
+                  )}
+                </SettingsRow>
+                <SettingsRow
                   htmlFor="ollama-model"
                   label="Local model"
                   helper={`Used for notes, answers, and connected knowledge. Leave blank for ${OLLAMA_GENERAL_MODEL}, or enter a model you installed in Ollama.`}
@@ -1283,8 +1330,9 @@ export const SettingsTab = ({
                     onChange={(e) => {
                       const value = e.target.value;
                       setOllamaModel(value);
-                      persistSetting('ollama_model', value);
+                      saveLocalModel('ollama_model', value);
                     }}
+                    onBlur={() => void finishLocalModelEdit()}
                   />
                 </SettingsRow>
                 <SettingsRow
@@ -1300,8 +1348,9 @@ export const SettingsTab = ({
                     onChange={(e) => {
                       const value = e.target.value;
                       setOllamaFastModel(value);
-                      persistSetting('ollama_fast_model', value);
+                      saveLocalModel('ollama_fast_model', value);
                     }}
+                    onBlur={() => void finishLocalModelEdit()}
                   />
                 </SettingsRow>
               </>

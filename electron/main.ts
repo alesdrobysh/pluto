@@ -47,6 +47,7 @@ import {
   OLLAMA_GENERAL_MODEL,
   resolveConfiguredOllamaModel,
 } from '../src/utils/ollamaModels';
+import { checkOllamaReadiness } from './llm/ollamaReadiness';
 import { readProjectDisplayTitle } from '../src/utils/projectBriefing';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { registerDepartureService } from './activeCall/departureService';
@@ -6465,6 +6466,13 @@ app.whenReady().then(async () => {
       throw new Error('chatgpt_desktop_unavailable');
     }
   });
+  ipcMain.handle('OLLAMA_READINESS', () =>
+    checkOllamaReadiness({
+      ollama_model: db.getSetting('ollama_model') || undefined,
+      ollama_fast_model: db.getSetting('ollama_fast_model') || undefined,
+      llm_model: db.getSetting('llm_model') || undefined,
+    }),
+  );
   ipcMain.handle('GET_SETTING', (_event, key) => {
     if (typeof key !== 'string' || isSecretSettingKey(key)) {
       throw new Error('secret_setting_requires_credential_ipc');

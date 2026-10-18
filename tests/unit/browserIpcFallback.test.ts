@@ -9,6 +9,15 @@ import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivity
 describe('browser IPC capture journal fallback', () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it('does not claim a browser preview verified the local Ollama service', async () => {
+    const ipc = createBrowserIpcFallback();
+    await expect(ipc.invoke('OLLAMA_READINESS')).resolves.toEqual({
+      status: 'service_unavailable',
+      models: [],
+      missingModels: [],
+    });
+  });
+
   it('still provides preview data in a real browser', () => {
     const browserWindow: Record<string, unknown> = { location: { search: '' } };
     vi.stubGlobal('window', browserWindow);

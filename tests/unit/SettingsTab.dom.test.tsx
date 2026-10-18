@@ -65,6 +65,113 @@ afterEach(() => {
 });
 
 describe('SettingsTab', () => {
+  it.each(['ollama-model', 'ollama-fast-model'])(
+    'checks %s once after editing and the latest save completes',
+    async (id) => {
+      const saves: Array<() => void> = [];
+      const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'GET_SETTING') return '';
+        if (channel === 'OLLAMA_READINESS')
+          return {
+            status: 'ready',
+            models: ['local:latest'],
+            missingModels: [],
+          };
+        if (channel === 'SET_SETTING')
+          return new Promise((resolve) => {
+            saves.push(() => resolve(null));
+          });
+        return null;
+      });
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: { invoke, on: vi.fn(() => () => {}) },
+      });
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () =>
+        root.render(
+          <SettingsTab {...defaultProps} initialTab="intelligence" />,
+        ),
+      );
+      const checks = () =>
+        invoke.mock.calls.filter(([channel]) => channel === 'OLLAMA_READINESS')
+          .length;
+      expect(checks()).toBe(1);
+      const input = container.querySelector<HTMLInputElement>(`#${id}`)!;
+      const setValue = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )!.set!;
+      for (const value of ['custom', 'custom:latest']) {
+        await act(async () => {
+          setValue.call(input, value);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      }
+      expect(saves).toHaveLength(2);
+      expect(checks()).toBe(1);
+      expect(container.textContent).toContain('Finish editing your model');
+      expect(container.textContent).not.toContain(
+        'Your local models are installed',
+      );
+      await act(async () => {
+        input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+      expect(container.textContent).toContain('Saving your local model');
+      await act(async () => saves[0]());
+      expect(checks()).toBe(1);
+      await act(async () => saves[1]());
+      expect(checks()).toBe(2);
+      expect(container.textContent).toContain(
+        'Your local models are installed',
+      );
+      act(() => root.unmount());
+    },
+  );
+
+  it('does not check stale settings after a model save fails', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GET_SETTING') return '';
+      if (channel === 'OLLAMA_READINESS')
+        return { status: 'ready', models: ['old:latest'], missingModels: [] };
+      if (channel === 'SET_SETTING') throw new Error('write failed');
+      return null;
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => {}) },
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(<SettingsTab {...defaultProps} initialTab="intelligence" />),
+    );
+    const input = container.querySelector<HTMLInputElement>('#ollama-model')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )!.set!.call(input, 'new:latest');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    });
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not save your local model',
+    );
+    expect(container.textContent).not.toContain(
+      'Your local models are installed',
+    );
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === 'OLLAMA_READINESS'),
+    ).toHaveLength(1);
+    act(() => root.unmount());
+  });
+
   it.each(['standard', 'encrypted'] as const)(
     'displays the %s database setup without a toggle',
     async (mode) => {

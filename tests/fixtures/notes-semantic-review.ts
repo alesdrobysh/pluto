@@ -17,6 +17,7 @@ export interface NotesSemanticReviewCase {
     forbidden: string[];
     contextRequired?: string[];
     ambiguousAcceptance?: boolean;
+    evidence?: Array<{ lineIndex: number; quote: string }>;
   };
 }
 
@@ -42,6 +43,10 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
       due: null,
     },
     expected: {
+      evidence: [
+        { lineIndex: 0, quote: 'Juniper and Kestrel' },
+        { lineIndex: 2, quote: "I'll coordinate how that progresses" },
+      ],
       kinds: ['action'],
       owner: 'Tavi',
       due: null,
@@ -218,6 +223,7 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
       due: null,
     },
     expected: {
+      evidence: [{ lineIndex: 0, quote: 'I still own updating the runbook' }],
       kinds: ['action'],
       owner: 'Maya Hart',
       due: null,
@@ -240,6 +246,9 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
       due: null,
     },
     expected: {
+      evidence: [
+        { lineIndex: 0, quote: 'Riley still owns sending the test checklist' },
+      ],
       kinds: ['action'],
       owner: 'Riley',
       due: null,
@@ -306,6 +315,13 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
       due: 'October 20, 2026',
     },
     expected: {
+      evidence: [
+        { lineIndex: 0, quote: 'I will verify backup restore' },
+        {
+          lineIndex: 0,
+          quote: 'move my backup restore deadline to October 23, 2026',
+        },
+      ],
       kinds: ['action'],
       owner: 'Jordan Vale',
       due: 'October 23, 2026',
@@ -998,6 +1014,11 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
       due: null,
     },
     expected: {
+      evidence: [
+        { lineIndex: 0, quote: 'Let me put' },
+        { lineIndex: 1, quote: 'the review' },
+        { lineIndex: 2, quote: 'time on the calendar' },
+      ],
       kinds: ['action'],
       owner: 'Me',
       due: null,
@@ -1014,6 +1035,11 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
     ],
     claim: { kind: 'action', text: 'Book the review', owner: 'Me', due: null },
     expected: {
+      evidence: [
+        { lineIndex: 0, quote: 'I will' },
+        { lineIndex: 1, quote: 'not' },
+        { lineIndex: 2, quote: 'book the review' },
+      ],
       kinds: ['point'],
       owner: null,
       due: null,
@@ -1035,6 +1061,10 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
       due: null,
     },
     expected: {
+      evidence: [
+        { lineIndex: 0, quote: 'send the pilot checklist' },
+        { lineIndex: 1, quote: 'Yes, by Monday' },
+      ],
       kinds: ['action'],
       owner: 'Me',
       due: 'Monday',

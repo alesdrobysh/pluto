@@ -6,6 +6,7 @@ import {
   applyMeetingNotesTemplateSettingsUpdate,
   createMeetingNotesTemplateSettingsSnapshot,
 } from '../../electron/llm/meetingNotesTemplates';
+import type { OllamaReadiness } from '../../electron/llm/ollamaReadiness';
 import type { MeetingPrep } from '../../electron/meetingPrep';
 import { prepRoster } from '../../electron/prepAttendees';
 import type { PrepAttendee } from '../../electron/prepAttendees';
@@ -1354,6 +1355,13 @@ const createInvokeFallback =
           : null;
         break;
       }
+      case 'OLLAMA_READINESS':
+        result = {
+          status: 'service_unavailable',
+          models: [],
+          missingModels: [],
+        } satisfies OllamaReadiness;
+        break;
       case 'GET_SETTING':
         result = getSetting(args[0]);
         break;

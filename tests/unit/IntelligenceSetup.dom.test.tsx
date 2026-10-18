@@ -24,6 +24,8 @@ async function renderSetup(
     }
     if (channel === 'CHATGPT_STATUS')
       return { connected, planEnabled: connected };
+    if (channel === 'OLLAMA_READINESS')
+      return { status: 'ready', models: ['custom:local'], missingModels: [] };
     if (channel === 'CHATGPT_SIGN_IN') {
       connected = true;
       saved.chatgpt_model = 'account-model';
@@ -48,7 +50,9 @@ async function renderSetup(
     );
   const submit = async () =>
     act(async () =>
-      container.querySelector<HTMLButtonElement>('button')!.click(),
+      container
+        .querySelector<HTMLButtonElement>('#intelligence-continue')!
+        .click(),
     );
   return { container, root, complete, invoke, saved, choose, submit };
 }
@@ -102,6 +106,60 @@ describe('First-run intelligence choice', () => {
     await f.submit();
     expect(f.invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
     expect(f.complete).toHaveBeenCalledOnce();
+    expect(f.invoke).not.toHaveBeenCalledWith('OLLAMA_READINESS');
+    act(() => f.root.unmount());
+  });
+
+  it('lets users keep recording while local intelligence is not installed, and remembers their choice', async () => {
+    const f = await renderSetup();
+    const original = f.invoke.getMockImplementation()!;
+    f.invoke.mockImplementation(async (channel, input) =>
+      channel === 'OLLAMA_READINESS'
+        ? {
+            status: 'model_missing',
+            models: ['custom:local'],
+            missingModels: ['custom:local'],
+          }
+        : original(channel, input),
+    );
+    await f.choose('ollama');
+    expect(f.container.textContent).toContain('not installed');
+    expect(
+      f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
+        .disabled,
+    ).toBe(true);
+    const later = [...f.container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Continue with recording',
+    )!;
+    await act(async () => later.click());
+    expect(f.saved).toMatchObject({
+      llm_provider: 'ollama',
+      intelligence_setup_complete: 'true',
+    });
+    expect(f.complete).toHaveBeenCalledOnce();
+    expect(f.invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+    act(() => f.root.unmount());
+  });
+
+  it('rechecks without changing an existing local model selection', async () => {
+    const f = await renderSetup({
+      llm_provider: 'ollama',
+      ollama_model: 'my-model:latest',
+      ollama_fast_model: 'my-quick:latest',
+    });
+    expect(f.container.textContent).toContain(
+      'Your local models are installed',
+    );
+    const recheck = [...f.container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Check again',
+    )!;
+    await act(async () => recheck.click());
+    expect(
+      f.invoke.mock.calls.filter(([channel]) => channel === 'OLLAMA_READINESS'),
+    ).toHaveLength(2);
+    await f.submit();
+    expect(f.saved.ollama_model).toBe('my-model:latest');
+    expect(f.saved.ollama_fast_model).toBe('my-quick:latest');
     act(() => f.root.unmount());
   });
 

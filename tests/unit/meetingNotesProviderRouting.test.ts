@@ -917,6 +917,7 @@ it.each([
     expect(result.all_action_items).toEqual([
       expect.objectContaining(fixture.expectedAction),
     ]);
+    expect(fetch).not.toHaveBeenCalled();
     expect(result.quality.issues).not.toContain(
       'semantic_notes_review_unavailable',
     );
