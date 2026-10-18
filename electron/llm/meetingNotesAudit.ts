@@ -1,3 +1,4 @@
+import { canonicalizeActionText } from '../../src/utils/actionCommitment';
 import {
   groundRecentWin,
   groundSourceReviewedItem,
@@ -1166,6 +1167,12 @@ const explicitDecisionOwner = (
       );
       if (!segment?.speaker) return [];
       const text = resolveSourceSpan(source, span);
+      if (
+        /\b(?:the decision|it)\s+is\s+(?:still\s+)?(?:pending|tentative|not\s+(?:yet\s+)?(?:final(?:ized|ised)?|settled|made|approved))\b/i.test(
+          text,
+        )
+      )
+        return [];
       return /\b(?:the decision is|(?:we|i) (?:decided|agreed|approved|selected|chose)|proceed with)\b/i.test(
         text,
       )
@@ -1267,11 +1274,40 @@ export const acceptEditedNotes = ({
           return [{ ...item, kind: 'point' as const, owner: null, due: null }];
         }
         if (item.kind === 'decision' && declaredDecisionOwner) {
-          return [{ ...item, owner: declaredDecisionOwner, due: null }];
+          const copiedDecision = groundSourceReviewedItem(
+            {
+              kind: 'decision',
+              text: evidence,
+              owner: declaredDecisionOwner,
+              due: null,
+            },
+            {
+              evidence,
+              quotedEvidence: evidence,
+              sourceLines,
+              sourceLine: sourceLines.join(' '),
+              lineIndex: item.sources[0]!.segment,
+            },
+          );
+          if (copiedDecision) {
+            issues.push(
+              `deterministic_replaced_decision_with_source:${item.id}`,
+            );
+            return [{ ...item, ...copiedDecision }];
+          }
         }
         if (acceptancePolicy === 'conservative') {
           issues.push(`deterministic_unsupported_commitment:${item.id}`);
-          return [];
+          // Keep the evidence, not the writer's unsupported settled claim.
+          return [
+            {
+              ...item,
+              kind: 'point' as const,
+              text: evidence.trim(),
+              owner: null,
+              due: null,
+            },
+          ];
         }
         throw new MeetingNotesError(
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
@@ -1289,6 +1325,22 @@ export const acceptEditedNotes = ({
       }
       if (ownerChanged) issues.push(`deterministic_corrected_owner:${item.id}`);
       if (dueRemoved) issues.push(`deterministic_removed_due:${item.id}`);
+      if (
+        item.kind === 'action' &&
+        ownerChanged &&
+        canonicalizeActionText(item.text, item.owner!) !== checked.text
+      ) {
+        issues.push(`deterministic_reclassified_owner_conflict:${item.id}`);
+        return [
+          {
+            ...item,
+            kind: 'point' as const,
+            text: evidence.trim(),
+            owner: null,
+            due: null,
+          },
+        ];
+      }
       return [{ ...item, ...checked }];
     });
   }

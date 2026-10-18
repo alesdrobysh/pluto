@@ -1777,12 +1777,24 @@ const runBoundedCompactNotes = async (
         }
       : {}),
   };
+  // Leaf-local checks cannot see a later packet cancel an earlier promise.
+  const finalReviewed = deterministicallyCheckedDraft(
+    input,
+    combined,
+    uniqueSpans(writtenLeaves.flatMap((leaf) => leaf.evidenceSpans)),
+  );
   const accepted = acceptEditedNotes({
     source: input.source,
-    draft: combined,
+    draft: finalReviewed.draft,
     acceptancePolicy: 'conservative',
   });
-  accepted.issues = [...new Set([...(accepted.issues ?? []), ...issues])];
+  accepted.issues = [
+    ...new Set([
+      ...(accepted.issues ?? []),
+      ...(finalReviewed.audited.issues ?? []),
+      ...issues,
+    ]),
+  ];
   return metadataFor(
     input,
     projectAuditedNotes(accepted),

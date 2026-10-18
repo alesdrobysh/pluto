@@ -10,7 +10,9 @@ import levenshtein from 'fast-levenshtein';
 import {
   type ActionCommitmentMetadata,
   canonicalizeActionText,
+  parseActionMetadata,
 } from '../src/utils/actionCommitment';
+import { parseUserEditsJson } from '../src/utils/analysisDocument';
 import {
   isUsablePersonName,
   isUsablePersonRole,
@@ -33,6 +35,39 @@ export interface ProcessedEntities {
   updated: number;
   linked: number;
   entities: db.Entity[];
+}
+
+/** Legacy extraction handlers must not invent a second set of meeting tasks. */
+export function requireSavedMeetingActions(
+  meeting: db.PersistedMeeting | undefined,
+): ExtractedEntities['action_items'] {
+  const analysis = parseActionMetadata(meeting?.analysis_json ?? null);
+  if (
+    !meeting ||
+    (meeting.analysis_format_pass != null && !meeting.analysis_format_pass) ||
+    !Array.isArray(analysis.all_action_items)
+  ) {
+    throw new Error('meeting_action_classification_unavailable');
+  }
+  const edits = parseUserEditsJson(meeting.user_edits_json);
+  return analysis.all_action_items.flatMap((action, index) => {
+    const edit =
+      edits[`all_action_items:${index}`] ?? edits[`v2:action:${index}`];
+    if (edit && typeof edit.edited === 'string' && !edit.edited.trim())
+      return [];
+    return action && typeof action.text === 'string' && action.text.trim()
+      ? [
+          {
+            description: action.text,
+            assignee:
+              typeof action.assignee === 'string' ? action.assignee : undefined,
+            due_date: typeof action.due === 'string' ? action.due : undefined,
+            evidence:
+              typeof action.evidence === 'string' ? action.evidence : undefined,
+          },
+        ]
+      : [];
+  });
 }
 
 const clamp = (value: number, min: number, max: number): number => {

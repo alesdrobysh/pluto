@@ -106,9 +106,19 @@ export const assertSupportedMigrationHistory = (
         entry.hash === packaged[index]?.hash,
     );
   if (!isExactPrefix) {
+    const newerBuildRequired =
+      applied.length > packaged.length &&
+      packaged.every(
+        (entry, index) =>
+          entry.when === applied[index]?.createdAt &&
+          entry.hash === applied[index]?.hash,
+      );
     throw new DatabaseLifecycleError(
       'database_version_unsupported',
       'Applied migrations are not an exact prefix of packaged migrations.',
+      newerBuildRequired
+        ? { migrationHistoryReason: 'newer_build_required' }
+        : {},
     );
   }
 };

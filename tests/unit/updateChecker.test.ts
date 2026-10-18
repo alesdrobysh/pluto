@@ -257,6 +257,7 @@ describe('UpdateChecker', () => {
     expect(fetch).toHaveBeenCalledOnce();
     expect(mocks.spawn).toHaveBeenCalledOnce();
     expect(spawned?.env.PLUTO_UPDATE_TAG).toBe('v1.0.0-rc.15');
+    expect(spawned?.env.PLUTO_UPDATE_USER_DATA).toBe(mocks.userData);
     expect(mocks.quit).toHaveBeenCalledOnce();
   });
   it('shows a persisted failure once after relaunch', async () => {
@@ -299,7 +300,7 @@ it.each([
       );
       writeFileSync(
         join(bin, 'open'),
-        '#!/bin/bash\nprintf "%s" "$1" > "$TEST_OPENED"\n',
+        '#!/bin/bash\nprintf "%s\\n" "$@" > "$TEST_OPENED"\n',
         { mode: 0o755 },
       );
       writeFileSync(join(bin, 'sleep'), '#!/bin/bash\nexit 0\n', {
@@ -316,6 +317,8 @@ it.each([
           PLUTO_UPDATE_RESULT: result,
           PLUTO_UPDATE_APP: '/fixture Applications/Pluto.app',
           PLUTO_UPDATE_DIRECTORY: '/fixture Applications',
+          PLUTO_UPDATE_USER_DATA:
+            '/fixture Profiles/original encrypted profile',
           PLUTO_UPDATE_INSTALLER: installer,
           PLUTO_UPDATE_SCRATCH: scratch,
           PLUTO_UPDATE_PARENT_PID:
@@ -335,13 +338,18 @@ it.each([
           '/fixture Applications',
           '--tag',
           'v1.0.0-rc.15',
+          '--user-data-dir',
+          '/fixture Profiles/original encrypted profile',
         ]);
       }
       if (exit !== 0) {
         expect(readFileSync(result, 'utf8')).toContain(`exit ${exit}`);
-        expect(readFileSync(reopened, 'utf8')).toBe(
+        expect(readFileSync(reopened, 'utf8').trim().split('\n')).toEqual([
+          '-na',
           '/fixture Applications/Pluto.app',
-        );
+          '--args',
+          '--user-data-dir=/fixture Profiles/original encrypted profile',
+        ]);
       } else {
         expect(existsSync(result)).toBe(false);
         expect(existsSync(reopened)).toBe(false);

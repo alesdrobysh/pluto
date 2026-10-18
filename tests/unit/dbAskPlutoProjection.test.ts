@@ -14,6 +14,7 @@ import {
   getAskPlutoMeetingHeaders,
   getAskPlutoMeetings,
   getCanonicalPersonCommitments,
+  identityStore,
   saveMeeting,
   searchMeetingNotesFts,
   upsertEntity,
@@ -21,6 +22,52 @@ import {
 
 afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
+});
+
+it('keeps completed adopted legacy actions and rejected self aliases closed in recall', () => {
+  const self = upsertEntity({
+    id: 'projection-self',
+    type: 'person',
+    name: 'Alex',
+  });
+  identityStore.setSelfPersonId(self.id);
+  upsertEntity({
+    id: 'legacy-adopted',
+    type: 'action_item',
+    name: 'Prepare the old checklist',
+    status: 'completed',
+    dedupe_by_name: false,
+    metadata: {
+      commitment_state: 'confirmed',
+      dreamingSources: [{ meetingIds: ['scoped'] }],
+    },
+  });
+  upsertEntity({
+    id: 'rejected-self-alias',
+    type: 'action_item',
+    name: 'Send an obsolete report',
+    status: 'active',
+    dedupe_by_name: false,
+    metadata: {
+      commitment_state: 'rejected',
+      assignee_name: 'Me',
+      source_meeting_id: 'scoped',
+    },
+  });
+  expect(getCanonicalPersonCommitments(self.id)?.excluded).toEqual(
+    expect.arrayContaining([
+      {
+        text: 'Prepare the old checklist',
+        status: 'completed',
+        sourceMeetingId: 'scoped',
+      },
+      {
+        text: 'Send an obsolete report',
+        status: 'rejected',
+        sourceMeetingId: 'scoped',
+      },
+    ]),
+  );
 });
 
 describe('Ask Pluto synthesized meeting projection', () => {

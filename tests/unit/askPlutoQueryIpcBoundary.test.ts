@@ -69,12 +69,10 @@ describe('Ask Pluto query IPC boundary', () => {
   });
   it('uses structured assignee recall before invoking the answer provider', () => {
     expect(main).toContain('buildAssigneeActionRecall');
-    expect(queryHandler).toContain(
-      'const assigneeRecall = buildAssigneeActionRecall',
+    expect(queryHandler).toMatch(
+      /const assigneeRecall\s*=\s*buildAssigneeActionRecall/,
     );
-    const assigneeRecallIndex = queryHandler.indexOf(
-      'const assigneeRecall = buildAssigneeActionRecall',
-    );
+    const assigneeRecallIndex = queryHandler.indexOf('const assigneeRecall');
     const extractiveAnswerIndex = queryHandler.indexOf(
       'const extractiveAnswer =',
     );
@@ -86,7 +84,7 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(extractiveAnswerIndex).toBeLessThan(groundedProviderIndex);
     expect(queryHandler).toContain('assigneeRecall?.context');
     expect(queryHandler).toContain('assigneeRecall?.answer');
-    expect(queryHandler).toContain('!assigneeRecall.coverageLimited');
+    expect(queryHandler).not.toContain('!assigneeRecall.coverageLimited');
     expect(queryHandler).toContain('const usePreparedAssigneeRecall');
     expect(queryHandler).toContain(
       "conversationResolution.relation === 'new_topic'",

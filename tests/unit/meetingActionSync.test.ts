@@ -35,6 +35,101 @@ afterAll(() => {
 });
 
 describe('meeting action entity and user edit synchronization', () => {
+  it('preserves completed actions when the saved edit document is unreadable', () => {
+    const meetingId = 'unreadable-edit-state';
+    saveMeeting({
+      id: meetingId,
+      title: 'Edit recovery',
+      analysis_json: JSON.stringify({
+        all_action_items: [{ text: 'Send the checklist' }],
+      }),
+    });
+    const task = upsertEntity({
+      id: 'completed-unreadable-edit',
+      type: 'action_item',
+      name: 'Send the checklist',
+      status: 'completed',
+      dedupe_by_name: false,
+      metadata: {
+        source_meeting_id: meetingId,
+        original_description: 'Send the checklist',
+        origin: 'extraction',
+        user_completed_edited: true,
+      },
+    });
+    db.prepare('UPDATE meetings SET user_edits_json = ? WHERE id = ?').run(
+      'not-json',
+      meetingId,
+    );
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(0);
+    expect(getEntity(task.id)?.status).toBe('completed');
+  });
+  it('does not transfer completion by position to a different regenerated task', () => {
+    const meetingId = 'regenerated-task-identity';
+    saveMeeting({
+      id: meetingId,
+      title: 'Task identity review',
+      analysis_json: JSON.stringify({
+        all_action_items: [{ text: 'Send the new report' }],
+      }),
+      user_edits_json: JSON.stringify({
+        'completion:all_action_items:0': { original: 'false', edited: 'true' },
+      }),
+    });
+    const old = upsertEntity({
+      id: 'old-task-identity',
+      type: 'action_item',
+      name: 'Prepare the old checklist',
+      status: 'active',
+      dedupe_by_name: false,
+      metadata: {
+        origin: 'extraction',
+        original_description: 'Prepare the old checklist',
+        source_meeting_id: meetingId,
+        source_path: 'all_action_items:0',
+        source_index: 0,
+      },
+    });
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(old.id)?.status).toBe('active');
+    expect(getEntity(old.id)?.name).toBe('Prepare the old checklist');
+  });
+  it('mirrors completion into the matching task after the note order changes', () => {
+    const meetingId = 'reordered-task-identity';
+    saveMeeting({
+      id: meetingId,
+      title: 'Task identity review',
+      analysis_json: JSON.stringify({
+        all_action_items: [
+          { text: 'Send the new report' },
+          { text: 'Prepare the checklist' },
+        ],
+      }),
+    });
+    const task = upsertEntity({
+      id: 'reordered-task',
+      type: 'action_item',
+      name: 'Prepare the checklist',
+      status: 'active',
+      dedupe_by_name: false,
+      metadata: {
+        origin: 'extraction',
+        original_description: 'Prepare the checklist',
+        source_meeting_id: meetingId,
+        source_path: 'all_action_items:0',
+        source_index: 0,
+      },
+    });
+    updateEntityStatus(task.id, 'completed');
+    const edits = JSON.parse(getMeeting(meetingId)!.user_edits_json!);
+    expect(edits['completion:all_action_items:0']).toBeUndefined();
+    expect(edits['completion:all_action_items:1'].edited).toBe('true');
+    expect(parseActionMetadata(getEntity(task.id)!.metadata).source_index).toBe(
+      1,
+    );
+  });
   it('synchronizes text edits (typos, product names) from user_edits_json to action entities', () => {
     const meetingId = 'meeting-typo-sync-1';
     const originalText =

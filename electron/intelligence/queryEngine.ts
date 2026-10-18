@@ -451,15 +451,26 @@ export const shouldUseWorkspaceIntelligence = (input: {
   relation: 'new_topic' | 'follow_up' | 'expansion' | 'omission_follow_up';
   priorQuestion?: string;
   conversationAnchor?: string;
-}): boolean =>
-  isPlanningOrPriorityQuery(input.query) ||
-  isWorkspaceRiskQuery(input.query) ||
-  (input.relation !== 'new_topic' &&
-    [input.priorQuestion, input.conversationAnchor].some(
-      (value) =>
-        value &&
-        (isPlanningOrPriorityQuery(value) || isWorkspaceRiskQuery(value)),
-    ));
+}): boolean => {
+  const questions = [
+    input.query,
+    ...(input.relation !== 'new_topic'
+      ? [input.priorQuestion, input.conversationAnchor]
+      : []),
+  ];
+  if (questions.some((query) => query && parseAssigneeActionQuery(query)))
+    return false;
+  return (
+    isPlanningOrPriorityQuery(input.query) ||
+    isWorkspaceRiskQuery(input.query) ||
+    (input.relation !== 'new_topic' &&
+      [input.priorQuestion, input.conversationAnchor].some(
+        (value) =>
+          value &&
+          (isPlanningOrPriorityQuery(value) || isWorkspaceRiskQuery(value)),
+      ))
+  );
+};
 
 export const resolveWorkspaceIntelligenceMode = (
   query: string,

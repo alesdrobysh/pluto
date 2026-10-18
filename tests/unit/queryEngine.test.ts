@@ -3198,27 +3198,49 @@ describe('Query Engine', () => {
         shouldUseWorkspaceIntelligence({
           query: 'tell me more please?',
           relation: 'expansion',
-          priorQuestion: 'what should i focus on?',
-          conversationAnchor: 'what should i focus on?',
+          priorQuestion: 'what should we focus on?',
+          conversationAnchor: 'what should we focus on?',
         }),
       ).toBe(true);
       expect(
         shouldUseWorkspaceIntelligence({
           query: 'what did you leave out? the stale items?',
           relation: 'follow_up',
-          conversationAnchor: 'what should i focus on?',
+          conversationAnchor: 'what should we focus on?',
         }),
       ).toBe(true);
       expect(
         shouldUseWorkspaceIntelligence({
           query: 'what did we decide about pricing?',
           relation: 'new_topic',
-          conversationAnchor: 'what should i focus on?',
+          conversationAnchor: 'what should we focus on?',
         }),
       ).toBe(false);
       expect(
         shouldUseWorkspaceIntelligence({
           query: 'Anything I should be concerned about across my work?',
+          relation: 'new_topic',
+        }),
+      ).toBe(true);
+    });
+
+    it('keeps personal priorities and their follow-ups on canonical commitments', () => {
+      expect(
+        shouldUseWorkspaceIntelligence({
+          query: 'what should I focus on?',
+          relation: 'new_topic',
+        }),
+      ).toBe(false);
+      expect(
+        shouldUseWorkspaceIntelligence({
+          query: 'what did you leave out?',
+          relation: 'omission_follow_up',
+          conversationAnchor: 'what are my open commitments?',
+        }),
+      ).toBe(false);
+      expect(
+        shouldUseWorkspaceIntelligence({
+          query: 'what should we focus on?',
           relation: 'new_topic',
         }),
       ).toBe(true);

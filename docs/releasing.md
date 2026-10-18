@@ -69,6 +69,9 @@ signing; it does not claim Developer ID signing or notarization.
   new version because the published tag identifies an immutable source revision.
 - If workflow discovery times out, use `gh run list --workflow release.yml`, then
   `gh run watch <run-id> --exit-status`. Do not bump just because discovery failed.
+- If GitHub reports `tag_name was used by an immutable release`, that tag cannot
+  be republished, even if its release was deleted. Do not move or recreate the tag.
+  Use the normal release workflow with a fresh version after the fix is ready.
 - Publishing can be retried: an existing draft resumes asset upload; an already
   published release is left intact.
 

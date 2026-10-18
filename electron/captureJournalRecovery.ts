@@ -494,6 +494,7 @@ const repairV3TranscriptGaps = async (
   transcribeChunk: NonNullable<RecoveryDependencies['transcribeChunk']>,
   fallbackConfig?: RecoveryDependencies['transcriptionConfig'],
   meetingKey?: Buffer,
+  beforeTranscription?: () => Promise<void>,
 ): Promise<CaptureJournalManifestV3 | CaptureJournalManifestV4> => {
   let manifest: CaptureJournalManifestV3 | CaptureJournalManifestV4 =
     initialManifest;
@@ -643,6 +644,7 @@ const repairV3TranscriptGaps = async (
       const inputPath = join(rootDir, disposition.repairRelativePath);
       const journalDurationSeconds =
         interval.chunkEndSec - interval.chunkStartSec;
+      await beforeTranscription?.();
       const result =
         manifest.schemaVersion === 4 && meetingKey
           ? await transcribeChunk(
@@ -1519,7 +1521,8 @@ export const recoverInterruptedCaptureJournals = async (
       continue;
     }
 
-    const existingMeeting = deps.getMeeting(manifest.meetingId);
+    let existingMeeting = deps.getMeeting(manifest.meetingId);
+    let stagedAudio: { mic: string | null; system: string | null } | undefined;
     const isRecoveryRequiredMeeting =
       existingMeeting?.finalization_status === 'recovery_required';
     const isResumableSealedMeeting = Boolean(
@@ -1634,6 +1637,61 @@ export const recoverInterruptedCaptureJournals = async (
             deps.transcribeChunk,
             deps.transcriptionConfig,
             meetingKey,
+            async () => {
+              if (existingMeeting) return;
+              const sources = await Promise.all(
+                (['mic', 'system'] as const).map(async (source) => {
+                  const recovered =
+                    manifest.schemaVersion === 4
+                      ? await buildV4SourceSegments(rootDir, manifest, source)
+                      : await buildV3SourceSegments(
+                          rootDir,
+                          manifest as CaptureJournalManifestV3,
+                          source,
+                        );
+                  if (!recovered.segments.length) return null;
+                  return manifest.schemaVersion === 4
+                    ? await materializeEncryptedJournalSource({
+                        rootDir,
+                        manifest,
+                        source,
+                        meetingKey: meetingKey!,
+                      })
+                    : await deps.stitchWavSegments(
+                        recovered.segments,
+                        `${manifest.meetingId}-${source}-recovered`,
+                      );
+                }),
+              );
+              if (!sources[0] && !sources[1]) return;
+              stagedAudio = { mic: sources[0], system: sources[1] };
+              const activity = await getRecoveryActivityEvidence(manifest);
+              // Publish recoverable audio before model work can stall or fail.
+              const pending = {
+                ...buildRecoveredMeeting({
+                  manifest,
+                  nowMs,
+                  micAudioPath: stagedAudio.mic,
+                  systemAudioPath: stagedAudio.system,
+                  integrity: {
+                    schemaVersion: 2,
+                    state: 'needs_attention',
+                    causes: [
+                      { code: 'recovered_awaiting_validation' },
+                      ...activity.causes,
+                    ],
+                    evidenceProvenance: activity.evidenceProvenance,
+                    ...(activity.activityEvidence
+                      ? { activityEvidence: activity.activityEvidence }
+                      : {}),
+                  },
+                }),
+                finalization_status: 'recovery_required' as const,
+                finalization_error_category: 'journal_seal_failed' as const,
+              };
+              await deps.saveMeeting(pending);
+              existingMeeting = pending;
+            },
           );
         }
       }
@@ -1710,6 +1768,7 @@ export const recoverInterruptedCaptureJournals = async (
       };
 
       const micAudioPath =
+        stagedAudio?.mic ||
         (isResumableSealedMeeting && resumableMeeting?.audio_path) ||
         (micRecovery.segments.length > 0
           ? manifest.schemaVersion === 4
@@ -1732,6 +1791,7 @@ export const recoverInterruptedCaptureJournals = async (
         await persistResumableStage({ audio_path: micAudioPath });
       }
       const systemAudioPath =
+        stagedAudio?.system ||
         (isResumableSealedMeeting && resumableMeeting?.system_audio_path) ||
         (systemRecovery.segments.length > 0
           ? manifest.schemaVersion === 4
@@ -1840,7 +1900,8 @@ export const recoverInterruptedCaptureJournals = async (
           systemAudioPath,
           integrity,
           acceptedSegments: acceptedEvidence.segments,
-          existingMeeting,
+          existingMeeting:
+            deps.getMeeting(manifest.meetingId) ?? existingMeeting,
         }),
       );
       result.recoveredCount += 1;

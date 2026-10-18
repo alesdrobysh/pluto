@@ -1,5 +1,9 @@
 import { setImmediate } from 'node:timers/promises';
-import { parseActionMetadata } from '../src/utils/actionCommitment';
+import {
+  getActionSourceMeetingId,
+  isPersonalAction,
+  parseActionMetadata,
+} from '../src/utils/actionCommitment';
 import type { ReminderCandidate } from './commitmentReminderPolicy';
 import type {
   PendingReminder,
@@ -44,12 +48,25 @@ export function createReminderPersistence(
     )
       return undefined;
     const metadata = parseActionMetadata(entity.metadata);
+    const self = api.identityStore.getSelfPersonId();
+    const canonicalSelf = self ? api.resolvePersonIdentityId(self) : null;
+    const canonicalOwner = entity.assigned_to
+      ? api.resolvePersonIdentityId(entity.assigned_to)
+      : null;
+    if (
+      !isPersonalAction(
+        { ...entity, assigned_to: canonicalOwner },
+        {
+          selfPersonId: canonicalSelf,
+        },
+      )
+    )
+      return undefined;
     const obligationId = store.resolveObligationId(entityId);
     if (!obligationId) return undefined;
     const sourceMeetingId =
-      typeof metadata.source_meeting_id === 'string'
-        ? metadata.source_meeting_id
-        : store.sourceMeetingId(entityId);
+      getActionSourceMeetingId(entity.metadata) ??
+      store.sourceMeetingId(entityId);
     if (metadata.origin === 'extraction' && !sourceMeetingId) return undefined;
     if (sourceMeetingId && !store.sourceExists(sourceMeetingId))
       return undefined;
@@ -57,7 +74,6 @@ export function createReminderPersistence(
       entity.assigned_to && metadata.owner_source === 'user'
         ? api.resolvePersonIdentityId(entity.assigned_to)
         : null;
-    const self = api.identityStore.getSelfPersonId();
     const other =
       owner && self && owner !== api.resolvePersonIdentityId(self)
         ? api.getEntity(owner)

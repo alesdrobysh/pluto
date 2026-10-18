@@ -51,6 +51,71 @@ function fixture(...turns: string[]) {
 }
 
 describe('source-grounded notes guardrails', () => {
+  it.each([
+    ['send the outline', 'I have sent the outline.'],
+    ['provide the examples', 'I already provided the examples.'],
+    ['coordinate the review', 'I have coordinated the review.'],
+    ['rerun the report query', 'I have already rerun the report query.'],
+  ])(
+    'does not retain a completed promise to %s as a future task',
+    (task, completion) => {
+      const f = fixture(`I will ${task}.`, completion);
+      expect(findNotesGuardrailIssues(f.source, f.draft(f.item(task)))).toEqual(
+        [
+          expect.objectContaining({
+            code: 'conflicting_action',
+            sources: [f.spans[0], f.spans[1]],
+          }),
+        ],
+      );
+      expect(
+        findNotesGuardrailIssues(
+          f.source,
+          f.draft(f.item(completion, 'point', [f.spans[1]!])),
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    'I have to send the outline.',
+    'I have not sent the outline.',
+    'Have I sent the outline?',
+    'I have sent a different report.',
+    'The issue is resolved.',
+    'I have sent the outline but I will send it again.',
+  ])('does not infer task completion from %s', (text) => {
+    const f = fixture('I will send the outline.', text);
+    expect(
+      findNotesGuardrailIssues(f.source, f.draft(f.item('Send the outline.'))),
+    ).toEqual([]);
+  });
+
+  it('does not transfer another speaker completion or ignore an explicit renewal', () => {
+    const f = fixture(
+      'I will send the outline.',
+      'I have sent the outline.',
+      'I will send the outline.',
+    );
+    const renewed = f.item('Send the outline.', 'action', [f.spans[2]!]);
+    expect(findNotesGuardrailIssues(f.source, f.draft(renewed))).toEqual([]);
+    const other = fixture(
+      'I will send the outline.',
+      'I have sent the outline.',
+    );
+    const otherSource = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Rae', text: 'I will send the outline.' },
+        { speaker: 'Lee', text: 'I have sent the outline.' },
+      ]),
+    );
+    expect(
+      findNotesGuardrailIssues(
+        otherSource,
+        other.draft(other.item('Send the outline.')),
+      ),
+    ).toEqual([]);
+  });
   it('reuses source preparation while checking edited drafts and individual actions independently', () => {
     const f = fixture(
       'I will send the outline after legal approves.',

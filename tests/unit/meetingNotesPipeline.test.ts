@@ -119,7 +119,7 @@ it('uses one writer and one complete-document editor without segmentation or a t
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v33',
+    prompt_version: 'notes-v36',
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
@@ -1092,6 +1092,78 @@ it('recovers deterministically and records missing_action as advisory when leaf 
     );
     expect(result.generation_metadata.audit_status).toBe(
       'complete_with_warnings',
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
+it('checks later cancellations across compact leaves before publishing future actions', async () => {
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Milo',
+      text: `I will send the outline. ${'Background. '.repeat(2000)}`,
+    },
+    {
+      speaker: 'Milo',
+      text: `I will not send the outline because the launch was cancelled. ${'Background. '.repeat(2000)}`,
+    },
+  ]);
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+    source.segments.map((segment) => {
+      const span = {
+        segment: segment.index,
+        start: 0,
+        end: segment.text.length,
+      };
+      return {
+        primarySpans: [span],
+        overlapSpans: [],
+        primaryText: segment.text,
+        sourceText: segment.text,
+        sourceRevision: source.revision,
+      };
+    }),
+  );
+  const generate = vi.fn(async (request: NotesRequest) => {
+    const { descriptor: span } = sourceDescriptors(request.prompt)[0]!;
+    return JSON.stringify({
+      title: null,
+      sections: [
+        {
+          title: 'Outline',
+          items: [
+            {
+              kind: span.segment === 0 ? 'action' : 'point',
+              text:
+                span.segment === 0
+                  ? 'Send the outline.'
+                  : 'Milo will not send the outline because the launch was cancelled.',
+              owner: span.segment === 0 ? 'Milo' : null,
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+  try {
+    const result = await generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 16384,
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(result.all_action_items).toEqual([]);
+    expect(JSON.stringify(result.topics)).toContain('launch was cancelled');
+    expect(result.quality.issues).toEqual(
+      expect.arrayContaining([expect.stringContaining('conflicting_action')]),
     );
   } finally {
     plan.mockRestore();

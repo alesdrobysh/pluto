@@ -185,6 +185,110 @@ const makeWorkingMemorySnapshot = (
 });
 
 describe('buildDashboardHomeModel', () => {
+  it.each([
+    {
+      name: 'Alex Morgan will prepare the checklist',
+      metadata: JSON.stringify({
+        source_meeting_id: 'meeting-1',
+        source_evidence: 'Alex Morgan will prepare the checklist',
+      }),
+    },
+    {
+      name: 'Prepare the checklist',
+      metadata: JSON.stringify({
+        assignee_name: 'Alex Morgan',
+        source_meeting_id: 'meeting-1',
+        source_evidence: 'Alex Morgan will prepare the checklist',
+      }),
+    },
+    {
+      name: 'Prepare the checklist',
+      metadata: JSON.stringify({ origin: 'user' }),
+    },
+  ])(
+    'keeps personal ownership from a self alias or explicit user work: %j',
+    (overrides) => {
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [makeAction(overrides)],
+        selfNames: ['Alex Morgan'],
+        workspace: null,
+        graphStats: null,
+      });
+      expect(model.commitments.items).toHaveLength(1);
+    },
+  );
+  it.each(['overdueActions', 'staleActions', 'activeActions'] as const)(
+    'requires positive personal ownership in %s, including for pinned suggestions',
+    (bucket) => {
+      const actions = [
+        makeAction({
+          id: 'unsourced-self',
+          metadata: JSON.stringify({ assignee_name: 'Me' }),
+        }),
+        makeAction({
+          id: 'uncited-self',
+          metadata: JSON.stringify({
+            assignee_name: 'Me',
+            source_meeting_id: 'meeting-1',
+          }),
+        }),
+        makeAction({ id: 'unknown', metadata: null }),
+        makeAction({
+          id: 'team',
+          metadata: JSON.stringify({ assignee_name: 'Team' }),
+        }),
+        makeAction({
+          id: 'background',
+          name: 'Jordan noted that the group will transfer records into the report.',
+          metadata: JSON.stringify({
+            dreamingSources: [{ meetingIds: ['meeting-1'] }],
+            dashboard_daily_priority: { date: '2026-10-14', rank: 0 },
+          }),
+        }),
+        makeAction({ id: 'completed', status: 'completed' }),
+        makeAction({
+          id: 'retired',
+          metadata: JSON.stringify({
+            commitment_state: 'confirmed',
+            meeting_regeneration_retired_at: '2026-10-13',
+          }),
+        }),
+        makeAction({
+          id: 'mine',
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+          }),
+        }),
+        makeAction({ id: 'adopted' }),
+      ];
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [],
+        overdueActions: [],
+        staleActions: [],
+        activeActions: [],
+        workspace: null,
+        graphStats: null,
+        dateKey: '2026-10-14',
+        [bucket]: actions,
+      });
+      expect(model.commitments.items.map((item) => item.id).sort()).toEqual([
+        'adopted',
+        'mine',
+      ]);
+      expect(model.commitments.backlog).toEqual([]);
+      expect(
+        model.actionInsights.allItems.map((item) => item.id).sort(),
+      ).toEqual(['adopted', 'mine']);
+    },
+  );
+
   it('caps top of mind at three and commitments at five items', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -279,7 +383,12 @@ describe('buildDashboardHomeModel', () => {
         makeAction({
           id: 'stale-possible',
           name: 'Stale possible',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       activeActions: [
@@ -288,6 +397,9 @@ describe('buildDashboardHomeModel', () => {
           id: 'daily-possible',
           name: 'Daily possible',
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
             commitment_state: 'possible',
             dashboard_daily_priority: { date: '2026-08-25', rank: 0 },
           }),
@@ -350,7 +462,12 @@ describe('buildDashboardHomeModel', () => {
         makeAction({
           id: 'possible-action',
           name: 'Maybe send a launch note',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       staleActions: [],
@@ -2167,7 +2284,7 @@ describe('buildDashboardHomeModel', () => {
     ]);
   });
 
-  it('fails metadata-free legacy actions closed to review without projecting commitment urgency', () => {
+  it('excludes metadata-free legacy actions without personal ownership', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -2178,12 +2295,8 @@ describe('buildDashboardHomeModel', () => {
       graphStats: null,
     });
 
-    expect(model.actionInsights.state).toBe('populated');
-    expect(model.actionInsights.items[0]).toMatchObject({
-      commitmentState: 'possible',
-      statusLabel: 'Needs review',
-      canComplete: false,
-    });
+    expect(model.actionInsights.state).toBe('empty');
+    expect(model.commitments.state).toBe('empty');
     expect(model.hero.kind).toBe('latest_meeting');
     expect(model.briefingFocus.kind).toBe('latest_meeting');
   });
@@ -2202,8 +2315,10 @@ describe('buildDashboardHomeModel', () => {
       overdueActions: [
         makeAction({
           metadata: JSON.stringify({
+            origin: 'user',
+            assignee_name: 'Me',
             commitment_state: 'possible',
-            origin: 'extraction',
+
             source_meeting_id: 'meeting-source',
           }),
         }),
@@ -2268,8 +2383,10 @@ describe('buildDashboardHomeModel', () => {
         makeAction({
           name: 'Pair microphone with system evidence for every interval',
           metadata: JSON.stringify({
+            origin: 'user',
+            assignee_name: 'Me',
             commitment_state: 'possible',
-            origin: 'extraction',
+
             source_meeting_id: 'meeting-source',
             full_description:
               'Pair microphone with system evidence for every interval',
@@ -2304,6 +2421,8 @@ describe('buildDashboardHomeModel', () => {
         overdueActions: [
           makeAction({
             metadata: JSON.stringify({
+              origin: 'user',
+              assignee_name: 'Me',
               commitment_state: 'possible',
               source_meeting_id: 'meeting-source',
             }),
@@ -2335,6 +2454,8 @@ describe('buildDashboardHomeModel', () => {
       overdueActions: [
         makeAction({
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            assignee_name: 'Me',
             commitment_state: 'possible',
             origin: 'extraction',
             source_meeting_id: '42',
@@ -2363,6 +2484,8 @@ describe('buildDashboardHomeModel', () => {
       activeActions: [
         makeAction({
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            assignee_name: 'Me',
             commitment_state: 'possible',
             origin: 'extraction',
             source_meeting_id: 'meeting-missing',
@@ -2405,7 +2528,12 @@ describe('buildDashboardHomeModel', () => {
         id: `possible-${index + 1}`,
         name: `Possible follow-up ${index + 1}`,
         due_date: null,
-        metadata: JSON.stringify({ commitment_state: 'possible' }),
+        metadata: JSON.stringify({
+          source_evidence: 'I will prepare the requested follow-up.',
+          source_meeting_id: 'meeting-1',
+          assignee_name: 'Me',
+          commitment_state: 'possible',
+        }),
         updated_at: `2026-08-${String(10 + index).padStart(2, '0')}T10:00:00.000Z`,
       }),
     );
@@ -2449,7 +2577,12 @@ describe('buildDashboardHomeModel', () => {
       meetings: [],
       overdueActions: [
         makeAction({
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       staleActions: [],
@@ -2501,7 +2634,12 @@ describe('buildDashboardHomeModel', () => {
       actions: [
         makeAction({
           id: 'possible-1',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       expected: '1 possible follow-up needs review before action.',
@@ -2511,11 +2649,21 @@ describe('buildDashboardHomeModel', () => {
       actions: [
         makeAction({
           id: 'possible-1',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
         makeAction({
           id: 'possible-2',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       expected: '2 possible follow-ups need review before action.',
@@ -2525,7 +2673,12 @@ describe('buildDashboardHomeModel', () => {
       actions: [
         makeAction({
           id: 'possible-1',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
         makeAction({ id: 'confirmed-1' }),
         makeAction({ id: 'confirmed-2' }),
@@ -2583,7 +2736,12 @@ describe('buildDashboardHomeModel', () => {
       overdueActions: [],
       staleActions: [
         makeAction({
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       activeActions: [],
@@ -3088,6 +3246,8 @@ describe('buildDashboardHomeModel', () => {
             id: 'action-me',
             name: 'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
             metadata: JSON.stringify({
+              source_evidence: 'I will prepare the requested follow-up.',
+              source_meeting_id: 'meeting-1',
               commitment_state: 'possible',
               assignee_name: 'Me',
             }),
@@ -3118,6 +3278,7 @@ describe('buildDashboardHomeModel', () => {
         id: 'possible-dup',
         name: 'Me to circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
         metadata: JSON.stringify({
+          source_evidence: 'I will prepare the requested follow-up.',
           commitment_state: 'possible',
           assignee_name: 'Me',
           source_meeting_id: 'meeting-1',
@@ -3155,6 +3316,8 @@ describe('buildDashboardHomeModel', () => {
         name: 'Me to circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
         metadata: JSON.stringify({
           commitment_state: 'possible',
+          source_evidence:
+            'I will circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
           source_meeting_id: 'meeting-1',
         }),
       });
@@ -3198,6 +3361,7 @@ describe('buildDashboardHomeModel', () => {
         id: 'possible-me',
         name: 'Send the updated proposal to client',
         metadata: JSON.stringify({
+          source_evidence: 'I will prepare the requested follow-up.',
           commitment_state: 'possible',
           assignee_name: 'Me',
           source_meeting_id: 'meeting-1',
@@ -3225,6 +3389,8 @@ describe('buildDashboardHomeModel', () => {
         name: 'Me will circle back with Arnold offline regarding the status of things and the timeline for tomorrow',
         metadata: JSON.stringify({
           commitment_state: 'possible',
+          source_evidence:
+            'I will circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
           source_meeting_id: 'meeting-1',
         }),
       });
@@ -3233,6 +3399,8 @@ describe('buildDashboardHomeModel', () => {
         name: 'Me to circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
         metadata: JSON.stringify({
           commitment_state: 'possible',
+          source_evidence:
+            'I will circle back with Arnold offline regarding the status of things and the timeline for tomorrow.',
           source_meeting_id: 'meeting-1',
         }),
       });
@@ -3240,7 +3408,9 @@ describe('buildDashboardHomeModel', () => {
         id: 'cand-3',
         name: 'Prepare the roadmap presentation for next week',
         metadata: JSON.stringify({
+          source_evidence: 'I will prepare the requested follow-up.',
           commitment_state: 'possible',
+          assignee_name: 'Me',
           source_meeting_id: 'meeting-1',
         }),
       });
@@ -3270,6 +3440,7 @@ describe('buildDashboardHomeModel', () => {
         name: 'Send revised rollout plan',
         due_date: '2026-09-01T12:00:00.000Z',
         metadata: JSON.stringify({
+          source_evidence: 'I will prepare the requested follow-up.',
           commitment_state: 'confirmed',
           assignee_name: 'Me',
           source_meeting_id: 'meeting-old',
@@ -3280,6 +3451,7 @@ describe('buildDashboardHomeModel', () => {
         name: 'Send revised rollout plan',
         due_date: '2026-09-20T12:00:00.000Z',
         metadata: JSON.stringify({
+          source_evidence: 'I will prepare the requested follow-up.',
           commitment_state: 'possible',
           assignee_name: 'Me',
           source_meeting_id: 'meeting-new',
@@ -3316,6 +3488,8 @@ describe('buildDashboardHomeModel', () => {
           id: 'mine',
           name: fullDescription.slice(0, 100),
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
             commitment_state: 'possible',
             full_description: fullDescription,
             assignee_name: 'Me',
@@ -3401,6 +3575,7 @@ describe('buildDashboardHomeModel', () => {
         name: 'Send updated benchmark numbers',
         assigned_to: 'person-taylor',
         metadata: JSON.stringify({
+          source_evidence: 'I will prepare the requested follow-up.',
           commitment_state: 'possible',
           assignee_name: 'Me',
           source_meeting_id: 'meeting-1',
@@ -3411,6 +3586,7 @@ describe('buildDashboardHomeModel', () => {
         name: 'Send the updated proposal to client',
         assigned_to: null,
         metadata: JSON.stringify({
+          source_evidence: 'I will prepare the requested follow-up.',
           commitment_state: 'possible',
           assignee_name: 'Me',
           source_meeting_id: 'meeting-1',

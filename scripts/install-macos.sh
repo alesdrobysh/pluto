@@ -3,6 +3,22 @@
 set -euo pipefail
 main() {
   fail() { printf 'Pluto: %s\n' "$*" >&2; exit 1; }
+  require_compatible_upgrade() {
+    local previous=$1 candidate=$2 value index
+    local old_parts=() new_parts=()
+    for value in "$previous" "$candidate"; do
+      value=${value/.rc./-rc.}
+      [[ $value =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.([0-9]+))?$ ]] || fail 'Cannot verify the installed version. Nothing was replaced.'
+      local parts=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" 1 0)
+      if [[ -n ${BASH_REMATCH[4]} ]]; then parts[3]=0; parts[4]=${BASH_REMATCH[5]}; fi
+      if [[ ${#old_parts[@]} == 0 ]]; then old_parts=("${parts[@]}"); else new_parts=("${parts[@]}"); fi
+    done
+    for index in 0 1 2 3 4; do
+      (( 10#${new_parts[index]} > 10#${old_parts[index]} )) && return
+      (( 10#${new_parts[index]} < 10#${old_parts[index]} )) && fail 'Refusing to install an older Pluto build over a newer one. Existing app and data were preserved.'
+    done
+    return 0
+  }
   require_pluto_closed() {
     local pid command
     for pid in $(pgrep -x Pluto || true); do
@@ -17,16 +33,19 @@ main() {
   applications=/Applications
   verify_only=false
   fresh_profile=false
+  user_data_dir=''
   requested_tag=''
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --tag) [[ $# -ge 2 ]] || fail 'Missing release tag.'; requested_tag=$2; shift 2 ;;
       --verify-only) verify_only=true; shift ;;
       --fresh-profile) fresh_profile=true; shift ;;
+      --user-data-dir) [[ $# -ge 2 && $2 == /* ]] || fail 'An absolute user-data directory is required.'; user_data_dir=$2; shift 2 ;;
       --directory) [[ $# -ge 2 ]] || fail 'Missing installation directory.'; applications=$2; shift 2 ;;
       *) fail "Unknown option: $1" ;;
     esac
   done
+  if "$fresh_profile" && [[ -n $user_data_dir ]]; then fail 'A fresh profile cannot replace the selected update profile.'; fi
   [[ -z $requested_tag || $requested_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+|\.rc\.[0-9]+)?$ ]] || fail 'Invalid release tag.'
   [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || fail 'An Apple Silicon Mac is required. Run Terminal without Rosetta.'
   os_version=$(sw_vers -productVersion)
@@ -96,6 +115,7 @@ main() {
   [[ ! -L $destination ]] || fail 'The installation destination is a symbolic link.'
   if [[ -e $destination ]]; then
     [[ $(plutil -extract CFBundleIdentifier raw -o - "$destination/Contents/Info.plist") == com.pluto.app ]] || fail 'The destination contains a different app.'
+    require_compatible_upgrade "$(plutil -extract CFBundleShortVersionString raw -o - "$destination/Contents/Info.plist")" "$version"
     previous_requirement=$(codesign -dr - "$destination" 2>&1 | sed -n 's/^# designated => //p')
   fi
   staging=$(mktemp -d "$applications/.pluto-install.XXXXXX")
@@ -119,7 +139,8 @@ main() {
     printf 'Launching first-run onboarding with a separate empty profile: %s\nYour normal profile is preserved.\n' "$profile"
     open -na "$destination" --args "--user-data-dir=$profile"
   else
-    open "$destination"
+    profile=${user_data_dir:-$HOME/Library/Application Support/pluto}
+    open -na "$destination" --args "--user-data-dir=$profile"
   fi
 }
 main "$@"

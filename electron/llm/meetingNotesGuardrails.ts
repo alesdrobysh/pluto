@@ -12,13 +12,15 @@ export type NotesGuardrailIssue = {
 // Deliberately small: these checks are a repair signal, not an action extractor.
 // State, intention, reported speech, and ambiguous task identity must abstain.
 const TASK_VERBS =
-  'send|email|share|review|update|prepare|write|draft|create|check|book|schedule|publish|upload|finish|replace';
+  'send|email|share|review|update|prepare|write|draft|create|check|book|schedule|publish|upload|finish|replace|coordinate|provide|rerun';
 const TASK_BOUNDARY = new RegExp(
   `\\s+and\\s+(?=(?:(?:i['’]ll|i will)\\s+)?(?:${TASK_VERBS})\\b)`,
   'i',
 );
 const PROMISE =
   /^(?:yes[, ]+|okay[, ]+|sure[, ]+)?(?:i['’]ll|i will|i commit to)\s+(.+)$/i;
+const COMPLETED_PROMISE =
+  /^i(?:(?:['’]ve| have)\s+(?:already\s+)?|\s+already\s+|\s+)((?:sent|emailed|shared|reviewed|updated|prepared|written|drafted|created|checked|booked|scheduled|published|uploaded|finished|replaced|coordinated|provided|rerun)\s+.+)/i;
 const CONDITION =
   /\b(?:only if|if|unless|until|once|after|when|provided(?: that)?|pending|subject to|conditional on|contingent (?:on|upon))\b/i;
 // Recognizable trailing due phrases are metadata, not task identity. Do not
@@ -309,6 +311,29 @@ function cancels(
   );
 }
 
+function completes(entry: Sentence, candidate: Candidate): boolean {
+  if (
+    !candidate.speaker ||
+    entry.speaker !== candidate.speaker ||
+    entry.text.endsWith('?') ||
+    /\b(?:but|and)\s+i(?:['’]ll| will| need to| must)\b/i.test(entry.text)
+  )
+    return false;
+  const match = COMPLETED_PROMISE.exec(entry.text);
+  if (
+    !match ||
+    CONDITION.test(match[1]!.replace(/^\S+\s+/, '')) ||
+    (/^rerun\b/i.test(match[1]!) &&
+      !/^i(?:['’]ve| have| already)\b/i.test(entry.text))
+  )
+    return false;
+  const task = match[1]!
+    .split(/[;,]|\s+(?:and|but)\s+/i)[0]!
+    .replace(/^sent\b/i, 'send')
+    .replace(/^written\b/i, 'write');
+  return matchesTask(candidate.task, task);
+}
+
 function requiresWithdrawalContext(
   entry: Sentence,
   candidate: Candidate,
@@ -354,7 +379,8 @@ export function createNotesGuardrailChecker(
         (entry) =>
           entry.order > previous.order &&
           entry.order < candidate.order &&
-          cancels(entry, previous, sourceCandidates),
+          (cancels(entry, previous, sourceCandidates) ||
+            completes(entry, previous)),
       )
         ? repeatedSources.get(previous)!
         : [];
@@ -399,13 +425,17 @@ export function createNotesGuardrailChecker(
           entry.order > candidate.order &&
           cancels(entry, candidate, sourceCandidates),
       );
+      const completion = entries.find(
+        (entry) => entry.order > candidate.order && completes(entry, candidate),
+      );
+      const resolution = cancellation ?? completion;
       // A later explicit renewal is authoritative for the same speaking owner
       // and task. An unrelated promise cannot reactivate cancelled work.
       if (
-        cancellation &&
+        resolution &&
         sourceCandidates.some(
           (later) =>
-            later.order > cancellation.order &&
+            later.order > resolution.order &&
             later.speaker === candidate.speaker &&
             matchesTask(candidate.task, later.task) &&
             matchesTask(later.task, candidate.task),
@@ -413,9 +443,10 @@ export function createNotesGuardrailChecker(
       )
         continue;
       let code: NotesGuardrailIssue['code'] | null = null;
-      if (cancellation) {
+      if (resolution) {
         if (matching.length) code = 'conflicting_action';
         else if (
+          cancellation &&
           requiresWithdrawalContext(cancellation, candidate) &&
           !context.some(
             (block) =>
@@ -462,7 +493,7 @@ export function createNotesGuardrailChecker(
       if (code && (!diagnosticCodes || diagnosticCodes.includes(code))) {
         const sources = [
           ...candidate.sources,
-          ...(cancellation ? [cancellation.span] : []),
+          ...(resolution ? [resolution.span] : []),
         ].map((span) => ({ ...span }));
         const issue = { code, sources };
         issues.set(JSON.stringify(issue), issue);

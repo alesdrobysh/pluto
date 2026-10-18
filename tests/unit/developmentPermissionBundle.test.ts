@@ -17,6 +17,17 @@ describe.skipIf(process.platform !== 'darwin')(
       );
       const bundle = path.resolve(executable, '../../..');
       const plist = path.join(bundle, 'Contents/Info.plist');
+      for (const [key, value] of Object.entries({
+        CFBundleName: 'Pluto Development',
+        CFBundleDisplayName: 'Pluto Development',
+        CFBundleIdentifier: 'com.pluto.app.development',
+      })) {
+        expect(
+          execFileSync('plutil', ['-extract', key, 'raw', '-o', '-', plist], {
+            encoding: 'utf8',
+          }).trim(),
+        ).toBe(value);
+      }
       for (const key of [
         'NSMicrophoneUsageDescription',
         'NSAudioCaptureUsageDescription',
@@ -39,6 +50,6 @@ describe.skipIf(process.platform !== 'darwin')(
       );
       expect(entitlements).toContain('com.apple.security.device.audio-input');
       expect(prepareDevElectron()).toBe(entry);
-    }, 30_000);
+    }, 60_000);
   },
 );

@@ -87,7 +87,7 @@ finish() {
   status=$?
   if [[ $status != 0 ]]; then
     printf 'Update failed (exit %s). See the update log for details.\n' "$status" > "$PLUTO_UPDATE_RESULT"
-    open "$PLUTO_UPDATE_APP" || true
+    open -na "$PLUTO_UPDATE_APP" --args "--user-data-dir=$PLUTO_UPDATE_USER_DATA" || true
   fi
   rm -rf "$PLUTO_UPDATE_SCRATCH"
 }
@@ -100,7 +100,7 @@ if kill -0 "$PLUTO_UPDATE_PARENT_PID" 2>/dev/null; then
   echo 'Pluto did not finish shutting down. Nothing was installed.'
   exit 1
 fi
-/bin/bash "$PLUTO_UPDATE_INSTALLER" --directory "$PLUTO_UPDATE_DIRECTORY" --tag "$PLUTO_UPDATE_TAG"
+/bin/bash "$PLUTO_UPDATE_INSTALLER" --directory "$PLUTO_UPDATE_DIRECTORY" --tag "$PLUTO_UPDATE_TAG" --user-data-dir "$PLUTO_UPDATE_USER_DATA"
 `;
 
 export class UpdateChecker {
@@ -259,6 +259,7 @@ export class UpdateChecker {
           PLUTO_UPDATE_RESULT: this.resultPath(),
           PLUTO_UPDATE_APP: appPath,
           PLUTO_UPDATE_DIRECTORY: dirname(appPath),
+          PLUTO_UPDATE_USER_DATA: app.getPath('userData'),
           PLUTO_UPDATE_INSTALLER: installerPath,
           PLUTO_UPDATE_SCRATCH: scratch,
           PLUTO_UPDATE_PARENT_PID: String(process.pid),

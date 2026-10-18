@@ -165,6 +165,55 @@ it('conservatively preserves conditional willingness as source text instead of a
   );
 });
 
+it.each([
+  [
+    'decision',
+    'We could enable automatic cleanup after the owner confirms the records.',
+    'Enable automatic cleanup.',
+    'Ben',
+  ],
+  [
+    'action',
+    'The deployment is only a proposal until security reviews it.',
+    'Deploy tomorrow.',
+    'Ben',
+  ],
+] as const)(
+  'preserves the cited context of an unsupported %s without publishing an outcome',
+  (kind, text, claim, owner) => {
+    const source = makeSyntheticNotesSource([{ speaker: 'Ben', text }]);
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const { draft } = makeDirectNotesFixture();
+    draft.sections[0]!.title.sources = sources;
+    draft.sections[0]!.items = [
+      { id: 's0:item:0', kind, text: claim, owner, due: 'tomorrow', sources },
+    ];
+
+    const reviewed = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+      compactNormalization: true,
+    });
+    expect(reviewed.draft.sections[0]!.items).toEqual([
+      expect.objectContaining({
+        kind: 'point',
+        text,
+        sources,
+        owner: null,
+        due: null,
+      }),
+    ]);
+    const projected = projectAuditedNotes(reviewed);
+    expect(projected.all_action_items).toEqual([]);
+    expect(projected.all_decisions).toEqual([]);
+    expect(JSON.stringify(projected.topics)).toContain(text);
+    expect(() => acceptEditedNotes({ source, draft })).toThrow(
+      /invalid_commitment/,
+    );
+  },
+);
+
 it('holds a copied disfluent writer point for source review', () => {
   const text =
     'as a homework just on each face I can review the kind of work that would have done and if if word change changes';
@@ -256,6 +305,40 @@ it('does not hold a coherent first-person source excerpt without repeated words'
   expect(reviewed.proseReviewItems).toBeUndefined();
 });
 
+it('does not let an explicit decision label bypass unsettled or contradictory source checks', () => {
+  const text =
+    'The decision is pending approval; the team has not selected a deployment target.';
+  const source = makeSyntheticNotesSource([{ speaker: 'Ben', text }]);
+  const sources = [{ segment: 0, start: 0, end: text.length }];
+  const { draft } = makeDirectNotesFixture();
+  draft.sections[0]!.title.sources = sources;
+  draft.sections[0]!.items = [
+    {
+      id: 's0:item:0',
+      kind: 'decision',
+      text: 'The team selected the production target.',
+      owner: null,
+      due: null,
+      sources,
+    },
+  ];
+
+  const accepted = acceptEditedNotes({
+    source,
+    draft,
+    acceptancePolicy: 'conservative',
+    compactNormalization: true,
+  });
+  expect(projectAuditedNotes(accepted).all_decisions).toEqual([]);
+  expect(accepted.draft.sections[0]!.items[0]).toMatchObject({
+    kind: 'point',
+    text,
+  });
+  expect(() =>
+    acceptEditedNotes({ source, draft, compactNormalization: true }),
+  ).toThrow(/invalid_commitment/);
+});
+
 it('rejects fabricated source references', () => {
   const { source, draft } = makeDirectNotesFixture();
   draft.sections[0]!.items[0]!.sources = [{ segment: 99, start: 0, end: 12 }];
@@ -273,6 +356,57 @@ it('does not silently change a wrong owner while leaving contradictory prose', (
   expect(() =>
     parseEditedNotes({ raw: JSON.stringify(draft), source }),
   ).toThrow(/invalid_commitment/);
+});
+
+it.each(['Jules will send the outline.', 'Jules to send the outline.'])(
+  'keeps source context rather than a corrected owner with contradictory prose: %s',
+  (text) => {
+    const { source, draft } = makeDirectNotesFixture();
+    Object.assign(draft.sections[0]!.items[0]!, { text, owner: 'Jules' });
+    const reviewed = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    expect(projectAuditedNotes(reviewed).all_action_items).toEqual([]);
+    expect(reviewed.draft.sections[0]!.items[0]).toMatchObject({
+      kind: 'point',
+      owner: null,
+      due: null,
+    });
+    expect(reviewed.issues).toContain(
+      'deterministic_reclassified_owner_conflict:s0:item:0',
+    );
+  },
+);
+
+it('corrects owner metadata without treating a named recipient as the actor', () => {
+  const text = 'I will send the outline to Jules.';
+  const source = makeSyntheticNotesSource([{ speaker: 'Milo', text }]);
+  const { draft } = makeDirectNotesFixture();
+  const sources = [{ segment: 0, start: 0, end: text.length }];
+  draft.sections[0]!.title.sources = sources;
+  draft.sections[0]!.items = [
+    {
+      id: 's0:item:0',
+      kind: 'action',
+      text: 'Send the outline to Jules.',
+      owner: 'Jules',
+      due: null,
+      sources,
+    },
+  ];
+  const reviewed = acceptEditedNotes({
+    source,
+    draft,
+    acceptancePolicy: 'conservative',
+  });
+  expect(projectAuditedNotes(reviewed).all_action_items).toEqual([
+    expect.objectContaining({
+      text: 'Send the outline to Jules',
+      assignee: 'Milo',
+    }),
+  ]);
 });
 
 it('preserves the speaker of an explicit declarative decision', () => {

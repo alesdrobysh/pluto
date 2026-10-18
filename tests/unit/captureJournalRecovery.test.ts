@@ -620,43 +620,75 @@ describe('capture journal recovery', () => {
       meetingId,
       activityEvidence: await buildEvidence(),
     });
-    const saveMeeting = vi.fn();
-    const transcribeChunk = vi.fn(async (inputPath: string) => ({
-      detectedLanguage: 'en',
-      providerLabel: 'local',
-      segments: [
-        {
-          start: inputPath.includes('mic') ? -0.2 : 1,
-          end: inputPath.includes('mic') ? 0.8 : 2.8,
-          text: inputPath.includes('mic')
-            ? 'Synthetic mic statement'
-            : 'Synthetic system statement',
-          ...(inputPath.includes('mic')
-            ? {}
-            : {
-                words: [
-                  {
-                    word: 'Synthetic system statement',
-                    start: 1,
-                    end: 1.6,
-                  },
-                ],
-              }),
-        },
-      ],
-    }));
-    const result = await recoverInterruptedCaptureJournals(root, {
-      getMeeting: () => null,
+    let persisted: PersistedMeeting | null = null;
+    const saveMeeting = vi.fn((meeting: PersistedMeeting) => {
+      persisted = meeting;
+    });
+    let failFirstRepair = true;
+    const transcribeChunk = vi.fn(async (inputPath: string) => {
+      expect(persisted).toMatchObject({
+        id: meetingId,
+        finalization_status: 'recovery_required',
+        transcript_status: 'needs_attention',
+        capture_journal_generation: manifest.generation,
+        audio_path: expect.stringContaining('mic-recovered'),
+        system_audio_path: expect.stringContaining('system-recovered'),
+      });
+      if (failFirstRepair) {
+        failFirstRepair = false;
+        throw new Error('transcription_unavailable');
+      }
+      // The visible recovered meeting can be edited while repair is running.
+      persisted = {
+        ...persisted!,
+        title: 'Edited recovered meeting',
+        user_notes: 'Keep this personal note.',
+        is_favorite: true,
+      };
+      return {
+        detectedLanguage: 'en',
+        providerLabel: 'local',
+        segments: [
+          {
+            start: inputPath.includes('mic') ? -0.2 : 1,
+            end: inputPath.includes('mic') ? 0.8 : 2.8,
+            text: inputPath.includes('mic')
+              ? 'Synthetic mic statement'
+              : 'Synthetic system statement',
+            ...(inputPath.includes('mic')
+              ? {}
+              : {
+                  words: [
+                    {
+                      word: 'Synthetic system statement',
+                      start: 1,
+                      end: 1.6,
+                    },
+                  ],
+                }),
+          },
+        ],
+      };
+    });
+    const dependencies = {
+      getMeeting: () => persisted,
       saveMeeting,
       stitchWavSegments: async (_segments, outputTag) =>
         join(root, `${outputTag}.wav`),
       transcribeChunk,
       transcriptionConfig,
       nowMs: 4_000,
+    };
+    const failed = await recoverInterruptedCaptureJournals(root, dependencies);
+    expect(failed).toMatchObject({ recoveredCount: 0, failedRecoveryCount: 1 });
+    expect(persisted).toMatchObject({
+      finalization_status: 'recovery_required',
     });
+    expect(saveMeeting).toHaveBeenCalledTimes(1);
+    const result = await recoverInterruptedCaptureJournals(root, dependencies);
 
     expect(result.recoveredCount).toBe(1);
-    expect(transcribeChunk).toHaveBeenCalledTimes(2);
+    expect(transcribeChunk).toHaveBeenCalledTimes(3);
     expect(
       (await readCaptureJournalManifest(root, meetingId)).lifecycleState,
     ).toBe('sealed');
@@ -669,7 +701,13 @@ describe('capture journal recovery', () => {
         expect.objectContaining({ speaker: 'Them' }),
       ]),
     });
-    const recovered = saveMeeting.mock.calls[0][0];
+    const recovered = saveMeeting.mock.calls.at(-1)![0];
+    expect(recovered.finalization_status).toBe('finalized');
+    expect(recovered).toMatchObject({
+      title: 'Edited recovered meeting',
+      user_notes: 'Keep this personal note.',
+      is_favorite: true,
+    });
     const transcript = JSON.parse(recovered.transcript_json) as {
       segments: Array<{ speaker: string; text: string }>;
     };

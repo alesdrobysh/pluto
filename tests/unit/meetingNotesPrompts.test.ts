@@ -39,6 +39,9 @@ it('asks the compact writer for complete items and bounded evidence', () => {
   expect(prompt).toContain('owner: string | null');
   expect(prompt).toContain('due: string | null');
   expect(prompt).toContain('account for every source turn');
+  expect(prompt).toContain('belongs in a kind:"action" item');
+  expect(prompt).toContain('no second person needs to approve it');
+  expect(prompt).toContain('speaker\'s exact name or label into owner');
   expect(prompt).toContain('names, numbers, definitions, reasons');
   expect(prompt).toContain('Stay close to source wording');
   expect(prompt).toContain(

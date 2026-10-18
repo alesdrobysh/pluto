@@ -643,6 +643,7 @@ import type { DreamingEntityType } from './dreaming/types';
 import {
   extractAndProcessEntities,
   processExtractedEntities,
+  requireSavedMeetingActions,
 } from './entityPipeline';
 import { IDENTITY_CHANNELS, handleIdentityRequest } from './identityHandlers';
 import { startIdentityReconciliation } from './identityReconciliation';
@@ -6585,7 +6586,18 @@ app.whenReady().then(async () => {
           `[LLM] Extracting and processing entities for meeting ${meetingId}`,
         );
         const result = await extractAndProcessEntities(
-          provider,
+          {
+            synthesizeKnowledgeDocument:
+              provider.synthesizeKnowledgeDocument?.bind(provider),
+            extractEntities: async (...args) => ({
+              ...(await provider.extractEntities(...args)),
+              action_items: requireSavedMeetingActions(
+                db.getMeeting(String(meetingId)) as
+                  | db.PersistedMeeting
+                  | undefined,
+              ),
+            }),
+          },
           transcript,
           meetingId,
           {
@@ -6717,7 +6729,14 @@ app.whenReady().then(async () => {
           `[EntityPipeline] Processing pre-extracted entities for meeting ${meetingId}`,
         );
         const result = await processExtractedEntities(
-          entities,
+          {
+            ...entities,
+            action_items: requireSavedMeetingActions(
+              db.getMeeting(String(meetingId)) as
+                | db.PersistedMeeting
+                | undefined,
+            ),
+          },
           meetingId,
           undefined,
           undefined,
@@ -7325,10 +7344,16 @@ app.whenReady().then(async () => {
               conversationResolution.relation === 'new_topic' &&
               !isExplicitInformationRequest(queryText),
           });
-          const assigneeRecall = buildAssigneeActionRecall(
-            effectiveQueryText,
-            persistedMeetings,
-          );
+          const assigneeRecall =
+            buildAssigneeActionRecall(effectiveQueryText, persistedMeetings) ??
+            (conversationResolution.relation !== 'new_topic'
+              ? buildAssigneeActionRecall(
+                  conversationResolution.priorQuestion ||
+                    planningConversationAnchor ||
+                    '',
+                  persistedMeetings,
+                )
+              : null);
           const overviewRecall = buildWorkingMemoryOverviewRecall(
             effectiveQueryText,
             parsed.entity_mentions,
@@ -7721,15 +7746,8 @@ app.whenReady().then(async () => {
               !temporalResolvedScope &&
               !currentMeetingRequested &&
               !isPlanning &&
-              assigneeRecall &&
-              !assigneeRecall.coverageLimited &&
-              (conversationResolution.relation === 'new_topic' ||
-                (conversationResolution.task === 'lookup' &&
-                  conversationResolution.retrievalPolicy === 'fresh' &&
-                  conversationResolution.retrievalQuery ===
-                    conversationResolution.priorQuestion &&
-                  conversationResolution.answerQuery ===
-                    conversationResolution.priorQuestion)),
+              (!inheritedScope || inheritedScope.kind === 'global') &&
+              assigneeRecall,
           );
           if (explicitMeetingScope) {
             scopeLabel = explicitMeetingScope.label;
@@ -8324,12 +8342,12 @@ app.whenReady().then(async () => {
                 );
           const extractiveAnswer = useWorkspaceRecall
             ? null
-            : conversationResolution.relation === 'omission_follow_up' ||
-                conversationResolution.relation === 'expansion' ||
-                selfReference.refersToSelf
-              ? null
-              : usePreparedAssigneeRecall && assigneeRecall
-                ? assigneeRecall.answer
+            : usePreparedAssigneeRecall && assigneeRecall
+              ? assigneeRecall.answer
+              : conversationResolution.relation === 'omission_follow_up' ||
+                  conversationResolution.relation === 'expansion' ||
+                  selfReference.refersToSelf
+                ? null
                 : buildExtractiveTemporalSummary(effectiveQueryText, context);
           let answerRaw: string;
           if (

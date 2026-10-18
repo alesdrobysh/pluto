@@ -42,6 +42,33 @@ export const getCommitmentState = (value: string | null): CommitmentState => {
   return state === 'confirmed' || state === 'rejected' ? state : 'possible';
 };
 
+/** Recover legacy consolidation provenance only when it names one source. */
+export const getActionSourceMeetingId = (
+  value: string | null,
+): string | null => {
+  const metadata = parseActionMetadata(value);
+  if (
+    typeof metadata.source_meeting_id === 'string' &&
+    metadata.source_meeting_id.trim()
+  ) {
+    return metadata.source_meeting_id;
+  }
+  const ids = new Set<string>();
+  for (const source of Array.isArray(metadata.dreamingSources)
+    ? metadata.dreamingSources
+    : []) {
+    if (
+      !source ||
+      typeof source !== 'object' ||
+      !Array.isArray(source.meetingIds)
+    )
+      continue;
+    for (const id of source.meetingIds)
+      if (typeof id === 'string' && id.trim()) ids.add(id);
+  }
+  return ids.size === 1 ? [...ids][0] : null;
+};
+
 export const mergeCommitmentReview = (
   value: string | null,
   commitmentState: 'confirmed' | 'rejected',
@@ -171,6 +198,65 @@ export const isThirdPartyAction = (
     description || action.name,
     options,
   );
+};
+
+export const isPersonalAction = (
+  action: {
+    name: string;
+    status: string | null;
+    metadata: string | null;
+    assigned_to?: string | null;
+  },
+  selfOptions: ThirdPartyAssigneeOptions,
+): boolean => {
+  const metadata = parseActionMetadata(action.metadata);
+  if (
+    action.status !== 'active' ||
+    metadata.meeting_regeneration_retired_at ||
+    metadata.cancelled_at ||
+    !action.name.trim() ||
+    isThirdPartyAction(action, selfOptions)
+  )
+    return false;
+
+  // Missing ownership is not personal ownership; explicit user adoption is.
+  if (
+    action.assigned_to ||
+    metadata.origin === 'user' ||
+    getCommitmentState(action.metadata) === 'confirmed'
+  )
+    return true;
+
+  if (
+    !getActionSourceMeetingId(action.metadata) ||
+    typeof metadata.source_evidence !== 'string' ||
+    !metadata.source_evidence.trim()
+  )
+    return false;
+
+  const assignee =
+    typeof metadata.assignee_name === 'string'
+      ? metadata.assignee_name.trim().toLowerCase()
+      : '';
+  const selfAssignees = new Set([
+    ...SELF_ACTION_ASSIGNEES,
+    ...(selfOptions.selfNames ?? []).map((name) => name.trim().toLowerCase()),
+  ]);
+  if (assignee) {
+    return selfAssignees.has(assignee);
+  }
+  const description =
+    !metadata.user_edited && typeof metadata.original_description === 'string'
+      ? metadata.original_description
+      : typeof metadata.full_description === 'string'
+        ? metadata.full_description
+        : action.name;
+  const subject = description
+    .trim()
+    .match(
+      /^(.+?)(?:['’]ll\s+|\s+(?:will|to|shall|must|should|needs? to|has to|have to|is to|am going to)\s+)\S/i,
+    )?.[1];
+  return Boolean(subject && selfAssignees.has(subject.toLowerCase()));
 };
 
 export const capitalizeActionText = (value: string): string =>

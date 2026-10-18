@@ -25,6 +25,7 @@ import {
 import {
   extractAndProcessEntities,
   processExtractedEntities as processWithIdentity,
+  requireSavedMeetingActions,
 } from '../../electron/entityPipeline';
 import type { ExtractedEntities } from '../../electron/llm/provider';
 
@@ -35,6 +36,44 @@ const processExtractedEntities = (
 
 afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
+});
+
+it('requires saved task classification at legacy extraction entry points', () => {
+  expect(
+    requireSavedMeetingActions({
+      analysis_json: '{"all_action_items":[{"text":"Removed task"}]}',
+      user_edits_json:
+        '{"all_action_items:0":{"original":"Removed task","edited":"","edited_at":"2026-10-14T12:00:00Z"}}',
+    } as any),
+  ).toEqual([]);
+  expect(() => requireSavedMeetingActions(undefined)).toThrow(
+    'meeting_action_classification_unavailable',
+  );
+  expect(() =>
+    requireSavedMeetingActions({
+      analysis_format_pass: false,
+      analysis_json: '{"all_action_items":[{"text":"Invented task"}]}',
+    } as any),
+  ).toThrow('meeting_action_classification_unavailable');
+  expect(
+    requireSavedMeetingActions({
+      analysis_json: '{"all_action_items":[]}',
+    } as any),
+  ).toEqual([]);
+  expect(
+    requireSavedMeetingActions({
+      analysis_format_pass: true,
+      analysis_json:
+        '{"all_action_items":[{"text":"Send the checklist","assignee":"Me","evidence":"I will send the checklist"}]}',
+    } as any),
+  ).toEqual([
+    {
+      description: 'Send the checklist',
+      assignee: 'Me',
+      evidence: 'I will send the checklist',
+      due_date: undefined,
+    },
+  ]);
 });
 
 const extractedAction = (description: string): ExtractedEntities => ({

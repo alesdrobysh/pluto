@@ -4,6 +4,11 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
+import {
+  PLUTO_DEVELOPMENT_BUNDLE_IDENTIFIER,
+  PLUTO_DEVELOPMENT_PRODUCT_NAME,
+} from '../electron/appRuntimePolicy';
+
 const require = createRequire(import.meta.url);
 
 /** Return a module that vite-plugin-electron can use as its Electron executable. */
@@ -17,7 +22,7 @@ export function prepareDevElectron(): string {
   const executableStats = fs.statSync(electronExecutable);
   const fingerprint = createHash('sha256')
     .update(
-      `${sourceApp}:${sourceStats.mtimeMs}:${executableStats.size}:pluto-dev-v2-calendar-permissions`,
+      `${sourceApp}:${sourceStats.mtimeMs}:${executableStats.size}:pluto-dev-v3-isolated-identity`,
     )
     .digest('hex')
     .slice(0, 12);
@@ -29,7 +34,10 @@ export function prepareDevElectron(): string {
     'pluto-electron',
     fingerprint,
   );
-  const brandedApp = path.join(cacheDir, 'Pluto.app');
+  const brandedApp = path.join(
+    cacheDir,
+    `${PLUTO_DEVELOPMENT_PRODUCT_NAME}.app`,
+  );
   const brandedExecutable = path.join(
     brandedApp,
     'Contents',
@@ -74,10 +82,14 @@ export function prepareDevElectron(): string {
         }
       }
       const plist = path.join(stagingApp, 'Contents', 'Info.plist');
-      for (const key of ['CFBundleName', 'CFBundleDisplayName']) {
+      for (const [key, value] of Object.entries({
+        CFBundleName: PLUTO_DEVELOPMENT_PRODUCT_NAME,
+        CFBundleDisplayName: PLUTO_DEVELOPMENT_PRODUCT_NAME,
+        CFBundleIdentifier: PLUTO_DEVELOPMENT_BUNDLE_IDENTIFIER,
+      })) {
         execFileSync('/usr/libexec/PlistBuddy', [
           '-c',
-          `Set :${key} Pluto`,
+          `Set :${key} ${value}`,
           plist,
         ]);
       }

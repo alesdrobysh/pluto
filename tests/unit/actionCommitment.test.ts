@@ -1,6 +1,7 @@
 import {
   areActionsEquivalent,
   canonicalizeActionText,
+  getActionSourceMeetingId,
   getCommitmentState,
   isThirdPartyAction,
   isThirdPartyAssignee,
@@ -9,6 +10,28 @@ import {
 } from '../../src/utils/actionCommitment';
 
 describe('action commitment metadata', () => {
+  it('recovers a unique legacy source without guessing across meetings', () => {
+    expect(
+      getActionSourceMeetingId(
+        JSON.stringify({
+          dreamingSources: [{ meetingIds: ['m'] }, { meetingIds: ['m'] }],
+        }),
+      ),
+    ).toBe('m');
+    expect(
+      getActionSourceMeetingId(
+        JSON.stringify({ dreamingSources: [{ meetingIds: ['m', 'other'] }] }),
+      ),
+    ).toBeNull();
+    expect(
+      getActionSourceMeetingId(
+        JSON.stringify({
+          source_meeting_id: 'explicit',
+          dreamingSources: [{ meetingIds: ['m'] }],
+        }),
+      ),
+    ).toBe('explicit');
+  });
   it.each([null, '', 'not-json', '[]', '42'])(
     'treats legacy or malformed metadata %j as a possible commitment',
     (metadata) => {

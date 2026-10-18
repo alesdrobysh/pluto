@@ -1723,3 +1723,39 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Supersedes:** The three-item cap in “2026-08-25 - Make Today's focus the dashboard's only daily priority surface” and “2026-09-16 - Show all open personal action items in Today’s focus.”
 - **Decision:** Show at most five items in Today's focus. Creation, backlog prioritization, and persisted daily ordering use the same limit; remaining items stay in the backlog. Existing review, ordering, and completion rules remain in force.
 - **Consequence:** Two additional existing items can be shown and prioritized. No additional queries, model calls, or background work are introduced.
+
+
+## 2026-10-11 - Isolate every source build and preserve profile identity across updates
+
+- **Status:** Accepted by direct owner request.
+- **Supersedes:** The production-profile exception for `pnpm start` in “2026-10-11 - Separate development from production startup” and the shared source profile in “2026-09-30 - Use one persistent profile for source startup.”
+- **Decision:** Both `start` and `dev` launch Pluto Development with a separate bundle identifier and a persistent development profile. Explicit source overrides cannot select the installed app's profile or descendants, including symlink aliases. The installed app retains its existing production path and keys.
+- **Update continuity:** In-app updates pass the current profile explicitly to the installer and both success and failure relaunches. Normal command-line installs use the stable production profile; a separate first-run profile requires an explicit testing flag. Existing Standard or Encrypted databases retain their format and skip storage setup. Successful legacy startup records that existing choice for subsequent upgrades and missing-database detection.
+- **Recovery:** A known matching migration prefix followed by newer migrations requires a compatible app update; the database is neither downgraded nor reset. Unknown or divergent histories remain blocked. The established migration hashes, order, and timestamps are frozen in a regression fixture; schema changes must append migrations. The installer rejects version downgrades. Upgrade regressions exercise both storage modes, unchanged key envelopes and data, selected-profile relaunches, and old-build refusal without database modification.
+
+## 2026-10-13 - Reuse project label variants across extraction and synthesis
+
+- **Status:** Accepted by direct owner request.
+- **Supersedes:** Mandatory model review for every alias in “2026-10-08 - Retrieve project homes before review and recover failed reconciliation.” Semantic matches and workstreams still require that review.
+- **Decision:** Treat an optional leading “Project” as a label wrapper only when a unique eligible home shares saved-note sources. Late qualified extraction reuses that identity and preserves reviewed or user-confirmed qualification and synthesized context. Synthesis also reuses a unique equivalent home supported by at least two of its cited conversations, even if inference omits candidate IDs. Ambiguity does not select an arbitrary home.
+- **Reconciliation:** Prefer reviewing extracted candidates before synthesized homes. Existing equivalent candidates can be filed as reversible aliases without inference when both share saved notes; transactional persistence still validates both source links, quotes, and protected classifications. Changed routing and synthesis hashes reconsider previous decisions.
+- **Recovery:** Unavailable local providers produce the safe `provider_unavailable` diagnostic. Failed provider initialization is evicted so a subsequent retry can reconnect after service recovery.
+- **Verification boundary:** Focused regressions cover creation order, omitted candidate IDs, ambiguous names, separate sources, metadata preservation, reversible persistence, and provider restart. A copied synthetic profile verifies that reconciliation produces one portfolio project with both source conversations; this does not deploy changes to an already-running app.
+
+## 2026-10-14 - Require positive personal ownership for Today's focus
+
+- **Status:** Accepted.
+- **Refines:** “2026-09-16 - Show all open personal action items in Today’s focus” and the project commitment evidence gate in “2026-10-05 - Preserve source context during evidence validation.”
+- **Decision:** Dashboard action projections require a canonical self assignment, a self assignee/subject, or explicit user creation/adoption. Missing ownership and collective ownership alone do not establish a personal obligation. Completed and retired records cannot enter the focus or its backlog. Explicit other-person assignment continues to take precedence over review state and stale assignee text.
+- **Source classification:** Background consolidation must respect supplied saved action lists, including empty lists and tasks removed from bounded notes. It cannot promote a different key point through prose commitment cues. Legacy notes without supplied classification retain the existing evidence checks.
+- **Data:** This changes eligibility, not stored history; no bulk rewrite or deletion of meeting notes, actions, or assignments.
+
+## 2026-10-14 - Consolidate existing obligations without creating new personal work
+
+- **Status:** Accepted.
+- **Supersedes:** The prose-only project commitment fallback in “2026-10-05 - Preserve source context during evidence validation” and its legacy fallback retained in “2026-10-14 - Require positive personal ownership for Today's focus.”
+- **Decision:** Background consolidation may link an existing, source-matched canonical action to a project. It cannot create another task lifecycle. The task must still appear in the current classified action list; completed or removed note edits are authoritative. Stored proposals are rechecked at application time and stale unsupported proposals cannot bypass newer validation. Identical wording in another meeting is not canonical identity.
+- **Personal eligibility:** Dashboard candidates need both positive personal ownership evidence and source provenance with an evidence quote. Canonical self assignments and explicit user creation/adoption remain eligible; explicit other owners, cancellations, completion and retirement remain authoritative. Reminders use this same personal eligibility check and canonical person identity.
+- **State continuity:** Source-note synchronization matches task wording rather than list position. Corrupt edit documents cannot clear completion. Legacy consolidation provenance may be read only when it identifies a unique source meeting; no bulk deletion or inferred ownership repair is performed.
+- **Retrieval:** Personal commitment and priority questions, including their conversational follow-ups, use canonical commitment recall rather than workspace-generated priority prose. Explicit meeting/date scopes retain their bounded evidence path. Calendar preparation's open-work section requires confirmed, current commitments; unconfirmed discussion remains historical context.
+- **Entry points:** Legacy entity-processing IPC handlers use saved action classification, so a second extraction cannot invent an independent task list.

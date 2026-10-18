@@ -4,48 +4,51 @@ import path from 'node:path';
 export const PLUTO_PRODUCT_NAME = 'Pluto';
 export const PLUTO_BUNDLE_IDENTIFIER = 'com.pluto.app';
 
-export type SourceProfileMode = 'dev' | 'start';
+export const PLUTO_DEVELOPMENT_PRODUCT_NAME = 'Pluto Development';
+export const PLUTO_DEVELOPMENT_BUNDLE_IDENTIFIER = 'com.pluto.app.development';
 
 export const resolveSourceUserDataDir = ({
   explicit,
   tempDir,
   productionDir,
-  mode,
 }: {
   explicit?: string;
   tempDir: string;
   productionDir?: string;
-  mode: SourceProfileMode;
 }): string => {
   const selected = explicit?.trim();
+  if (selected && !path.isAbsolute(selected)) {
+    throw new Error('Source profiles require an absolute user-data directory.');
+  }
   const userDataDir =
     selected ||
-    (productionDir
-      ? mode === 'start'
-        ? productionDir
-        : `${productionDir}-development`
-      : undefined) ||
+    (productionDir ? `${productionDir}-development` : undefined) ||
     path.join(tempDir, 'pluto-development-profile');
-  if (
-    mode === 'dev' &&
-    productionDir &&
-    isSameUserDataDir(userDataDir, productionDir)
-  ) {
-    throw new Error('pnpm dev cannot open the production data profile.');
+  if (productionDir && isWithinUserDataDir(userDataDir, productionDir)) {
+    throw new Error('Source Pluto cannot open the production data profile.');
   }
   return userDataDir;
 };
 
-const isSameUserDataDir = (left: string, right: string): boolean => {
+const isWithinUserDataDir = (left: string, right: string): boolean => {
   const canonical = (value: string) => {
-    const absolute = path.resolve(value);
-    try {
-      return fs.realpathSync.native(absolute).toLowerCase();
-    } catch {
-      return absolute.toLowerCase();
+    const absolute = value;
+    let existing = absolute;
+    while (!fs.existsSync(existing) && path.dirname(existing) !== existing) {
+      existing = path.dirname(existing);
     }
+    const resolved = fs.realpathSync.native(existing);
+    return path
+      .resolve(resolved, path.relative(existing, absolute))
+      .toLowerCase();
   };
-  return canonical(left) === canonical(right);
+  const relative = path.relative(canonical(right), canonical(left));
+  return (
+    relative === '' ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== '..' &&
+      !path.isAbsolute(relative))
+  );
 };
 
 export const resolveProductionUserDataDir = (input: {
@@ -70,13 +73,4 @@ export const resolveUserDataArgument = (argv: string[]): string | null => {
   const value = argv.find((argument) => argument.startsWith(prefix));
   const resolved = value?.slice(prefix.length).trim();
   return resolved || null;
-};
-
-export const resolveSourceProfileMode = (argv: string[]): SourceProfileMode => {
-  const prefix = '--pluto-source-mode=';
-  const value = argv.find((argument) => argument.startsWith(prefix));
-  if (value && value !== `${prefix}start` && value !== `${prefix}dev`) {
-    throw new Error('Invalid source profile mode.');
-  }
-  return value === `${prefix}start` ? 'start' : 'dev';
 };

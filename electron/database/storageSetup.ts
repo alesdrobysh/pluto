@@ -145,8 +145,8 @@ export const initializeDatabaseStorageSetup = (input: {
   }
   input.initialize(mode);
   const choice = readChoice(input.databasePath);
-  if (choice && !choice.initialized) {
-    writeChoice(input.databasePath, { ...choice, initialized: true });
+  if (!choice || !choice.initialized) {
+    writeChoice(input.databasePath, { version: 1, mode, initialized: true });
   }
   return mode;
 };
