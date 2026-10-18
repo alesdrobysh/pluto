@@ -1,157 +1,180 @@
 // @vitest-environment happy-dom
-
-import { type MutableRefObject, act, createElement, createRef } from 'react';
+import { type MutableRefObject, act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import { GRACE_SHORT_MS } from '../../src/autoEnd/decision';
+import {
+  type DepartureStatus,
+  DEPARTURE_IPC as IPC,
+} from '../../electron/activeCall/departureTypes';
 import { useAutoEndMonitor } from '../../src/hooks/useAutoEndMonitor';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const Harness = ({
-  stopSessionRef,
-}: {
-  stopSessionRef: MutableRefObject<((reason?: string) => void) | null>;
-}) => {
-  useAutoEndMonitor({
-    isRecording: true,
-    autoEndEnabled: true,
-    stopSessionRef,
-  });
-  return null;
+const baseStatus: DepartureStatus = {
+  meetingId: 'meeting-1',
+  generation: 'generation-1',
+  phase: 'joined',
+  source: null,
+  sourceConfirmed: false,
+  candidates: [],
+  unavailable: false,
+  sessionAmbiguous: false,
+  checkIn: false,
+  calendarCheck: null,
+  inspection: 'ready',
+  stop: null,
 };
+const confirmed = (generation = 'generation-1'): DepartureStatus => ({
+  ...baseStatus,
+  generation,
+  phase: 'departure_confirmed',
+  stop: {
+    meetingId: 'meeting-1',
+    generation,
+    requestId: 'request-1',
+    reason: 'ui_departure',
+    provider: 'zoom',
+    sourceId: 'zoom-1',
+    appName: 'Zoom',
+  },
+});
+
+function setup(stop: (reason?: string) => Promise<boolean>, external = false) {
+  let hook: ReturnType<typeof useAutoEndMonitor> | null = null;
+  const reopen = vi.fn();
+  const listeners = new Map<
+    string,
+    (_event: unknown, status: DepartureStatus) => void
+  >();
+  const invoke = vi.fn(async (channel: string) => {
+    if (channel === IPC.begin) return baseStatus;
+    if (channel === IPC.claim || channel === IPC.acknowledge) return true;
+    if (channel === 'SHOW_MEETING_ENDED_ALERT') return external;
+    return null;
+  });
+  Object.defineProperty(window, 'ipcRenderer', {
+    configurable: true,
+    value: {
+      invoke,
+      on: (
+        channel: string,
+        callback: (_event: unknown, status: DepartureStatus) => void,
+      ) => {
+        listeners.set(channel, callback);
+        return () => listeners.delete(channel);
+      },
+    },
+  });
+  const stopSessionRef: MutableRefObject<
+    ((reason?: string) => Promise<boolean>) | null
+  > = { current: stop };
+  const Harness = () => {
+    hook = useAutoEndMonitor({
+      isRecording: true,
+      meetingId: 'meeting-1',
+      autoEndEnabled: true,
+      onReopen: reopen,
+      stopSessionRef,
+    });
+    return null;
+  };
+  const root = createRoot(document.createElement('div'));
+  const emit = async (status: DepartureStatus) => {
+    await act(async () => {
+      listeners.get(IPC.status)?.(null, status);
+      await Promise.resolve();
+    });
+  };
+  return {
+    root,
+    Harness,
+    emit,
+    invoke,
+    getHook: () => hook,
+    reopen,
+    triggerReopen: () =>
+      listeners.get('MEETING_ENDED_REOPEN')?.(null, baseStatus),
+  };
+}
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
-  it('ends through the shared stop-session callback after the call app exits', async () => {
-    vi.useFakeTimers();
-    const stopSession = vi.fn();
-    const stopSessionRef = createRef<((reason?: string) => void) | null>();
-    stopSessionRef.current = stopSession;
-    let detectionCount = 0;
-    const invoke = vi.fn(async (channel: string) => {
-      if (channel === 'DETECT_ACTIVE_CALL') {
-        detectionCount += 1;
-        return detectionCount === 1
-          ? {
-              active: true,
-              appName,
-              sourceApp: appName === 'Chrome' ? 'Google Chrome' : 'Zoom',
-              confidence: 'medium',
-              reason:
-                appName === 'Zoom'
-                  ? 'call-app-running-silent-fallback'
-                  : 'browser-call-tab-open-silent-fallback',
-            }
-          : {
-              active: false,
-              appName: null,
-              confidence: 'low',
-              reason:
-                appName === 'Chrome'
-                  ? 'browser-call-tab-closed'
-                  : 'no-call-app-running',
-            };
-      }
-      return true;
-    });
-    Object.defineProperty(window, 'ipcRenderer', {
-      configurable: true,
-      value: { invoke },
-    });
-
-    const container = document.createElement('div');
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(createElement(Harness, { stopSessionRef }));
-      await Promise.resolve();
-    });
-    expect(invoke).toHaveBeenCalledWith('DETECT_ACTIVE_CALL');
-    expect(invoke).toHaveBeenCalledWith('LOG_AUTO_END_EVENT', {
-      reason_code: 'call_app_locked',
-      app_name: appName,
-    });
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
-    });
-    expect(detectionCount).toBe(2);
+describe('useAutoEndMonitor bridge', () => {
+  it('uses only a confirmed main-process request and acknowledges shared release', async () => {
+    const stop = vi.fn(async () => true);
+    const { root, Harness, emit, invoke } = setup(stop);
+    await act(async () => root.render(createElement(Harness)));
+    await emit(baseStatus);
+    expect(stop).not.toHaveBeenCalled();
+    await emit(confirmed('stale-generation'));
+    expect(stop).not.toHaveBeenCalled();
+    await emit(confirmed());
+    expect(stop).toHaveBeenCalledExactlyOnceWith('auto:ui_departure:zoom');
+    expect(invoke).toHaveBeenCalledWith(IPC.claim, confirmed(), 'request-1');
     expect(invoke).toHaveBeenCalledWith(
-      'DETECT_ACTIVE_CALL',
-      appName === 'Chrome' ? 'Google Chrome' : 'Zoom',
+      IPC.acknowledge,
+      confirmed(),
+      'request-1',
+      true,
     );
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(GRACE_SHORT_MS);
-    });
-    expect(stopSession).toHaveBeenCalledOnce();
-    expect(stopSession).toHaveBeenCalledWith('auto:call_app_exited');
-
     await act(async () => root.unmount());
   });
-});
 
-describe('quiet meeting breaks', () => {
-  it.each(['inactive', 'resumed', 'unavailable', 'exited'])(
-    'handles %s after a quiet break without an inactivity deadline',
-    async (outcome) => {
-      vi.useFakeTimers();
-      const stopSession = vi.fn();
-      const stopSessionRef = createRef<((reason?: string) => void) | null>();
-      stopSessionRef.current = stopSession;
-      let count = 0;
-      const active = {
-        active: true,
-        appName: 'Zoom',
-        confidence: 'high',
-        reason: 'call-app-running-with-active-audio',
-      };
-      const inactive = {
-        active: false,
-        appName: 'Zoom',
-        confidence: 'low',
-        reason: 'call-app-running-without-target-audio',
-      };
-      Object.defineProperty(window, 'ipcRenderer', {
-        configurable: true,
-        value: {
-          invoke: vi.fn(async (channel: string) => {
-            if (channel !== 'DETECT_ACTIVE_CALL') return true;
-            count += 1;
-            if (count === 1) return active;
-            if (count === 2 || outcome === 'inactive') return inactive;
-            if (outcome === 'resumed') return active;
-            return {
-              ...inactive,
-              reason:
-                outcome === 'exited'
-                  ? 'no-call-app-running'
-                  : 'browser-tab-inspection-unavailable',
-            };
-          }),
-        },
-      });
-      const root = createRoot(document.createElement('div'));
-      await act(async () =>
-        root.render(createElement(Harness, { stopSessionRef })),
+  it('reports a failed release and permits a subsequent main-process retry', async () => {
+    const stop = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const { root, Harness, emit, invoke } = setup(stop);
+    await act(async () => root.render(createElement(Harness)));
+    await emit(confirmed());
+    expect(invoke).toHaveBeenCalledWith(
+      IPC.acknowledge,
+      confirmed(),
+      'request-1',
+      false,
+    );
+    await emit(confirmed());
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenCalledWith(
+      IPC.acknowledge,
+      confirmed(),
+      'request-1',
+      true,
+    );
+    await act(async () => root.unmount());
+  });
+
+  it('dismisses the confirmed-stop notice after eight seconds', async () => {
+    vi.useFakeTimers();
+    const { root, Harness, emit, getHook } = setup(vi.fn(async () => true));
+    await act(async () => root.render(createElement(Harness)));
+    await emit(confirmed());
+    expect(getHook()?.autoEndTriggered).toBe(true);
+    await act(async () => vi.advanceTimersByTime(7_999));
+    expect(getHook()?.autoEndTriggered).toBe(true);
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(getHook()?.autoEndTriggered).toBe(false);
+    await act(async () => root.unmount());
+  });
+
+  it('shows an external notice after release and routes Reopen back to Pluto', async () => {
+    const { root, Harness, emit, invoke, getHook, reopen, triggerReopen } =
+      setup(
+        vi.fn(async () => true),
+        true,
       );
-      await act(async () => vi.advanceTimersByTimeAsync(5_000));
-      expect(stopSession).not.toHaveBeenCalled();
-      await act(async () => vi.advanceTimersByTimeAsync(5_001));
-      if (outcome === 'exited') {
-        expect(stopSession).toHaveBeenCalledExactlyOnceWith(
-          'auto:call_app_exited',
-        );
-      } else {
-        expect(stopSession).not.toHaveBeenCalled();
-        await act(async () => vi.advanceTimersByTimeAsync(30 * 60_000));
-        expect(stopSession).not.toHaveBeenCalled();
-      }
-      await act(async () => root.unmount());
-    },
-  );
+    await act(async () => root.render(createElement(Harness)));
+    await emit(confirmed());
+    expect(invoke).toHaveBeenCalledWith('SHOW_MEETING_ENDED_ALERT', {
+      reason: 'ui_departure',
+      appName: 'Zoom',
+    });
+    expect(getHook()?.autoEndTriggered).toBe(false);
+    await act(async () => triggerReopen());
+    expect(reopen).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
 });

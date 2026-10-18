@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -122,37 +123,71 @@ test('CLI preview is read-only and blocks unsafe releases', () => {
     git('switch', '-c', 'codex/fixture');
     assert.throws(() => preview('--dry-run'), /Release from master/);
     assert.throws(() => preview('--typo'), /Unknown argument/);
-    // Exercise the actual commit/tag/atomic-push path against a disposable
-    // local origin. GitHub and pnpm are stubbed; nothing can publish online.
+    // Exercise preparation and tagging against disposable local Git only.
     git('switch', 'master');
+    const calls = resolve(root, 'calls');
+    const watched = resolve(root, 'watched');
+    const dispatched = resolve(root, 'dispatched');
     writeFileSync(
       resolve(bin, 'gh'),
       `#!/bin/sh
+printf '%s\\n' "$*" >> '${calls}'
 case "$1 $2" in
-  "auth status"|"run watch") exit 0 ;;
+  "auth status") exit 0 ;;
   "repo view") printf '{"nameWithOwner":"example/pluto","defaultBranchRef":{"name":"master"}}' ;;
   "api "*) printf active ;;
-  "run list") printf '[{"databaseId":42,"headBranch":"v1.0.0-rc.4"}]' ;;
+  "pr create") printf 'https://github.com/example/pluto/pull/42' ;;
+  "workflow run") touch '${dispatched}' ;;
   "release view") printf 'https://github.com/example/pluto/releases/tag/v1.0.0-rc.4' ;;
+  "run list") if echo "$*" | grep -q -- '--event push'; then printf '[{"databaseId":43,"headBranch":"v1.0.0-rc.4"}]'; elif [ -f '${dispatched}' ]; then printf '[{"databaseId":42}]'; else printf '[]'; fi ;;
+  "run watch") touch '${watched}'; if [ -f '${root}/change-checkout' ]; then git checkout --detach HEAD^; fi; if [ -f '${root}/fail-verification' ]; then exit 1; fi ;;
   *) exit 1 ;;
 esac
 `,
       { mode: 0o755 },
     );
     writeFileSync(resolve(bin, 'pnpm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-    assert.match(preview(), /releases\/tag\/v1.0.0-rc.4/);
+    assert.match(preview(), /pull\/42/);
+    assert.equal(git('tag', '--list'), tags);
+    assert.match(
+      git('branch', '--show-current'),
+      /^codex\/release-v1\.0\.0-rc\.4-/,
+    );
+    const prepared = git('rev-parse', 'HEAD');
     assert.equal(
       JSON.parse(readFileSync(resolve(cwd, 'package.json'), 'utf8')).version,
       '1.0.0-rc.4',
     );
-    assert.match(
-      readFileSync(resolve(cwd, 'docs/releases/v1.0.0-rc.4.md'), 'utf8'),
-      /Fix restart cache reuse/,
-    );
-    const released = git('rev-parse', 'HEAD');
-    assert.equal(git('rev-parse', 'v1.0.0-rc.4^{}'), released);
-    assert.equal(git('rev-parse', 'origin/master'), released);
+    assert.equal(git('rev-parse', 'origin/master'), head);
+    // Simulate the PR being merged and the default branch synced.
+    git('switch', 'master');
+    git('merge', '--ff-only', prepared);
+    git('push', 'origin', 'master');
+    assert.match(preview('publish', '--dry-run'), /Verify installer/);
+    assert.equal(existsSync(dispatched), false);
+    writeFileSync(resolve(root, 'fail-verification'), '');
+    assert.throws(() => preview('publish'));
+    assert.equal(git('tag', '--list'), tags);
+    assert.equal(git('rev-parse', 'HEAD'), prepared);
+    rmSync(resolve(root, 'fail-verification'));
+    rmSync(dispatched);
+    writeFileSync(resolve(root, 'change-checkout'), '');
+    assert.throws(() => preview('publish'), /changed during verification/);
+    assert.equal(git('tag', '--list'), tags);
+    rmSync(resolve(root, 'change-checkout'));
+    git('switch', 'master');
+    rmSync(dispatched);
+    assert.match(preview('publish'), /Tag v1.0.0-rc.4 pushed/);
+    assert.equal(git('rev-parse', 'v1.0.0-rc.4^{}'), prepared);
+    assert.equal(git('rev-parse', 'origin/master'), prepared);
     assert.equal(git('status', '--porcelain'), '');
+    assert.equal(existsSync(watched), true);
+    const operations = readFileSync(calls, 'utf8');
+    assert.match(
+      operations,
+      /workflow run release.yml --ref master -f expected_sha=/,
+    );
+    assert.match(operations, /run watch 42 --exit-status/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

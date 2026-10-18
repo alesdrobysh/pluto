@@ -8,6 +8,7 @@ import {
   createMeetingNotesTemplateSettingsSnapshot,
   resolveMeetingNotesTemplate,
 } from '../../electron/llm/meetingNotesTemplates';
+import { NOTES_PROMPT_VERSION } from '../../electron/llm/meetingNotesTypes';
 import {
   createMeetingAnalysisRunCoordinator,
   shouldUseMeetingNotesOptionalReviewBudget,
@@ -514,6 +515,7 @@ describe('meeting analysis run coordinator', () => {
       true,
     );
     expect(shouldUseMeetingNotesOptionalReviewBudget('ollama')).toBe(true);
+    expect(shouldUseMeetingNotesOptionalReviewBudget('ChatGPT')).toBe(true);
     expect(shouldUseMeetingNotesOptionalReviewBudget('OpenAI')).toBe(false);
     expect(shouldUseMeetingNotesOptionalReviewBudget('Anthropic Claude')).toBe(
       false,
@@ -558,6 +560,27 @@ describe('meeting analysis run coordinator', () => {
     } finally {
       clock.mockRestore();
     }
+  });
+
+  it('does not precompute paid cloud leaves while the transcript is changing', async () => {
+    const getProvider = vi.fn();
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {} as never,
+      getSettings: async () => ({ llm_provider: 'chatgpt' }),
+      getProvider,
+    });
+    await expect(
+      coordinator.precomputeIncrementalMeetingNotes({
+        source: createNotesSource(
+          JSON.stringify({
+            segments: [{ speaker: 'Alex', text: 'A partial meeting.' }],
+          }),
+        ),
+        userNotes: '',
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toBe('discarded');
+    expect(getProvider).not.toHaveBeenCalled();
   });
 
   it('precomputes a live leaf with the same source-independent cache identity used at publication', async () => {
@@ -1063,7 +1086,7 @@ describe('meeting analysis run coordinator', () => {
           thinking: null,
           seed: null,
           contextTokens: 16384,
-          promptVersion: 'notes-v35',
+          promptVersion: NOTES_PROMPT_VERSION,
         }),
         'utf8',
       )
@@ -1370,7 +1393,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v35',
+            promptVersion: NOTES_PROMPT_VERSION,
           }),
           'utf8',
         )
@@ -1389,7 +1412,7 @@ describe('meeting analysis run coordinator', () => {
             thinking: null,
             seed: null,
             contextTokens: 16384,
-            promptVersion: 'notes-v35',
+            promptVersion: NOTES_PROMPT_VERSION,
           }),
           'utf8',
         )
@@ -2109,4 +2132,245 @@ describe('meeting analysis run coordinator', () => {
       }),
     );
   });
+});
+
+describe('published notes do not regenerate from secondary vocabulary', () => {
+  const setup = (
+    secondaryStatus = 'complete',
+    provider: 'chatgpt' | 'ollama' = 'chatgpt',
+  ) => {
+    const template = resolveMeetingNotesTemplate(
+      createMeetingNotesTemplateSettingsSnapshot('auto', {}),
+      'auto',
+    );
+    const settings = {
+      llm_provider: provider,
+      ollama_model: 'gemma4:12b',
+      chatgpt_model: 'gpt-5.6-terra',
+    };
+    const revisions = {
+      sourceRevision: 'saved-source',
+      eligibilityRevision: 'eligible',
+      userNotesHash: 'scratchpad',
+    };
+    const run = {
+      run_id: 'saved-run',
+      input_revision: 'legacy-fingerprint-before-extraction',
+      source_revision: revisions.sourceRevision,
+      eligibility_revision: revisions.eligibilityRevision,
+      user_notes_hash: revisions.userNotesHash,
+      notes_status: 'published',
+      secondary_status: secondaryStatus,
+    };
+    const meeting = {
+      id: 'fictional-saved',
+      transcript_status: 'validated',
+      transcript_json: JSON.stringify({
+        segments: [
+          { speaker: 'Them', text: 'Riley will send the checklist by Monday.' },
+        ],
+      }),
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'Pilot readiness',
+        topics: [],
+        all_decisions: [],
+        all_action_items: [
+          { text: 'Send the checklist', assignee: 'Riley', due: 'Monday' },
+        ],
+        meeting_type: 'general',
+        quality: {
+          format_pass: true,
+          retry_count: 0,
+          fallback_used: false,
+          issues: [],
+        },
+        generation_metadata: {
+          provider,
+          model:
+            provider === 'ollama'
+              ? settings.ollama_model
+              : settings.chatgpt_model,
+          prompt_version: NOTES_PROMPT_VERSION,
+          notes_template: template,
+        },
+      }),
+    };
+    const writer = vi.fn().mockRejectedValue(new Error('writer_called'));
+    const begin = vi.fn();
+    const current = vi.fn(
+      ({ inputRevision }) =>
+        begin.mock.calls.length > 0 || inputRevision === run.input_revision,
+    );
+    const secondary = vi.fn(async ({ canCommit }) => {
+      expect(canCommit()).toBe(true);
+    });
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => meeting,
+        getMeetingAnalysisPublicationRevisions: () => revisions,
+        getMeetingAnalysisRun: () => run,
+        beginMeetingAnalysisRun: begin,
+        updateMeetingAnalysisRunStatus: () => true,
+        updateMeetingAnalysisRunStatusIfCurrent: ({ secondaryStatus }) => {
+          if (secondaryStatus) run.secondary_status = secondaryStatus;
+          return true;
+        },
+        isMeetingAnalysisRunCurrent: current,
+        publishMeetingNotesIfCurrent: vi.fn(),
+        getAllEntities: () => [
+          { type: 'person', name: 'Riley' },
+          { type: 'person', name: 'Avery' },
+          { type: 'project', name: 'Harbor pilot' },
+        ],
+      },
+      getSettings: async () => settings,
+      getProvider: async () => ({
+        name: provider,
+        generateStructuredAnalysis: writer,
+      }),
+      runSecondary: secondary,
+    });
+    return {
+      coordinator,
+      settings,
+      revisions,
+      run,
+      meeting,
+      writer,
+      begin,
+      secondary,
+      current,
+    };
+  };
+  const request = {
+    meetingId: 'fictional-saved',
+    requestId: 'offline',
+    reason: 'automatic' as const,
+  };
+
+  it('reuses an existing published run despite names added by secondary extraction', async () => {
+    const f = setup();
+    expect(
+      await f.coordinator.generateAndPublishMeetingNotes(request),
+    ).toMatchObject({ runId: 'saved-run', status: 'published' });
+    expect(f.writer).not.toHaveBeenCalled();
+    expect(f.begin).not.toHaveBeenCalled();
+    expect(f.secondary).not.toHaveBeenCalled();
+  });
+
+  it('resumes missing secondary work with the saved revision, then reuses it', async () => {
+    const f = setup('failed');
+    await f.coordinator.generateAndPublishMeetingNotes(request);
+    await vi.waitFor(() => expect(f.run.secondary_status).toBe('complete'));
+    await f.coordinator.generateAndPublishMeetingNotes({
+      ...request,
+      requestId: 'again',
+    });
+    expect(f.secondary).toHaveBeenCalledTimes(1);
+    expect(f.writer).not.toHaveBeenCalled();
+    expect(f.begin).not.toHaveBeenCalled();
+    expect(f.current).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inputRevision: 'legacy-fingerprint-before-extraction',
+      }),
+    );
+  });
+
+  it.each(['provider', 'model', 'template', 'prompt', 'seed', 'thinking'])(
+    'keeps published cloud notes through changed %s without paying for writers or backfill',
+    async (change) => {
+      const f = setup('failed');
+      const analysis = JSON.parse(f.meeting.analysis_json);
+      if (change === 'provider')
+        analysis.generation_metadata.provider = 'ollama';
+      if (change === 'model') f.settings.chatgpt_model = 'gpt-6.1-sol';
+      if (change === 'template')
+        analysis.generation_metadata.notes_template.revision = 'old';
+      if (change === 'prompt')
+        analysis.generation_metadata.prompt_version = 'old';
+      if (change === 'seed')
+        analysis.generation_metadata.generation_options = { seed: 42 };
+      if (change === 'thinking')
+        analysis.generation_metadata.generation_options = {
+          structured_thinking: true,
+        };
+      f.meeting.analysis_json = JSON.stringify(analysis);
+      await expect(
+        f.coordinator.generateAndPublishMeetingNotes(request),
+      ).resolves.toMatchObject({ runId: 'saved-run', status: 'published' });
+      expect(f.writer).not.toHaveBeenCalled();
+      expect(f.secondary).not.toHaveBeenCalled();
+      expect(f.begin).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not silently reuse malformed published cloud notes', async () => {
+    const f = setup();
+    f.meeting.analysis_json = '{broken';
+    await expect(
+      f.coordinator.generateAndPublishMeetingNotes(request),
+    ).rejects.toThrow('writer_called');
+    expect(f.writer).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies a changed cloud model when the user explicitly regenerates', async () => {
+    const f = setup();
+    f.settings.chatgpt_model = 'gpt-6.1-sol';
+    await expect(
+      f.coordinator.generateAndPublishMeetingNotes({
+        ...request,
+        reason: 'manual',
+      }),
+    ).rejects.toThrow('writer_called');
+    expect(f.writer).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['model', 'prompt'])(
+    'preserves Ollama automatic rewrites for changed %s',
+    async (change) => {
+      const f = setup('complete', 'ollama');
+      if (change === 'model') f.settings.ollama_model = 'another-local-model';
+      else {
+        const analysis = JSON.parse(f.meeting.analysis_json);
+        analysis.generation_metadata.prompt_version = 'old';
+        f.meeting.analysis_json = JSON.stringify(analysis);
+      }
+      await expect(
+        f.coordinator.generateAndPublishMeetingNotes(request),
+      ).rejects.toThrow('writer_called');
+      expect(f.writer).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(['source', 'scratchpad', 'eligibility', 'manual'])(
+    'still generates for changed %s',
+    async (change) => {
+      const f = setup();
+      if (change === 'source') f.revisions.sourceRevision = 'changed';
+      if (change === 'scratchpad') f.revisions.userNotesHash = 'changed';
+      if (change === 'eligibility') f.revisions.eligibilityRevision = 'changed';
+      if (change === 'model') f.settings.chatgpt_model = 'gpt-6.1-sol';
+      if (['template', 'prompt', 'seed', 'thinking'].includes(change)) {
+        const a = JSON.parse(f.meeting.analysis_json);
+        if (change === 'template')
+          a.generation_metadata.notes_template.revision = 'changed';
+        if (change === 'prompt') a.generation_metadata.prompt_version = 'old';
+        if (change === 'seed')
+          a.generation_metadata.generation_options = { seed: 42 };
+        if (change === 'thinking')
+          a.generation_metadata.generation_options = {
+            structured_thinking: true,
+          };
+        f.meeting.analysis_json = JSON.stringify(a);
+      }
+      await expect(
+        f.coordinator.generateAndPublishMeetingNotes({
+          ...request,
+          reason: change === 'manual' ? 'manual' : 'automatic',
+        }),
+      ).rejects.toThrow('writer_called');
+      expect(f.writer).toHaveBeenCalledTimes(1);
+    },
+  );
 });

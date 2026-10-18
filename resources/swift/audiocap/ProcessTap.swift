@@ -84,6 +84,7 @@ final class ProcessTap {
         let processObjectIDs = try findAudioObjectIDs(for: pids)
         let tapDescription = Self.makeDescription(processObjectIDs: processObjectIDs, isGlobal: isGlobal)
         tapDescription.uuid = UUID()
+        tapDescription.muteBehavior = .unmuted
         
         var tapID: AUAudioObjectID = .unknown
         var err = AudioHardwareCreateProcessTap(tapDescription, &tapID)

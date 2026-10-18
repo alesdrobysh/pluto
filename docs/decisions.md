@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-12 - Acknowledge audio release independently of recording finalization
+
+- **Status:** Accepted
+- **Extends:** “2026-09-09 - Truthful system capture evidence, paced live ASR queue, and deadline-bound stop” and the 2026-08-11 stop-boundary update.
+- **Decision:** Freeze the meeting clock and revoke capture restart admission at terminal stop. Stop native capture, browser tracks, and the AudioContext independently of recorder events and persistence. Wait for the owned helper's transport close; escalate within a bounded deadline. Preserve lease authority for final journal writes while rejecting recovery restart. A stopped notification requires resource acknowledgement; persistence remains a separate outcome.
+- **Consequences:** Recorder-event loss cannot keep audio active. Failed release remains retryable. Automatic audio probes stay paused until passive app/tab closure or explicit new recording; automatic departure evidence and packaged device-route acceptance remain separate work.
+
 ## Entry Format
 
 ```markdown
@@ -347,42 +354,42 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 
 ## 2026-08-07 - Local Model Action Item & Decision Extraction with Evidence Grounding
 - **Status:** Accepted
-- **Source:** [Issue #594](https://github.com/metagrover/pluto/issues/594), `docs/superpowers/specs/2026-08-07-local-model-action-item-extraction-design.md`
+- **Source:** [Issue #594](https://github.com/metagrover/pluto/issues/594), [docs/superpowers/specs/2026-08-07-local-model-action-item-extraction-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-07-local-model-action-item-extraction-design.md)
 - **Decision:** Shift action item and decision extraction and validation from rigid code-level keyword matching (`hasSupportInTranscript`) to local LLM extraction with prompt-based `evidence` quote grounding.
 - **Rationale:** Hardcoded TypeScript keyword filters (`"i'll"`, `"send"`, `"draft"`) rejected 98.8% of LLM-extracted action items because natural LLM paraphrasing caused single-line token overlap to fall below 0.6. Relying on the LLM to extract tasks and supply transcript evidence quotes preserves high recall while maintaining hallucination safeguards.
 - **Consequences:** Removes rigid keyword deletion from `applyTranscriptGrounding()`, adds optional `evidence` field to `ActionItemV3` and `DecisionV3` prompts/schemas, and flags low-support items in metadata without stripping them from user-facing notes.
 
 ## 2026-08-06 - Native Apple Silicon MLX Whisper Transcription Engine
 - **Status:** Accepted
-- **Source:** [Issue #593](https://github.com/metagrover/pluto/issues/593), `docs/superpowers/specs/2026-08-06-apple-silicon-mlx-whisper-design.md`
+- **Source:** [Issue #593](https://github.com/metagrover/pluto/issues/593), [docs/superpowers/specs/2026-08-06-apple-silicon-mlx-whisper-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-06-apple-silicon-mlx-whisper-design.md)
 - **Decision:** Integrate Apple MLX (`mlx-whisper`) as the primary native transcription engine on Apple Silicon Macs (`darwin`/`arm64`) under the `local_alt_apple_silicon` backend identifier in `python/whisperx_server.py`.
 - **Rationale:** Standard PyTorch WhisperX runs on CPU on macOS, leading to high CPU usage and slower finalization. A local content-free fixture confirmed that the installed MLX small model runs faster than real time on the development machine; transcript quality remains governed by the configured model and the recording-quality benchmark rather than an unverified equivalence claim.
 - **Consequences:** Adds `mlx` and `mlx-whisper` Python dependencies on macOS arm64, exposes backend choice in Pluto settings, models `mlx` and `float16` explicitly in the shared contract, and reports an unavailable MLX runtime instead of silently claiming a CPU fallback is the selected engine.
 
 ## 2026-08-04 - Asynchronous Memory Dreaming and Knowledge Consolidation Engine
 - **Status:** Accepted
-- **Source:** [Issue #586](https://github.com/metagrover/pluto/issues/586), `docs/superpowers/specs/2026-08-04-memory-dreaming-engine-design.md`
+- **Source:** [Issue #586](https://github.com/metagrover/pluto/issues/586), [docs/superpowers/specs/2026-08-04-memory-dreaming-engine-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-04-memory-dreaming-engine-design.md)
 - **Decision:** Pluto will consolidate cross-meeting knowledge through a proposal-first background Dreaming Engine. Deterministic code owns cluster selection, evidence and identifier validation, graph invariants, transactional application, and restoration. `qwen3.5:9b` is the preferred background synthesis candidate to benchmark; it proposes evidence-backed changes but does not receive direct database authority. Entity merges, temporal transitions, correction overrides, archival, and deletion require review initially.
 - **Rationale:** Point-in-time extraction accumulates fragmented snippets, conflicting temporal facts, and near-duplicate nodes. Background execution can tolerate Qwen's higher latency and benefits from its stronger observed evidence grounding, but local evaluation did not establish enough semantic precision for autonomous durable mutation.
 - **Consequences:** The first implementation persists inspectable proposals, enforces risk tiers, preserves immutable episodic evidence, and stores complete before-and-after state for any applied change. Dreaming yields to recording and foreground analysis, checks memory pressure, rejects late cancelled results, and unloads its model after a run. Any broader auto-application policy requires dreaming-specific benchmark evidence and a later decision update.
 
 ## 2026-07-22 - Delegate routine Builder review, not human authority
 - **Status:** Accepted
-- **Source:** [Issue #546](https://github.com/metagrover/pluto/issues/546), `docs/superpowers/specs/2026-07-22-delegated-design-review-design.md`
+- **Source:** [Issue #546](https://github.com/metagrover/pluto/issues/546), [docs/superpowers/specs/2026-07-22-delegated-design-review-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-07-22-delegated-design-review-design.md)
 - **Decision:** Builder uses fresh independent read-only sub-agents to review bounded engineering designs and committed written specs. Human approval remains required for unresolved product intent, privacy/legal/security risk, credentials or private evidence, spending, destructive or irreversible work, authority conflicts, and human-only evidence.
 - **Rationale:** Independent review removes routine approval latency while preserving separation of duties and the owner-only decisions that protect Pluto's trust contract.
 - **Consequences:** Design and committed-spec approvals are separate, revisions invalidate approval, reviewers cannot author or implement the artifact, and unresolved repeated or conflicting review outcomes escalate to the human owner.
 
 ## 2026-07-22 - Fail closed on recording trust, not meeting preservation
 - **Status:** Accepted
-- **Source:** [Issue #535](https://github.com/metagrover/pluto/issues/535), [PR #544](https://github.com/metagrover/pluto/pull/544), `docs/superpowers/specs/2026-07-22-recoverable-seal-failure-design.md`
+- **Source:** [Issue #535](https://github.com/metagrover/pluto/issues/535), [PR #544](https://github.com/metagrover/pluto/pull/544), [docs/superpowers/specs/2026-07-22-recoverable-seal-failure-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-07-22-recoverable-seal-failure-design.md)
 - **Decision:** A capture-journal seal gates normal meeting finalization. If sealing fails, Pluto preserves the unsealed journal and a visible meeting marked `recovery_required` instead of discarding the meeting or presenting it as normally finalized.
 - **Rationale:** Losing an entire meeting is worse than delaying an imperfect transcript, while silently treating unsealed evidence as complete would violate Pluto's recording-trust contract.
 - **Consequences:** Finalized-evidence consumers defer recovery-required meetings, user-visible failure copy remains content-free, the only recovery source cannot be deleted from Meeting View, and automatic retry/recovery remains focused follow-up work.
 
 ## 2026-07-13 - Store new journal entries as changelog fragments
 - **Status:** Accepted
-- **Source:** [Issue #390](https://github.com/metagrover/pluto/issues/390), `docs/superpowers/specs/2026-07-13-changelog-fragments-design.md`
+- **Source:** [Issue #390](https://github.com/metagrover/pluto/issues/390), [docs/superpowers/specs/2026-07-13-changelog-fragments-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-07-13-changelog-fragments-design.md)
 - **Decision:** New Pluto product/development journal entries are canonical, uniquely named files under `docs/changelog/entries/`. Ordinary pull requests never edit the archived aggregate journal or commit generated aggregate output.
 - **Rationale:** Independent fragments preserve Pluto's rich Changed, Why, Replaced, and Notes context without forcing concurrent branches to modify the same newest date section.
 - **Consequences:** Meaningful changes must add and validate a fragment, CI rejects malformed or duplicate fragments, existing history stays in `docs/CHANGELOG.md`, and combined post-migration views are generated on demand.
@@ -446,7 +453,7 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 
 ## 2026-05-09 - Treat streams as derived, attention as future durable state
 - **Status:** Accepted
-- **Source:** [Issue #76](https://github.com/metagrover/pluto/issues/76), `docs/superpowers/specs/2026-05-09-cognitive-memory-spine-design.md`
+- **Source:** [Issue #76](https://github.com/metagrover/pluto/issues/76), [docs/superpowers/specs/2026-05-09-cognitive-memory-spine-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-05-09-cognitive-memory-spine-design.md)
 - **Decision:** Pluto's Cognitive Memory Spine should keep raw capture, extracted graph state, knowledge docs, and correction feedback durable now; keep streams and working-memory reads derived for the current phase; and move canonical attention ownership into SQLite in Phase 1 rather than extending the in-memory proactive alert store.
 - **Rationale:** The current codebase already has durable capture, graph, and synthesis primitives, but it does not yet have a trustworthy shared attention layer. Persisting stream identity too early would harden still-evolving heuristics, while leaving attention transient would block cross-surface continuity and correction-aware ranking.
 - **Consequences:** Phase 1 work should add a durable attention queue, Phase 2 work should decide how to persist working-memory snapshots, and follow-up lifecycle work should keep explicit action state distinct from `knowledge_corrections` feedback.
@@ -475,7 +482,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-11 - Hint local transcription with bounded known-person context
 
 - **Status:** Accepted
-- **Source:** [Issue #602](https://github.com/metagrover/pluto/issues/602), `docs/superpowers/specs/2026-08-11-known-person-transcription-vocabulary-design.md`
+- **Source:** [Issue #602](https://github.com/metagrover/pluto/issues/602), [docs/superpowers/specs/2026-08-11-known-person-transcription-vocabulary-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-11-known-person-transcription-vocabulary-design.md)
 - **Decision:** Each recording resolves one local `known_person_v1` vocabulary snapshot: explicit participants first, then a deterministic saliency/recency/frequency ranking of linked person entities, capped at 12 sanitized names and 240 prompt characters. The snapshot is passed only to MLX `initial_prompt`; transcript text is never rewritten after recognition.
 - **Rationale:** Pluto already has relevant person context, while MLX supports a bounded prompt that can disambiguate acoustically similar names. A deterministic local hint improves recognition without sending the graph elsewhere or asserting a name when the audio does not support it.
 - **Consequences:** Live and normal final transcription share the immutable recording snapshot; empty context omits the prompt; production logs and persisted transcript metadata retain only policy version and hint count; synthetic ambiguity and negative-control replays gate quality claims.
@@ -489,14 +496,14 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 
 ## 2026-07-30 - Derive transcript trust from explicit evidence-backed state
 - **Status:** Accepted
-- **Source:** [Issue #556](https://github.com/metagrover/pluto/issues/556), `docs/superpowers/specs/2026-07-30-transcript-trust-state-design.md`
+- **Source:** [Issue #556](https://github.com/metagrover/pluto/issues/556), [docs/superpowers/specs/2026-07-30-transcript-trust-state-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-07-30-transcript-trust-state-design.md)
 - **Decision:** Recording recovery, transcript validation, retry, Meeting View, and downstream intelligence share one versioned transcript-trust envelope. User copy and action eligibility are resolved from explicit causes, available artifacts, content-free evidence provenance, and validation proof; recovery alone never means captured speech is missing, and downstream generation requires a persisted proof-backed `validated` state.
 - **Rationale:** The previous projections let generic `needs_attention` states render as speech loss and allowed separate pipeline stages to infer trust differently. A single fail-closed resolver preserves the recording while distinguishing recoverable validation work, capture gaps, evidence failures, and proven transcript loss.
 - **Consequences:** New writes use schema version 2, conflicting projections are rejected transactionally, legacy records remain readable without directly gaining generation eligibility, eligible unanalyzed meetings automatically validate before Pluto builds their standard analysis, existing analysis remains the primary Meeting View experience, recovery gaps require restoration before validation, and the privacy-safe recording-quality benchmark asserts the explicit capture-gap cause and aggregate recovery counts.
 
 ## 2026-07-31 - Finalize recordings from durable live transcript checkpoints
 - **Status:** Accepted
-- **Source:** [Issue #442](https://github.com/metagrover/pluto/issues/442), `docs/superpowers/specs/2026-07-31-resumable-live-transcript-finalization-design.md`
+- **Source:** [Issue #442](https://github.com/metagrover/pluto/issues/442), [docs/superpowers/specs/2026-07-31-resumable-live-transcript-finalization-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-07-31-resumable-live-transcript-finalization-design.md)
 - **Decision:** New recordings use a versioned capture-journal interval ledger that durably links each accepted live transcript chunk and arbitration frame to its exact repair audio and resolved transcription configuration. Clean stop and interrupted recovery verify and reuse that chunk evidence; only unresolved captured tuples are transcribed again.
 - **Rationale:** Live transcription was already producing useful text during recording, but the renderer discarded it and recovery rebuilt an empty transcript before running Whisper over the complete recording. That duplicated successful work, increased latency, and could replace a healthy live result with a failed validation pass.
 - **Consequences:** Fully checkpointed recordings reach deterministic transcript validation without full-session transcription, clean-stop tail gaps are repaired before sealing, native system audio is downmixed and cropped to journal time, a targeted empty retry can establish per-source silence while canonical validation still checks whole-meeting coverage, interrupted work resumes at chunk boundaries, audio remains the recovery source of truth, capture gaps remain fail-closed, and the canonical transcript plus downstream analysis claim is generation-guarded and committed atomically.
@@ -537,7 +544,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-14 - Validate sealed live chunks within the capture compute budget
 
 - **Status:** Accepted
-- **Source:** [Issue #616](https://github.com/metagrover/pluto/issues/616), `docs/superpowers/specs/2026-08-14-live-background-transcript-validation-design.md`
+- **Source:** [Issue #616](https://github.com/metagrover/pluto/issues/616), [docs/superpowers/specs/2026-08-14-live-background-transcript-validation-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-14-live-background-transcript-validation-design.md)
 - **Decision:** Keep base MLX transcription on the first-paint path, then admit at most one medium validation of a sealed five-second source chunk after the live queue becomes idle and the 20-second cadence plus macOS battery/thermal policy allow it. A successful result replaces the matching capture-journal checkpoint once, remains linked to the same audio checksum, and updates the live draft through a monotonic time-aligned merge with stable IDs.
 - **Rationale:** Whole-meeting rolling reconciliation is both thermally unsafe and difficult to bind to exact evidence. Sealed capture tuples already provide bounded audio, durable checksums, source ownership, and a finalization reuse seam.
 - **Consequences:** Live work always wins; denied, failed, or cancelled background work leaves the preview untouched; acceptance frames remain immutable until stop-time finalization rebuilds stale links; validated medium checkpoints accelerate finalization without weakening canonical transcript trust.
@@ -545,7 +552,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-14 - Require evidence before presenting settled meeting intelligence
 
 - **Status:** Accepted
-- **Source:** [Issue #594](https://github.com/metagrover/pluto/issues/594), `docs/superpowers/specs/2026-08-14-evidence-grounded-meeting-analysis-design.md`
+- **Source:** [Issue #594](https://github.com/metagrover/pluto/issues/594), [docs/superpowers/specs/2026-08-14-evidence-grounded-meeting-analysis-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-14-evidence-grounded-meeting-analysis-design.md)
 - **Decision:** Single-pass, per-topic, and repair analysis use one decision/action taxonomy. Every retained settled item must resolve to a normalized verbatim transcript line and substantially conserve its claim tokens; unsupported items are removed, unsupported attribution fields are cleared, and rollups are rebuilt from grounded topic arrays.
 - **Rationale:** Prompt contradictions and whole-transcript token overlap let exploratory language and unsupported owners reach user-facing analysis even when quality metadata admitted the failure. A larger local model improved quoting but did not fix classification by itself.
 - **Consequences:** Proposals and open questions remain visible without becoming commitments; structured Ollama thinking and evaluation seeds are explicit capabilities; default-model changes require a repeated real-provider quality, latency, and memory gate rather than a single anecdotal run.
@@ -627,7 +634,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-24 - Bound meeting coaching to private, evidence-grounded reflection
 
 - **Status:** Proposed
-- **Source:** [Issue #654](https://github.com/metagrover/pluto/issues/654), `docs/superpowers/specs/2026-08-24-evidence-grounded-meeting-coaching-design.md`
+- **Source:** [Issue #654](https://github.com/metagrover/pluto/issues/654), [docs/superpowers/specs/2026-08-24-evidence-grounded-meeting-coaching-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-24-evidence-grounded-meeting-coaching-design.md)
 - **Decision:** Pluto may offer on-demand coaching through Ask Pluto, meeting-scoped chat, and a Recent Win source moment. Successful responses use a fixed strengths, improvement, evidence, impact, and next-experiment contract. Behavioral and leadership claims require reliable meeting evidence and user attribution; coaching must not infer personality or intent, manufacture praise, score or compare participants, or become employer-facing evaluation.
 - **Rationale:** Meeting memory can reduce the effort of useful self-reflection, but unsupported praise and people evaluation would undermine Pluto's trust model and create a surveillance product instead of a private second brain.
 - **Consequences:** #62 and #614 remain the retrieval, citation, correction, and conversation foundations. Weak evidence produces constrained coaching rather than generic advice presented as meeting analysis. Longitudinal growth tracking, scoring, and organization-facing analytics remain outside the outcome and require separate consent and quality decisions.
@@ -651,7 +658,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-24 - Calibrate cross-channel skew before removing Parakeet bleed
 
 - **Status:** Accepted
-- **Source:** [Issue #657](https://github.com/metagrover/pluto/issues/657), `docs/superpowers/specs/2026-08-24-parakeet-cross-channel-skew-dedup-design.md`
+- **Source:** [Issue #657](https://github.com/metagrover/pluto/issues/657), [docs/superpowers/specs/2026-08-24-parakeet-cross-channel-skew-dedup-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-24-parakeet-cross-channel-skew-dedup-design.md)
 - **Decision:** Parakeet finalization may align microphone and System word clocks only when at least three independent, unique four-word anchors form a 75% dominant offset cluster and the absolute offset is no greater than 2.5 seconds. The existing exact consecutive-word collapse then runs first at the original timestamps and, when calibration passes, at the estimated offset. System words are never removed.
 - **Rationale:** Real dual-source capture can contain the same playback speech on both channels with a stable delay just outside the direct matcher's tolerance. A larger fixed tolerance would erase legitimate nearby speech, while generic save-time cleanup would mutate canonical evidence without source-clock proof. AEC reduces future acoustic bleed but cannot reliably repair already sealed recordings.
 - **Consequences:** Strongly evidenced skewed duplicates are removed during canonical reconciliation, ambiguous overlap remains intact, and content-free calibration provenance is persisted with new final transcripts. Historical Parakeet trust records without this optional provenance remain readable.
@@ -659,7 +666,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-24 - Preserve useful context on an empty daily briefing
 
 - **Status:** Accepted
-- **Source:** [Issue #658](https://github.com/metagrover/pluto/issues/658), `docs/superpowers/specs/2026-08-24-useful-empty-dashboard-design.md`
+- **Source:** [Issue #658](https://github.com/metagrover/pluto/issues/658), [docs/superpowers/specs/2026-08-24-useful-empty-dashboard-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-24-useful-empty-dashboard-design.md)
 - **Decision:** When no supported item needs attention, Pluto states that once and guides the user through the strongest available real context. If suggested commitments remain, the status is `Nothing urgent`; `You're caught up` is reserved for a genuinely empty review queue. Suggested commitments use progressive disclosure with one resting review action and one primary decision. Recent Win remains a permanent engagement surface, using evidence-backed content when available and a truthful feature preview otherwise. Latest meeting or Knowledge re-entry sits beneath it as secondary context. Initial loading may reserve layout with skeletons; background refreshes preserve the resolved model and do not replace stable status copy.
 - **Rationale:** Repeating empty messages across fixed regions made a data-bearing dashboard appear vacant, while a shared loading flag caused routine background meeting updates to flash a global refresh label.
 - **Consequences:** Unsupported claims never appear, but Recent Win intentionally reserves a compact space to preserve the product's progress-recognition loop. Suggested commitments remain visibly distinct from confirmed work without presenting adjacent equal-weight decisions or contradicting a caught-up message, and refresh feedback belongs to initial load or the control that initiated a mutation rather than the whole dashboard.
@@ -667,7 +674,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-24 - Separate readable transcript text from canonical evidence
 
 - **Status:** Accepted
-- **Source:** [Issue #659](https://github.com/metagrover/pluto/issues/659), `docs/superpowers/specs/2026-08-24-readable-finalized-transcripts-design.md`
+- **Source:** [Issue #659](https://github.com/metagrover/pluto/issues/659), [docs/superpowers/specs/2026-08-24-readable-finalized-transcripts-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-24-readable-finalized-transcripts-design.md)
 - **Decision:** Pluto removes exact same-source duplicates and strictly evidenced embedded one-letter microphone artifacts during final canonical reconciliation. Ordinary `um` and `uh` disfluencies remain in persisted transcript evidence and are suppressed only through a pure readable projection used by Meeting View and downstream text analysis.
 - **Rationale:** Cross-channel reconciliation can prove some fragments are pipeline artifacts, but transcript text alone cannot prove whether an ordinary disfluency was spoken. Enabling generic save-time cleanup would improve appearance by silently rewriting evidence and could erase genuine meaning.
 - **Consequences:** Existing meetings become easier to read without database rewrites, new transcripts persist content-free readability counts, analysis and title generation receive the same clean projection, and canonical timestamps, word arrays, raw audio, and source provenance remain available for evidence review.
@@ -683,7 +690,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-25 - Separate recording start, capture, and finalization presentation states
 
 - **Status:** Accepted
-- **Source:** [Issue #664](https://github.com/metagrover/pluto/issues/664), `docs/superpowers/specs/2026-08-25-trustworthy-recording-loop-design.md`
+- **Source:** [Issue #664](https://github.com/metagrover/pluto/issues/664), [docs/superpowers/specs/2026-08-25-trustworthy-recording-loop-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-25-trustworthy-recording-loop-design.md)
 - **Decision:** Recording startup publishes a finite `starting` state before asynchronous local admission. Accepted stop freezes the visible meeting clock and immediately replaces the live workspace with a local document-shaped pending view; persisted Meeting View replaces it when provisional save completes. Live and saved transcript presentation may split long same-speaker runs at bounded time and character limits, but cannot rewrite canonical segments, words, timestamps, or speaker evidence.
 - **Rationale:** A click without feedback resembles failure, a live timer after stop falsely implies capture continues, and unbounded same-speaker merging hides otherwise available punctuation and turns in walls of text.
 - **Consequences:** Startup, recording, and finalization are honest user-visible phases. Users can leave finalization running without remaining trapped in capture UI, while canonical audio, transcript integrity, and downstream analysis contracts remain unchanged.
@@ -699,7 +706,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-25 - Resolve Ask Pluto's current meeting at query submission
 
 - **Status:** Accepted
-- **Source:** [Issue #62](https://github.com/metagrover/pluto/issues/62), `docs/superpowers/specs/2026-08-25-adaptive-reliable-ask-pluto.md`
+- **Source:** [Issue #62](https://github.com/metagrover/pluto/issues/62), [docs/superpowers/specs/2026-08-25-adaptive-reliable-ask-pluto.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-25-adaptive-reliable-ask-pluto.md)
 - **Decision:** Ask Pluto resolves `current meeting` to the active recording when one exists and otherwise to the most recently started persisted meeting, including a meeting that is still processing or failed. Each request freezes that scope and its available evidence at submission. A later explicit reference to current/latest resolves again, while referential follow-ups inherit the prior resolved scope. Straightforward retrieval uses a fast non-thinking path; cross-meeting comparison, conflict, trend, rationale, risk, and advice use bounded deep reasoning.
 - **Rationale:** Treating current meeting as only the selected or latest completed record makes the same phrase change meaning across recording, meeting view, and global chat. A blanket thinking choice also trades away either responsiveness or the synthesis required for cross-meeting questions without repairing missing context.
 - **Consequences:** Live and processing evidence remains visibly provisional rather than silently falling back to an older meeting. The active meeting is pinned during current-versus-history retrieval, Ask Pluto carries bounded conversation and citations, and foreground queries must have a cancellable, observable lifecycle that can preempt background knowledge synthesis.
@@ -707,7 +714,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-25 - Bound Ask Pluto depth by visible-answer latency
 
 - **Status:** Accepted
-- **Source:** [Issue #62](https://github.com/metagrover/pluto/issues/62), `docs/superpowers/specs/2026-08-25-adaptive-reliable-ask-pluto.md`
+- **Source:** [Issue #62](https://github.com/metagrover/pluto/issues/62), [docs/superpowers/specs/2026-08-25-adaptive-reliable-ask-pluto.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-25-adaptive-reliable-ask-pluto.md)
 - **Decision:** Synchronous Ask Pluto uses deterministic intent routing and disables hidden Qwen 3.5 thinking in both Fast and Deep modes. Deep retains a 16K context, a 2,048-token answer budget, pinned cross-meeting evidence, and stricter comparative citation requirements. Hidden thinking may return only if the local runtime exposes a reliably bounded budget that meets the visible-first-token contract.
 - **Rationale:** On the target 16 GB machine, model classification added roughly nine seconds before every answer. A 2,048-token Deep thinking run produced no visible answer, and a 4,096-token run required 124,297 ms for its first visible token. Evidence-structured non-thinking Deep synthesis met both the latency and grounded-content benchmark.
 - **Consequences:** Deep remains a product-level reasoning and retrieval mode rather than a transport-level chain-of-thought switch. Ask Pluto avoids a second classification generation, pauses background knowledge synthesis for the visible chat session, preempts background title work, keeps direct and cited follow-up prompts on frozen evidence, and does not trade live-chat reliability for hidden reasoning tokens.
@@ -780,17 +787,17 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Audit-kind correction (2026-08-27):** A complete, source-reviewed NotesItem may be reclassified between point/action/decision/question. Rejecting all kind changes prevented the audit from correcting conditional discussion and withdrawals. Narrative/title-to-item shape mismatches remain invalid; promoted commitments still pass owner/date/modality checks, and hierarchy still requires explicit conservation/dispositions. Concrete writer examples were removed after a synthetic run copied one as an unsourced claim; the source gate rejected that output.
 - **Approved accuracy-first revision (2026-08-27):** Replace the patch/verdict audit with a complete source-based editor only after independent semantic acceptance. Accuracy, readable coverage and reliability take priority over latency; the former 30-second acceptance target is superseded. The editor remains an internal opt-in prototype because real-provider tests still miss conditional promises and retain unaccepted or withdrawn commitments. Unit tests validate mechanics, not semantic quality. Neither reasoning nor hiding draft classifications resolved the failures. A successful simple prose diagnostic prevents attributing these failures to universal model incapability. Further pipeline-stage or model changes require a new bounded decision; no promotion, production regeneration, merge or push is authorized by this checkpoint.
 - **Approved source-reconciliation evaluation (2026-08-27):** The user authorized a focused source-only stage before prose composition, superseding the fixed two-pass constraint. The flat reconciler and independent raw-output harness were implemented, but baseline, grammar-free and documented Qwen sampling profiles all failed the first three semantic cases. The prototype is not integrated. Structural review and unit success do not override action/withdrawal errors; retain the exact failing artifacts and evaluate a different generation model/runtime only with authorization. No production model or notes were changed.
-- **Approved alternative-model evaluation (2026-08-27):** Evaluate feasible local alternatives using synthetic sources only, with the same prompt, source contract and independent semantic fixtures; do not switch the production default. Record model digests, inherited sampling settings, raw responses and the first failure stage. A guard rejection is not automatically a semantic failure: separately document demonstrable validator false positives and taxonomy disagreements. The reproduced equivalent-condition vocabulary gap is corrected with positive and negative regression tests, without rewriting model output or weakening the independent semantic gates. See `docs/superpowers/plans/2026-08-27-meeting-model-evaluation.md` for measured results and the production-promotion boundary.
+- **Approved alternative-model evaluation (2026-08-27):** Evaluate feasible local alternatives using synthetic sources only, with the same prompt, source contract and independent semantic fixtures; do not switch the production default. Record model digests, inherited sampling settings, raw responses and the first failure stage. A guard rejection is not automatically a semantic failure: separately document demonstrable validator false positives and taxonomy disagreements. The reproduced equivalent-condition vocabulary gap is corrected with positive and negative regression tests, without rewriting model output or weakening the independent semantic gates. See [docs/superpowers/plans/2026-08-27-meeting-model-evaluation.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/plans/2026-08-27-meeting-model-evaluation.md) for measured results and the production-promotion boundary.
 - **User-confirmed local-only scope (2026-08-27):** The user declined API models. Continue within local models; a hosted-provider key or reference run is not a prerequisite. The next requested work is a holistic prompt review with concise general guidance, a few contrasting examples and targeted omission/condition safeguards. That design is pending approval; no model switch, new download, production regeneration or additional pipeline stage is implied. Preserve previous evaluation evidence and distinguish mechanically enforceable checks from semantic completeness that still requires local-model verification.
-- **Approved compact local guidance and checks (2026-08-27):** The user approved the shared general content policy, three contrasting examples, source-based omission/conflict checks, commitment preservation and one bounded correction attempt described in `docs/superpowers/specs/2026-08-27-local-notes-guardrails-design.md`. Implement on the isolated #674 branch with local synthetic evaluation. Explicit choices not to proceed may be decisions; merely lacking an assignment is not itself a decision. No default-model switch or production regeneration is authorized by implementation approval.
-- **Compact guidance implementation (2026-08-27):** Shared the three-example policy across stages, clarified the flat response schema, and connected conservative source-derived omission/condition/cancellation signals to the existing single repair per stage. Composition must conserve already-grounded commitments exactly; unresolved failures do not publish partial success. Explicit negative choices retain their predicate, prerequisites and recipient scope. Prompt/cache identity advances to notes-v12 (audit) and notes-v13 (editor), with legacy readers unchanged. The small lexical guardrail deliberately abstains on recognized compound conditional promises and does not establish semantic completeness. Final local evidence is recorded in `docs/superpowers/plans/2026-08-27-local-notes-guardrails-evaluation.md`; no hosted baseline, model promotion, production regeneration, merge or push is part of this checkpoint.
+- **Approved compact local guidance and checks (2026-08-27):** The user approved the shared general content policy, three contrasting examples, source-based omission/conflict checks, commitment preservation and one bounded correction attempt described in [docs/superpowers/specs/2026-08-27-local-notes-guardrails-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-27-local-notes-guardrails-design.md). Implement on the isolated #674 branch with local synthetic evaluation. Explicit choices not to proceed may be decisions; merely lacking an assignment is not itself a decision. No default-model switch or production regeneration is authorized by implementation approval.
+- **Compact guidance implementation (2026-08-27):** Shared the three-example policy across stages, clarified the flat response schema, and connected conservative source-derived omission/condition/cancellation signals to the existing single repair per stage. Composition must conserve already-grounded commitments exactly; unresolved failures do not publish partial success. Explicit negative choices retain their predicate, prerequisites and recipient scope. Prompt/cache identity advances to notes-v12 (audit) and notes-v13 (editor), with legacy readers unchanged. The small lexical guardrail deliberately abstains on recognized compound conditional promises and does not establish semantic completeness. Final local evidence is recorded in [docs/superpowers/plans/2026-08-27-local-notes-guardrails-evaluation.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/plans/2026-08-27-local-notes-guardrails-evaluation.md); no hosted baseline, model promotion, production regeneration, merge or push is part of this checkpoint.
 - **Supported-commitment preservation (2026-08-27):** Fresh Gemma output retained a privacy policy and its audit approved it, but deterministic grounding silently discarded it because permission wording used “may”. Retained audit-supported actions/decisions now require repair or explicit failure when grounding disagrees; unsupported/uncertain audit removals remain explicit. A decision-only, full-normalized-source-copy allowance recognises an initial “The decision is” statement without changing global action-resolution cues, and rejects tentative or unfinished decision status while preserving actual policy prerequisites. The exact captured response is a regression fixture. This closes a demonstrated code-loss path; it does not solve remaining model formatting or coverage failures.
-- **Local schema-constrained notes (2026-08-27):** Gemma 4 12B is the primary local evaluation candidate, not a newly promoted production default. Local notes generation now supplies stage-specific JSON schemas to Ollama, including exact request-local source labels, while hosted/non-notes requests retain their prior behavior. Writer/merge, audit and optional editor response contracts are selected explicitly and retained through the existing single repair. The compact prompt, parsers, semantic grounding and original transcript remain unchanged. Shared notes-v14/v15 identities invalidate pre-schema generation/cache fingerprints without changing legacy readers. Structural conformity does not certify completeness or truth; prospective two-seed synthetic evaluation is recorded separately in `docs/superpowers/plans/2026-08-27-gemma-schema-evaluation.md`.
+- **Local schema-constrained notes (2026-08-27):** Gemma 4 12B is the primary local evaluation candidate, not a newly promoted production default. Local notes generation now supplies stage-specific JSON schemas to Ollama, including exact request-local source labels, while hosted/non-notes requests retain their prior behavior. Writer/merge, audit and optional editor response contracts are selected explicitly and retained through the existing single repair. The compact prompt, parsers, semantic grounding and original transcript remain unchanged. Shared notes-v14/v15 identities invalidate pre-schema generation/cache fingerprints without changing legacy readers. Structural conformity does not certify completeness or truth; prospective two-seed synthetic evaluation is recorded separately in [docs/superpowers/plans/2026-08-27-gemma-schema-evaluation.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/plans/2026-08-27-gemma-schema-evaluation.md).
 - **Captured-output validation corrections (2026-08-27):** Frozen Gemma schema evaluation returned 20 structurally conforming responses, but only 3/8 final documents: four validation failures and one audit timeout. Exact captured replays reproduced code false positives in rejected-offer condition scope, explicit promise withdrawal, repeated-recipient purpose clauses and abbreviated explicit-decision framing. Correct these narrowly, preserving original output/citations and actor, recipient, prerequisite and polarity checks; ambiguous extra offers or promises must not disappear into a scoped-away clause. Shared identities advance to notes-v16/v17 and guardrails-v2/schema-v1; the compact three-example prompt and inference-stage budget remain unchanged. Replay success does not rescore the frozen runs. Narrative omissions and a pre-existing permissive standalone action-grounding control remain separate acceptance gaps; the model stays unpromoted and the local implementation remains unshipped.
 - **PR completion hardening (2026-08-27):** Resume the approved local-only scope in PR #676. Reject complete copied conditional offers when unrelated resolution is borrowed, require body/overview coverage for explicit unambiguous promise withdrawals, and prefer a topic's first reviewed outcome in the three-item fallback overview without losing narrative-only topics or provenance. Capture secondary retry rows after asynchronous initialization. Title-only compare-and-set writes preserve drafts on conflict and invalidate old async sessions across navigation/unmount; failed regeneration retains published notes. Compact general guidance now explicitly preserves attributed feelings/reasons and asks audits to retain withdrawal discussion, without adding stages or retries. Notes-v22/v23 and guardrails-v3/schema-v1 distinguish the corrected generation. Fixed-seed raw evaluations and isolated synthetic Electron QA are recorded separately; none certifies real-recording/hierarchy fidelity or authorizes production model promotion. PR remains draft while release gates are open.
 - **Final fidelity continuation (2026-08-27):** Preserve every material operation and current status, explicit offer dispositions, and source-supported person references in the compact shared policy (notes-v24/v25). Full-PR review also corrected the automatic-secondary snapshot race, Unicode partition progress, actual local-model identity across stage requests, and private bounded Electron HTTP-error classification. A proposed canonical withdrawal polarity witness was implemented experimentally but failed independent adversarial review on later restarts and unresolved references. Remove it; do not treat selected passing tests as a finality guarantee or expand a fixture-shaped whitelist. Retain guardrails-v3 and the existing one-repair fail-closed path. A citation-repair alternative needs revised approval; no extra stage, retry, model promotion, production regeneration, or merge is implied.
 - **Bounded relative improvement (2026-08-27):** The user approved improving the existing audit/repair and accepts meaningful progress over the previous model/prompt without requiring perfection. Freeze one notes-v26/v27 correction revision; retain guardrails-v3, all source/repair limits and historical results. Compare the actual previous Qwen/notes-v9 system with the candidate on identical original conversations, preserving each system's production defaults and all failures. Review practical latency, material completeness and correctness separately; new serious task/ownership/condition/reversal errors block promotion, while smaller documented gaps may become follow-up work. Do not infer model-only causality from a whole-system comparison, silently change the production model, or start another tuning loop after the bounded results. See the relative-comparison plan for the stop/ship decision.
-- **Approved useful local baseline (2026-08-28):** The user explicitly approved shipping incremental improvement with Gemma 4 12B for meeting notes, rather than continuing model comparisons or requiring perfect output. Keep the existing writer/audit and one correction attempt. On the repaired local production audit, recognized content-quality disagreements become recorded warnings and unverifiable or source-conflicting confirmed tasks/decisions are excluded. Missing coverage is not repaired by inventing content. Complete the entire source hierarchy before publication and preserve warnings from every section. Schema, audit-contract, source-reference, cancellation, transport and capacity failures still fail; hosted and opt-in editor behavior remain strict. The shared notes-v28/model identity applies to requests, metadata and run reuse; generic model settings and non-note tasks are unchanged. No model download, settings/database rewrite or production regeneration is part of this change. Saved-response replay proves code behavior only, not new model quality or complete output for previously interrupted private meetings. See `docs/superpowers/specs/2026-08-28-recoverable-local-notes-design.md` and the linked issue approval. Earlier evaluation scores and decisions remain historical evidence, not current promotion requirements.
+- **Approved useful local baseline (2026-08-28):** The user explicitly approved shipping incremental improvement with Gemma 4 12B for meeting notes, rather than continuing model comparisons or requiring perfect output. Keep the existing writer/audit and one correction attempt. On the repaired local production audit, recognized content-quality disagreements become recorded warnings and unverifiable or source-conflicting confirmed tasks/decisions are excluded. Missing coverage is not repaired by inventing content. Complete the entire source hierarchy before publication and preserve warnings from every section. Schema, audit-contract, source-reference, cancellation, transport and capacity failures still fail; hosted and opt-in editor behavior remain strict. The shared notes-v28/model identity applies to requests, metadata and run reuse; generic model settings and non-note tasks are unchanged. No model download, settings/database rewrite or production regeneration is part of this change. Saved-response replay proves code behavior only, not new model quality or complete output for previously interrupted private meetings. See [docs/superpowers/specs/2026-08-28-recoverable-local-notes-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-28-recoverable-local-notes-design.md) and the linked issue approval. Earlier evaluation scores and decisions remain historical evidence, not current promotion requirements.
 
 ## 2026-08-27 - Ship Ask Pluto assistance modes independently
 
@@ -886,7 +893,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-30 - Read meeting context from the native macOS calendar store
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #617](https://github.com/metagrover/pluto/issues/617), `docs/superpowers/specs/2026-08-30-native-calendar-context-design.md`
+- **Source:** [Issue #617](https://github.com/metagrover/pluto/issues/617), [docs/superpowers/specs/2026-08-30-native-calendar-context-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-30-native-calendar-context-design.md)
 - **Decision:** Pluto's first calendar integration reads one user-selected calendar through macOS EventKit instead of operating a Google OAuth client or hosted synchronization service. Calendars already configured on the Mac can include Google/CalDAV, iCloud, Exchange, local, and subscribed sources. Pluto requests native Calendar access only after an explicit user action, queries a bounded local window, persists only minimal meeting-context fields, marks calendar provenance separately from transcript evidence, and exposes no event mutation operation.
 - **Rationale:** A shared one-click Google OAuth client requires production verification and a stable public project domain, while bring-your-own credentials are not a one-click product. EventKit preserves the intended one-click, local-first, free open-source experience and delegates provider authentication and remote synchronization to macOS.
 - **Consequences:** Apple requires full Calendar permission to read events because EventKit has no read-only authorization level; Pluto must disclose that honestly and enforce read-only behavior in its bridge contract. `Last read from this Mac` cannot claim remote-provider freshness. Direct Google OAuth, cross-platform calendar providers, multiple selected calendars, event editing, invitations, and generated pre-meeting briefs remain outside the first release.
@@ -895,7 +902,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-31 - Make saved Ask Pluto notes-first and inference-coordinated
 
 - **Status:** Accepted.
-- **Source:** [Issue #699](https://github.com/metagrover/pluto/issues/699), `docs/superpowers/specs/2026-08-31-notes-first-ask-pluto-design.md`, informed by the runtime evaluation in #694.
+- **Source:** [Issue #699](https://github.com/metagrover/pluto/issues/699), [docs/superpowers/specs/2026-08-31-notes-first-ask-pluto-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-31-notes-first-ask-pluto-design.md), informed by the runtime evaluation in #694.
 - **Decision:** Saved-meeting Ask Pluto searches a dedicated, rebuildable notes evidence index and does not use transcript-derived ranking, snippets, prompt context, or citations by default. Transcript evidence is allowed only for explicit exact-wording intent or a disclosed fallback when no usable notes exist. Active-meeting chat remains transcript-backed. Global and meeting-scoped chat share the same policy and evidence packet.
 - **Answer path:** Safely renderable summaries, decisions, action items, owners, and dates may bypass model generation. Other saved-meeting synthesis uses Gemma over compact notes evidence; Phi remains the fast model for active-meeting chat rather than causing routine completed-chat model swaps.
 - **Runtime:** A provider-neutral coordinator in Electron's main process owns priority, cancellation, model residency, and content-free timing. Pluto initially retains serialized Ollama inference, enforces one packaged production-profile instance, and isolates development profiles. Direct MLX, llama.cpp, and same-model parallel decoding remain benchmark candidates that must pass full production-path semantic, latency, memory, cancellation, and contention gates before promotion.
@@ -905,7 +912,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-31 - Group Settings by user intent with horizontal tabs
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #643](https://github.com/metagrover/pluto/issues/643), `docs/superpowers/specs/2026-08-31-settings-information-architecture-design.md`
+- **Source:** [Issue #643](https://github.com/metagrover/pluto/issues/643), [docs/superpowers/specs/2026-08-31-settings-information-architecture-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-31-settings-information-architecture-design.md)
 - **Decision:** Settings uses four horizontal categories: Personal, Meetings, Intelligence, and Advanced. It shows one category at a time with standard keyboard tab behavior. Categories represent the user's intent rather than mirroring each implementation section; Calendar stays with recording, appearance stays with identity, and destructive maintenance remains isolated.
 - **Rationale:** The existing application sidebar already provides primary navigation, so a second left rail would make Settings feel administrative. A single scrolling page continued to expose every control at once, while a tab for every feature would create category sprawl. Four intent-based tabs keep the visible choice count within a manageable range and preserve room for related settings to grow.
 - **Consequences:** Personal is the default whenever Settings mounts, and the selected category lasts only while the page remains mounted. Existing settings, defaults, persistence, setup states, and destructive confirmation behavior remain unchanged. Future controls should join one of these intent categories unless a distinct user task justifies revisiting the information architecture.
@@ -923,7 +930,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-08-31 - Make People an evidence-backed relationship briefing
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #704](https://github.com/metagrover/pluto/issues/704), `docs/superpowers/specs/2026-08-31-person-relationship-briefings-design.md`
+- **Source:** [Issue #704](https://github.com/metagrover/pluto/issues/704), [docs/superpowers/specs/2026-08-31-person-relationship-briefings-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-08-31-person-relationship-briefings-design.md)
 - **Decision:** A People profile is a calm relationship dossier, not a jump to the latest meeting or a broad model-generated biography. It separates confirmed participation, exact unique-name calendar matches, and mention-only associations. Expectations and recent deliveries require a user-confirmed stable person owner. Displayed relationship insights require fresh, direct, high-confidence synthesis whose every citation points to a confirmed conversation; otherwise Pluto omits the section.
 - **Capacity policy:** Meeting-scoped extraction and durable secondary fields complete with the meeting run. Cross-meeting knowledge documents wait until Pluto and macOS have both been quiet for 15 minutes, the Mac is on wall power, thermals are nominal or fair, and no foreground pause reason is active. Capacity is rechecked during generation. Foreground activity, battery power, unsafe thermals, or capture/transcription work aborts and retains the refresh for retry.
 - **Consequences:** Sparse profiles remain useful through disclosed meeting provenance without invented summaries. Calendar invitations never imply attendance, mentions never imply participation, display-name matches never assign work, and failed or interrupted cross-meeting synthesis cannot block publication of the meeting's primary notes and extraction. This policy schedules existing cross-meeting documents; it does not add a new dreaming graph or infer durable person facts without source evidence.
@@ -983,7 +990,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-09-01 - Bound automatic meeting-note attempts across restarts
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #698](https://github.com/metagrover/pluto/issues/698), production-history audit, and `docs/meeting-notes-latency-benchmark.md`.
+- **Source:** [Issue #698](https://github.com/metagrover/pluto/issues/698), production-history audit, and [docs/meeting-notes-latency-benchmark.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/meeting-notes-latency-benchmark.md).
 - **Decision:** Pluto persists an automatic-attempt count with the current meeting-analysis run and admits at most two failed automatic attempts for the same transcript, eligibility state, and user notes. The main process enforces the cap before provider generation, and the renderer receives a current-revision exhaustion signal so restarting the app does not requeue unchanged failed work. Manual retry remains available and does not consume the automatic budget.
 - **Observability:** Terminal run history stores stable content-free failure codes. Organic latency reports distinguish attempts from distinct meetings, report retry concentration and truncated stages, and calculate latency only from published attempts. Raw exceptions, meeting identifiers, and meeting content remain excluded from reports.
 - **Rationale:** Production history contained 24 expensive failed attempts for one meeting. Counting those rows as 24 independent samples both hid a restart-driven retry loop and overstated corpus coverage.
@@ -1001,7 +1008,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-09-02 - Require offline diarization before canonical speaker identity
 
 - **Status:** Accepted.
-- **Source:** [Issue #725](https://github.com/metagrover/pluto/issues/725), `docs/superpowers/specs/2026-09-02-diarization-first-attribution-restoration-design.md`
+- **Source:** [Issue #725](https://github.com/metagrover/pluto/issues/725), [docs/superpowers/specs/2026-09-02-diarization-first-attribution-restoration-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-02-diarization-first-attribution-restoration-design.md)
 - **Decision:** Pluto extends its existing native Parakeet runtime with sealed-file offline diarization and aligned microphone/system energy analysis. Anonymous diarization clusters are mapped from acoustic evidence; channel origin alone never verifies `Me` or `Them`. At most one sufficiently supported cluster maps to `Me`, unsupported clusters remain unknown, and short local interruptions may be restored only through bounded mic-exclusive evidence.
 - **Trust boundary:** Canonical finalization and downstream intelligence fail closed when diarization is unavailable, evidence is insufficient, or production attribution acceptance rejects the result. The provisional transcript remains readable and retryable, but confidence-zero channel fallback is not promoted to validated identity.
 - **Recovery:** Newly finalized meetings use this path automatically. Historical low-confidence meetings are corrected only through an explicit user retry that reuses the same current pipeline and commits with generation-, transcript-, and lease-aware compare-and-save. Pluto does not automatically rewrite the historical corpus.
@@ -1019,7 +1026,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-09-04 - Separate remote speaker clusters from local identity
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #749](https://github.com/metagrover/pluto/issues/749), `docs/superpowers/specs/2026-09-04-remote-participant-diarization-design.md`.
+- **Source:** [Issue #749](https://github.com/metagrover/pluto/issues/749), [docs/superpowers/specs/2026-09-04-remote-participant-diarization-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-04-remote-participant-diarization-design.md).
 - **Decision:** Offline FluidAudio diarization receives only the isolated System recording. Recovered microphone/System evidence remains authoritative for `Me`, `Them`, and `Unknown`; a second pass may replace only accepted `Them` speech with deterministic meeting-local `Remote Speaker N` labels using Parakeet word bounds.
 - **Trust boundary:** Pluto publishes anonymous remote labels only when at least two clusters each have one second of System-speech support and aligned coverage reaches 0.8. Short-lived, overlapping, missing, or under-covered evidence falls back to `Them` and records a content-free reason. Remote clustering never changes `Me` or `Unknown`.
 - **Identity boundary:** Anonymous cluster labels remain canonical transcript evidence. A user-confirmed meeting identity binding changes the displayed name across that meeting and rechecks derived ownership without rewriting acoustic evidence. Calendar attendees are choices, not automatic identity claims; conversational cues and stored voiceprints remain outside this release.
@@ -1028,7 +1035,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-09-02 - Keep idle dreaming proposal-only and evidence-bound
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #586](https://github.com/metagrover/pluto/issues/586), `docs/superpowers/specs/2026-09-02-idle-dreaming-people-and-projects-design.md`
+- **Source:** [Issue #586](https://github.com/metagrover/pluto/issues/586), [docs/superpowers/specs/2026-09-02-idle-dreaming-people-and-projects-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-02-idle-dreaming-people-and-projects-design.md)
 - **Decision:** Background People and Projects dreaming may prepare reviewable proposals but never writes model output directly into canonical records. Each run packages a bounded notes-only view, pins its full prompt-visible source revision, requires exact supporting excerpts, validates the complete response atomically, and persists a capped proposal set. Accept and reject are explicit user decisions routed through canonical project, commitment, milestone, and identity structures with generated provenance, durable corrections, and stale-write protection.
 - **Capacity:** Dreaming starts only for dirty eligible entities after the shared idle, power, thermal, pause, and foreground-inference gates pass. Work is serialized, preemptible, deadline-bounded, and unloaded after a batch. Startup recovers abandoned leases; unchanged failures do not create an endless retry loop. Entity-scoped preparation is the only manual entry point.
 - **Model routing:** Evidence-heavy dreaming uses fixed local `gemma4:12b`. Phi remains reserved for approved lightweight interactive use cases. Dreaming does not select an arbitrary installed model, honor a hosted route, or reintroduce Qwen evaluation or fallback.
@@ -1062,7 +1069,7 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 ## 2026-09-04 - Attribute recovered mic speech to the user and bound production notes
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #725](https://github.com/metagrover/pluto/issues/725), [Issue #753](https://github.com/metagrover/pluto/issues/753), and `docs/superpowers/specs/2026-09-04-speaker-trust-and-bounded-notes-design.md`.
+- **Source:** [Issue #725](https://github.com/metagrover/pluto/issues/725), [Issue #753](https://github.com/metagrover/pluto/issues/753), and [docs/superpowers/specs/2026-09-04-speaker-trust-and-bounded-notes-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-04-speaker-trust-and-bounded-notes-design.md).
 - **Decision:** In Pluto's dual-source capture model, the microphone contains the workspace user's speech plus possible loudspeaker echo, while System contains remote participants. Finalization removes System-correlated echo from the mic transcript, attributes all surviving mic speech to `Me`, and diarizes only System audio into participant speakers. Microphone diarization must not fragment the user's identity or relabel surviving mic speech as an anonymous speaker.
 - **Notes capacity:** Production compact notes are planned from the exact source-label payload sent to the provider. A fitting meeting receives one compact writer and one complete-document editor. An oversized meeting receives at most three preplanned leaves, each with one compact writer and one editor; reviewed leaves are combined mechanically without model merge, repair, retry, or recursive repartition. A plan over three leaves fails before inference, and every admitted run has a twelve-minute absolute deadline.
 - **Trust boundary:** System-correlated mic material is removed only through the recovered-channel timing, text, and acoustic gates. Ambiguous simultaneous material still fails closed, exact finalization reasons are retained in the integrity envelope, and raw evidence is not rewritten. Historical v3 meetings remain readable but require explicit reprocessing before downstream notes are trusted.
@@ -1094,7 +1101,7 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 ## 2026-09-05 - Confirm meeting speakers before creating People evidence
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #747](https://github.com/metagrover/pluto/issues/747), [PR #754](https://github.com/metagrover/pluto/pull/754), and `docs/superpowers/specs/2026-09-04-proactive-calendar-auto-naming-silence-auto-stop.md`.
+- **Source:** [Issue #747](https://github.com/metagrover/pluto/issues/747), [PR #754](https://github.com/metagrover/pluto/pull/754), and [docs/superpowers/specs/2026-09-04-proactive-calendar-auto-naming-silence-auto-stop.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-04-proactive-calendar-auto-naming-silence-auto-stop.md).
 - **Decision:** Calendar organizers and attendees are meeting-roster hints, not confirmed participants. They may name an active session, improve that session's transcription vocabulary, and appear as `Invited` choices during speaker review, but they do not create People relationships or manual participant records by themselves. Only an explicit user confirmation that an anonymous speaker is one individual creates or links a person.
 - **Evidence boundary:** Canonical transcripts retain meeting-local `Remote Speaker N` labels. The UI projects those labels as `Speaker N` and projects a confirmed person's name without rewriting acoustic evidence. A confirmed binding is direct, derived People evidence for that meeting; undoing the binding removes the relationship without deleting transcript or calendar evidence.
 - **Voice sample boundary:** Speaker review may extract a short isolated-System-audio WAV on demand from conservative non-overlapping intervals. The temporary file is deleted after its bytes are returned, local paths never cross into the renderer, and no embedding or voiceprint is retained. Cross-meeting voice recognition remains deferred to [Issue #755](https://github.com/metagrover/pluto/issues/755).
@@ -1103,7 +1110,7 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 ## 2026-09-05 - Review aggregate remote speech without inventing a cluster
 
 - **Status:** Accepted and implemented.
-- **Source:** [Issue #761](https://github.com/metagrover/pluto/issues/761) and `docs/superpowers/specs/2026-09-05-single-them-speaker-identification-design.md`.
+- **Source:** [Issue #761](https://github.com/metagrover/pluto/issues/761) and [docs/superpowers/specs/2026-09-05-single-them-speaker-identification-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-05-single-them-speaker-identification-design.md).
 - **Decision:** Numbered `Remote Speaker N` clusters remain the preferred anonymous review targets. When a meeting has no numbered remote cluster but does contain canonical `Them` speech, the guided meeting review treats `Them` as one reviewable remote participant and keeps that label visible instead of inventing `Speaker 1`.
 - **Identity boundary:** Selecting or creating a person stores the existing meeting-scoped binding for `Them`. The UI may project the confirmed person's name and People may consume the confirmed relationship, but canonical transcript evidence remains `Them` and undo restores the anonymous display.
 - **Consequences:** The meeting metadata count and transcript speaker label can open the guided identification flow for single-remote meetings. `Me`, `Unknown`, and local diarization labels remain excluded, and the legacy channel-correction control keeps its explicit individual-scope behavior.
@@ -1111,7 +1118,7 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 ## 2026-09-05 - Cross-meeting speaker recognition using opt-in local voice profiles
 
 - **Status:** Accepted and implemented under [Issue #755](https://github.com/metagrover/pluto/issues/755).
-- **Source:** [Issue #755](https://github.com/metagrover/pluto/issues/755), `docs/superpowers/specs/2026-09-05-recognize-confirmed-speakers-voice-profiles-design.md`.
+- **Source:** [Issue #755](https://github.com/metagrover/pluto/issues/755), [docs/superpowers/specs/2026-09-05-recognize-confirmed-speakers-voice-profiles-design.md](https://github.com/metagrover/pluto/blob/74a080d958b7faca5cd634cb1ea3158a41446621/docs/superpowers/specs/2026-09-05-recognize-confirmed-speakers-voice-profiles-design.md).
 - **Decision:** Pluto recognizes recurring remote meeting speakers across sessions using opt-in local voice profiles. The implementation enforces strict biometric isolation, bounded native transport, deterministic acoustic calibration, lossless identity merges, and explicit user control.
 - **Bounded native evidence:** The Swift ParakeetRuntime computes bounded centroid embeddings and purity statistics during final diarization without transmitting raw chunk arrays across IPC. Bounded clusters require $\ge 3.0$s clean speech, $\ge 2$ segments, $\ge 2$ chunks, and minimum chunk similarity $\ge 0.70$.
 - **Biometric protection:** Candidate vectors and enrollments are stored exclusively in dedicated SQLite tables (`meeting_speaker_candidates`, `speaker_voice_enrollments`). Raw embeddings are never written to transcript JSON, meeting metadata, logs, or renderer IPC. Handlers sanitize all payloads.
@@ -1725,6 +1732,14 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Consequence:** Two additional existing items can be shown and prioritized. No additional queries, model calls, or background work are introduced.
 
 
+## 2026-10-11 - Require PR tests and installer verification before release tags
+
+- **Status:** Accepted by direct owner request; no replacement release authorized.
+- **Decision:** Require Biome Lint and Full Tests for up-to-date PRs into master. Full Tests includes TypeScript, release and installer regressions, and the complete Vitest suite on Apple Silicon macOS. A dedicated required-check ruleset has no administrator bypass; existing review requirements remain separate.
+- **Release flow:** `pnpm release` prepares a metadata PR without tagging. After merge, `pnpm release publish` verifies the exact master revision through an untagged CI build, including the app inside the mounted installer and cold/cached runtime preparation, before tagging. Changed master or failed verification blocks the tag. Tagged builds independently require that prior verification and repeat packaging checks.
+- **Publication:** Create or resume a draft, upload assets, then publish. API errors fail closed. Deleted immutable-release names are permanently reserved: rc.16 cannot be republished under its existing name. A new version requires separate release authorization; do not delete, move, or automatically bump tags to evade this protection.
+- **Limits:** Automated installer validation does not prove recording quality, macOS permission UX, or real-profile upgrade acceptance. Consumer recovery and development/profile isolation remain separate work.
+
 ## 2026-10-11 - Isolate every source build and preserve profile identity across updates
 
 - **Status:** Accepted by direct owner request.
@@ -1732,6 +1747,23 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **Decision:** Both `start` and `dev` launch Pluto Development with a separate bundle identifier and a persistent development profile. Explicit source overrides cannot select the installed app's profile or descendants, including symlink aliases. The installed app retains its existing production path and keys.
 - **Update continuity:** In-app updates pass the current profile explicitly to the installer and both success and failure relaunches. Normal command-line installs use the stable production profile; a separate first-run profile requires an explicit testing flag. Existing Standard or Encrypted databases retain their format and skip storage setup. Successful legacy startup records that existing choice for subsequent upgrades and missing-database detection.
 - **Recovery:** A known matching migration prefix followed by newer migrations requires a compatible app update; the database is neither downgraded nor reset. Unknown or divergent histories remain blocked. The established migration hashes, order, and timestamps are frozen in a regression fixture; schema changes must append migrations. The installer rejects version downgrades. Upgrade regressions exercise both storage modes, unchanged key envelopes and data, selected-profile relaunches, and old-build refusal without database modification.
+
+## 2026-10-11 - Bound background cleanup during quit
+
+- **Status:** Accepted
+- **Source:** Owner request on 2026-10-11
+- **Supersedes:** The shutdown deadline in “Retain local models for up to two hours with idle memory release”. The five-second Ollama request limit remains; a ten-second deadline now covers the entire shutdown, including inference admission and other background services.
+- **Decision:** Cmd+Q and updater-triggered quit share a ten-second watchdog. Normal cleanup closes the database before resuming Electron quit. If cleanup or window close stalls, exit the process; do not manually close SQLite while unfinished consumers may still access it.
+- **Capture:** Refuse quit before starting cleanup while a capture lease is active. Stop and save the recording before quitting or updating.
+- **Limit:** The watchdog bounds asynchronous stalls while the main event loop remains responsive; it cannot interrupt synchronous code that blocks that loop. Packaged macOS quit/update acceptance remains required.
+
+
+## 2026-10-12 - Verify updates before requesting quit and report one shared attempt
+
+- **Status:** Accepted
+- **Extends:** “2026-10-11 - Bound background cleanup during quit” and “2026-10-11 - Isolate every source build and preserve profile identity across updates”.
+- **Decision:** Download, validate, and stage the selected release while Pluto remains open. The main process reports one shared attempt and coalesces repeated requests. Only after verified preparation does it approve handoff and request quit. The installer observes parent exit before replacement; blocked quit produces a retryable failure. Startup confirms the installed version.
+- **Consequences:** Network and verification errors leave the current app usable; the existing quit deadline remains independent from the installer's parent-exit deadline. Updater acceptance is a separate public-launch gate, with packaged lifecycle fault tests in installer CI. Existing installed builds retain their old updater until upgraded.
 
 ## 2026-10-13 - Reuse project label variants across extraction and synthesis
 
@@ -1759,3 +1791,498 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 - **State continuity:** Source-note synchronization matches task wording rather than list position. Corrupt edit documents cannot clear completion. Legacy consolidation provenance may be read only when it identifies a unique source meeting; no bulk deletion or inferred ownership repair is performed.
 - **Retrieval:** Personal commitment and priority questions, including their conversational follow-ups, use canonical commitment recall rather than workspace-generated priority prose. Explicit meeting/date scopes retain their bounded evidence path. Calendar preparation's open-work section requires confirmed, current commitments; unconfirmed discussion remains historical context.
 - **Entry points:** Legacy entity-processing IPC handlers use saved action classification, so a second extraction cannot invent an independent task list.
+
+## 2026-10-14 - Stop recordings only on confirmed call departure
+
+- **Status:** Accepted by direct owner request; app-specific UI profiles remain gated by signed packaged acceptance.
+- **Supersedes:** The app-level inferred closure authority in “2026-10-09 - Scope call-end evidence to the locked source” and the auto-end implementation boundary in “2026-10-08 - Preserve recordings through quiet breaks.” Their recording-preservation and shared-finalization requirements remain in force.
+- **Decision:** A passive native Core Audio monitor may identify a likely call source and suspect departure. Silence, mute, microphone release, output inactivity, transcript inactivity, calendar end, missing controls, and failed inspection never authorize stopping, alone or in combination. Only a confirmed termination notification for the exact bound application instance, a verified departure UI state for the previously joined session observed twice at least one second apart, verified exact call tab/window closure, or explicit End meeting can request the shared stop path. Unknown or contradictory evidence resets pending UI confirmation. Exact Chrome Meet tab closure initially required an Accessibility joined marker in addition to browser Automation.
+- **Rollout:** Accessibility is optional and separately enabled from browser Automation. Meet, Zoom, Teams, and Slack layout profiles are individually disabled until the signed packaged matrix passes with zero premature stops during thirty-minute silent and muted breaks. Unsupported versions and languages remain unknown. `confirmed_departure_enabled=false` disables the new detector without changing preferences or recordings.
+
+### 2026-10-15 — Replace the Accessibility gate for exact Chrome Meet tab closure
+- **Supersedes:** The Accessibility requirement for Chrome Meet tab closure in the 2026-10-14 confirmed-departure decision above.
+- **Decision:** A previously active bound Chrome source plus a sole canonical Meet tab observed with user-enabled browser Automation may establish an exact tab identity without Accessibility. Require the same tab ID and meeting key across two successful observations at least one second apart, then two successful observations of its absence at least one second apart. Audio release or silence still cannot authorize stopping. Navigation, replacement, simultaneous Meet tabs, source changes, failed inspection, or conflicting evidence invalidate the inference. Accessibility remains optional for separately accepted post-call UI adapters.
+- **Limit:** App-level Chrome audio is not a tab-specific joined signal; simultaneous calls or unrelated Chrome audio need further discrimination. Keep the exact-tab path behind acceptance and continue recording when identity cannot be established. A Meet hang-up that leaves the tab open still needs a positively verified UI state or manual stop.
+- **Preservation:** Bind decisions to a recording generation and source. Acknowledge capture release before reporting completion; keep failed release retryable and retain the existing journal-sealing and transcript-finalization path. Save the specific end reason. Keep diagnostics local, bounded, and free of meeting content, raw URLs, and window text. The [departure-detection follow-up](follow-ups/meeting-departure-detection.md) records the remaining acceptance gate.
+
+### 2026-10-15 — Add a cancellable calendar-end quiet fallback
+- **Supersedes:** The absolute prohibition on calendar end plus audio inactivity as stop authority in “2026-10-14 - Stop recordings only on confirmed call departure.” The confirmed-departure path remains unchanged.
+- **Decision:** For a recording linked to a specific non-cancelled calendar occurrence, wait until at least two minutes after its scheduled end and at least two continuous minutes with both the bound source's input and output inactive. Show an external twenty-second warning with Keep recording and End now. If quiet persists and the user does not cancel, request the shared stop path with `calendar_quiet_timeout`. Keep recording suppresses this fallback for the rest of that recording. Any activity, ambiguous source, unknown monitor result, device change, or lost calendar link cancels the warning. An unlinked or ad-hoc meeting never uses this fallback.
+- **Presentation:** The finished-recording notice appears outside the main window. Calendar-fallback stops retain Reopen for thirty seconds; other confirmed stops retain it for eight seconds. Capture release still must be acknowledged before showing it. This is a deliberate user-approved tradeoff: a silent call that runs beyond its scheduled calendar end can stop after the visible warning. The signed long-break acceptance matrix must cover this case.
+
+### 2026-10-15 — Gate Chrome tab closure until joined identity is verified
+- **Supersedes:** The provisional exact-tab closure authority in “2026-10-15 — Replace the Accessibility gate for exact Chrome Meet tab closure.”
+- **Decision:** Keep Chrome tab inspection code behind a disabled acceptance gate. App-wide Chrome audio plus a sole Meet tab does not prove that tab was joined; closing an unrelated Meet tab could end a recording. Enable automatic tab-closure stopping only after a tab-specific joined signal and the packaged acceptance matrix are in place. Browser Automation may still help identify calls, while app-instance termination and explicit End meeting remain available.
+
+### 2026-10-15 — Confirm the call source before inferred stops
+- **Supersedes:** Automatic source binding as sufficient authority for app-instance termination in “2026-10-14 - Stop recordings only on confirmed call departure” and the calendar fallback's use of an audio-only bound source above.
+- **Decision:** App-wide input/output activity suggests a source but never confirms that it is the recorded call. Exact application termination and the calendar-end quiet fallback require explicit source confirmation; an accepted, previously joined UI session can also establish identity for exact termination. A provisional source that quits leaves recording active. The calendar fallback reads the current cached occurrence by its explicitly linked key, abstains if it was cancelled or removed, and cancels an unclaimed timeout when audio resumes or monitoring continuity is lost.
+
+
+## 2026-10-15 - Allow ChatGPT plan usage for all intelligence with local capture and transcription
+
+- **Status:** Accepted by direct owner request; live-account acceptance pending.
+- **Supersedes:** The provider-setup restriction in “2026-10-07 - Limit provider setup to Ollama and OpenRouter pending acceptance testing” for the new ChatGPT provider; the local-only background execution boundary in “2026-09-16 - Keep Pluto memory local while allowing explicit cloud inference”; and the fixed-local model-routing clause in “2026-09-02 - Keep idle dreaming proposal-only and evidence-bound” when ChatGPT is explicitly selected. Existing evidence, correction, provenance, and persistence policies remain in force.
+- **Decision:** Add an opt-in ChatGPT provider using official Sign in with ChatGPT and the user's eligible plan. After versioned text-egress consent, route notes, chat, preparation, extraction, commitments, knowledge documents, and background People/Project synthesis through the account's selected model. Retain existing providers and never switch providers or billing automatically.
+- **Privacy and identity:** Keep capture, transcription, audio, retrieval, canonical storage, and source validation local. Send bounded text context for inference. Verify OAuth state, PKCE, signed identity and nonce; keep account-bound credentials in protected main-process storage. Use stateless Responses requests and serialize rotating refreshes.
+- **Limits:** Pause ChatGPT inference after a usage-limit failure until explicit retry. Sign-out revokes the renewable session, clears tokens, and cancels in-flight inference. This initial integration supports one connected account/workspace per profile.
+- **Verification boundary:** Focused tests and renderer/Electron bundling establish the implementation contract. They do not establish live OAuth eligibility, plan charging, or real-model quality. Complete an interactive account sign-in and fictional-data intelligence acceptance run before release. See [ChatGPT intelligence](chatgpt-intelligence.md).
+
+
+## 2026-10-15 - Choose intelligence once during first-run setup
+
+- **Status:** Accepted by direct owner request.
+- **Extends:** “2026-10-15 - Allow ChatGPT plan usage for all intelligence with local capture and transcription.”
+- **Decision:** After recording permissions and before the optional profile, ask whether Ollama or ChatGPT should power intelligence. Put the ChatGPT text-egress disclosure and browser sign-in in that step. Persist the provider, versioned consent, connection, and choice-completion marker. Resume past a completed choice if setup is interrupted; completed profiles never repeat onboarding.
+- **Returning use:** Restore the selected provider and protected ChatGPT session on startup, renew tokens automatically, and request reauthorization only when necessary. Keep provider changes and account management in Settings. Completing onboarding refreshes the shell's provider state before opening the workspace.
+
+- **Upgrades:** Preserve existing providers and skip first-run setup for completed profiles. Show a one-time dashboard notice with “Keep current setup” and “Review ChatGPT.” Both actions persist dismissal; review opens Intelligence settings without changing the provider or cloud consent. A choice made in Settings also completes the provider-choice marker.
+
+
+## 2026-10-15 - Bound ChatGPT plan consumption and reuse identical work
+
+- **Status:** Accepted by direct owner request.
+- **Supersedes:** Automatic ChatGPT background synthesis after provider consent in “2026-10-15 - Allow ChatGPT plan usage for all intelligence with local capture and transcription.” ChatGPT remains available for all intelligence, but optional automatic enrichment requires a separate opt-in.
+- **Decision:** Default to 50 requests and a 200,000-token admission budget per local day. Count attempts durably before egress, replace reservations with reported usage on completion, and retain unmeasured reservations after interruption/restart. Keep 30 days of content-free task/model aggregates. Persist upstream usage-limit pauses until explicit retry. Limits apply to one Pluto profile and do not represent the account's remaining quota.
+- **Background:** Default optional enrichment off; after opt-in, admit at most ten background requests per day within the shared budget. Keep explicit refreshes and ordinary meeting processing eligible under the overall budget. Never silently switch providers.
+- **Reuse:** Serialize upstream calls without paid-work preemption, share identical in-flight requests with independent caller cancellation, and reuse exact completed extraction/background responses in bounded memory for ten minutes. Include account session, model, source input, task and schema in reuse identity. Preserve existing source-revision publication checks and explicit rewrite semantics.
+- **Boundary:** SIWC does not support a server output-token cap. Reservation estimates limit admission, but an in-flight response can exceed its estimate. The authoritative plan/app allowance remains in ChatGPT usage settings.
+
+
+## 2026-10-15 — Full-source cloud intelligence and provisional Luna default
+
+ChatGPT notes supersede the inherited Ollama 16K context/chunk policy: use a
+131,072-token application budget, skip live leaf precomputation, and do not turn
+context failures into paid hierarchy retries. Knowledge synthesis sends selected
+meeting evidence together (existing 80-meeting source cap), without paid split
+retries. Local Ollama planning remains unchanged. Daily admission protections
+remain independent of context capacity.
+
+New ChatGPT connections prefer available GPT-6 Luna; preserve valid saved choices
+and keep Sol selectable. Sixteen paired fictional-meeting requests found the same
+core commitment coverage after correcting local grounding false negatives; Luna
+used 15,593 reported tokens versus Sol's 16,083. This small sample supports a
+provisional default, not a general accuracy or plan-credit equivalence claim.
+Raw responses and reports remain ignored/local. No production data was used.
+
+
+## 2026-10-15 — Prefer Sol pending broader source-quality acceptance
+
+Supersedes the model preference in “Full-source cloud intelligence and provisional
+Luna default” above. New ChatGPT connections prefer available GPT-6.1 Sol, preserve
+valid saved model choices, and keep Luna selectable. Source-reviewed private
+comparisons exposed material omissions in Luna that the fictional fixtures did not
+reveal. Faster output and lower token counts alone do not meet the quality gate.
+Neither model selection resolves remaining local commitment/scope projection gaps;
+private comparison evidence stays outside Git.
+
+ChatGPT compact notes allow up to 36 exact canonical source fragments per item and
+title, with matching prompt, wire schema and parser budgets. This accommodates
+fragmented real speech without truncating citations or relaxing source validation.
+The default local-model cap stays three. Invalid cloud drafts do not receive an
+automatic paid format repair; they fail visibly after the writer attempt.
+
+
+## 2026-10-15 — Preserve source discussion when commitment classification fails
+
+Extends “2026-10-06 - Temporarily disable model reviews for meeting notes.” The
+conservative notes path no longer erases cited information merely because a writer
+classifies it as an action or decision that cannot be settled. It retains exact
+source excerpts as discussion, with speaker boundaries and original provenance,
+and clears commitment owner/due fields. It never republishes the rejected model
+assertion as fact. Strict model-audited acceptance still rejects invalid claims;
+unclear-prose review remains active.
+
+Canonical adjacent fragments from one identifiable speaker can be joined for
+local checks; omitted fragments and ambiguous remote speakers are never bridged.
+Concrete colloquial first-person commitments retain their source speaker. Negative
+contractions are normalized before polarity comparison, and a corrected owner
+cannot leave a conflicting model-supplied leading name in the action text. Unowned
+requests remain discussion unless a task-specific explicit settlement is supported.
+
+Verification uses saved responses with network disabled, plus fictional regression
+cases. No new inference, automatic regeneration, provider switch, usage-limit reset,
+or source-data mutation is part of this fix. Private meeting evidence stays ignored.
+
+
+## 2026-10-15 — Confirm Sol after corrected-response comparison
+
+Confirms the model choice in “Prefer Sol pending broader source-quality acceptance”
+after replaying the saved outputs through the corrected local checks. GPT-6.1 Sol
+is the default for new ChatGPT connections when available; retain valid saved
+choices and keep Luna selectable. The corrected comparison still favors Sol for
+material recall. Luna's speed and modest reduction in total request tokens do not
+justify omitting source-backed follow-ups and dependencies.
+
+This decision adds no model escalation, dual-model requests, regeneration, or usage
+policy changes. The comparison uses only saved responses and private ignored
+artifacts. The limited notes sample does not establish accuracy across every
+intelligence workflow; preserve current grounding and admission safeguards.
+
+
+## 2026-10-15 — Preserve narrow promises beside tentative plans
+
+Extends “Preserve source discussion when commitment classification fails.” When a
+writer combines a tentative plan with a task-matched explicit promise, conservative
+acceptance retains the promise in exact source wording and preserves the proposed
+context as cited discussion. The canonical self speaker can participate in task
+scoping. Strict acceptance still requires corrected wording rather than silently
+rewriting a reviewed commitment. Conditions and subsequent withdrawals remain gates.
+
+An imperative action can retain a future pronoun-based promise after a not-yet
+statement when the promised verb matches the action. A different task, hypothetical
+promise, condition omission, or later negation cannot provide this exception.
+
+Saved responses are replayed offline; this change introduces no new inference,
+retry, model escalation, or usage-policy change. Terra now retains the same two
+reviewed follow-ups as Sol in the limited private sample, with less polished wording
+on one action. Sol remains the default pending broader quality evidence; existing
+saved choices remain untouched. Private meeting details remain outside Git.
+
+
+## 2026-10-15 — Prefer Terra with local recovered-action cleanup
+
+Supersedes the default-model choice in “Confirm Sol after corrected-response
+comparison” and “Preserve narrow promises beside tentative plans.” New ChatGPT
+connections prefer available GPT-5.6 Terra, then available GPT-6.1 Sol, then the
+first account model. Preserve valid saved choices and expose all account models,
+including Sol. This is initial selection, not automatic inference fallback.
+
+Apply bounded local wording cleanup to a source promise recovered from a combined
+tentative action: remove first-person “let me” framing and normalize disfluent
+“put … time” scheduling. Preserve recipients, quantities, conditions, source
+quotes and provenance; retain the proposed context as discussion. Other model
+paraphrases are untouched. No paid rewrite, additional inference, usage-limit
+change, or persisted production-note migration accompanies this change.
+
+Saved-response replay remains the verification path. Terra retained the two
+reviewed follow-ups after validation fixes and used fewer tokens in the limited
+private sample; this does not establish universal model accuracy or plan-credit
+cost. Raw private evidence remains outside Git.
+
+
+## 2026-10-15 — Guard action timing, carry owner labels, and separate queue waiting
+
+Extends “Prefer Terra with local recovered-action cleanup.” Unsupported calendar
+or relative timing in action prose is checked against the task-matched source,
+not merely the presence of a number elsewhere in a turn. Recover a concrete
+source promise with its qualifiers when possible; otherwise retain discussion.
+Removing an invalid due field cannot leave the same invented timing in prose.
+Original source quotes and provenance stay intact; strict acceptance still
+requires corrected wording. No production-note migration is performed.
+
+Saved-note retrieval carries explicit canonical owner labels in action evidence
+and indexed sections. Me denotes the user; numbered remote speakers remain
+identified by their recorded label with their name unconfirmed. Display-name
+mappings are respected without guessing from participants. An evidence-format
+revision invalidates stale retrieval projections. The Ask prompt preserves those
+labels without treating them as verified real-person names.
+
+ChatGPT Ask Pluto has a bounded five-minute queue wait, followed by its existing
+response allowance once usage admission starts the request. Streaming progress
+retains the existing idle deadline. Non-ChatGPT response policies are unchanged.
+Queued cancellation/expiry does not reserve tokens or dispatch inference. Paid
+work remains non-preemptible; request budgets, reservations, duplicate sharing,
+and explicit retry policy stay in place. Saved response replay and simulated
+queue/transport tests verify the change without new model calls.
+
+
+## 2026-10-16 — Reuse published notes after enrichment and retain action deadlines
+
+Extends “Guard action timing, carry owner labels, and separate queue waiting.”
+Saved-note evidence carries the structured action due field alongside its owner
+and prose. Keep the recorded wording (including relative or qualified timing)
+without inventing a calendar date. Increment the evidence-format revision so
+existing retrieval projections are refreshed.
+
+Refines “Bound ChatGPT plan consumption and reuse identical work.” Ambient
+person/project vocabulary added by enrichment is a hint for future writing,
+not a reason to regenerate published notes. Automatic reuse verifies the saved
+source, eligibility, user-note revisions and recorded provider/model, prompt,
+template and generation options. Secondary retries keep the original published
+run revision; manual regeneration and changed source/configuration still run.
+In-flight and stage-cache fingerprints retain vocabulary for exact-input reuse.
+Usage admission, reservations, background opt-in, and daily caps are unchanged.
+
+
+## 2026-10-16 — Resolve explicit meeting references and present owners naturally
+
+Refines “Guard action timing, carry owner labels, and separate queue waiting.”
+Canonical owner and due labels remain internal retrieval evidence. Ask answers
+express ownership in natural prose; saved answers render owner prefixes as names
+without rewriting stored content, deadlines, conditions, quotes, or provenance.
+Unknown remote speakers retain their unconfirmed identity.
+
+An explicit quoted meeting title is a scope constraint, including generic titles
+such as “Meeting.” A supplied recording date and time disambiguates matches in
+the local timezone used by the UI. Duplicate matches request clarification; an
+unmatched explicit reference returns no evidence rather than widening retrieval.
+Source counts continue to reflect actual context. Historical answers retain their
+original source lists; offline replay does not claim fresh model verification.
+
+
+## 2026-10-16 — Preserve answer text and keep citation presentation separate
+
+Supersedes “Resolve explicit meeting references and present owners naturally.”
+Remove the renderer's owner-label and source-footer pattern rewriting, and the
+new quoted-title/timestamp regex parser. Do not reinterpret model prose with a
+hand-written parser. Answer generation requests natural ownership wording and
+leaves source attribution to Pluto's structured citation control, including when
+the user asks for a citation. Saved answer text is preserved verbatim.
+
+The collapsed control shows the number of sources, with reference details inside.
+The removed timestamp parser does not provide precise free-text meeting scoping;
+meeting-specific questions should use the existing meeting chat with its explicit
+meeting ID. Natural-language scope resolution needs a separate semantic contract,
+not another collection of text patterns. No history migration or new model call
+is performed by this change.
+
+
+## 2026-10-16 — Resolve Ask Pluto meeting scope semantically before retrieval
+
+Extends “Preserve answer text and keep citation presentation separate,” replacing
+its meeting-chat-only workaround for free-text single-meeting references. Ask
+Pluto obtains one structured scope and intent result before retrieval for new or
+fresh factual turns and clarification replies. The scope can select one or up to
+eight meetings, use the current recording state, remain workspace-wide, or
+request clarification. No regex or prose-parser fallback resolves meeting scope.
+The existing intent classification is replaced, not added as a third call.
+
+Only complete, bounded meeting-title and recording-time catalogs are sent for
+scope selection; transcripts and notes are excluded. UTC and user-timezone dates
+are supplied so recording times remain distinct from deadlines inside meetings.
+Catalogs over 24,000 characters and question context over 8,000 characters stop
+locally rather than truncate candidates and claim a unique match. Model output
+is JSON-schema constrained and independently checked for known unique IDs,
+selection cardinality, and field bounds. Invalid, ambiguous, or unmatched scope
+stops before answer generation. Valid IDs constrain retrieval and final evidence.
+Existing explicit scope can be reused for reuse turns; a fresh reference or
+clarification is resolved against the current catalog. Historical chat is intact.
+
+Scope uses a distinct foreground askPlutoScope task under the existing provider
+and usage gate. Its local/provider output allowance is 512 tokens where enforced;
+SIWC retains its conservative reservation because it cannot enforce that cap.
+Exact scope inputs share in-flight work and the existing ten-minute, bounded,
+account/model/catalog-specific completed cache. Consent, pause, persisted quotas,
+cancellation, queue limits and no automatic interactive retries remain in force.
+A fresh scope is refused before egress if fewer than two daily requests or the
+minimum scope-plus-answer allowance remain. The answer still receives its own
+admission check; concurrent work can change availability between stages. A new
+scope may consume one admitted request before the answer request. Offline
+fixtures and mocked transport validate the contract; live semantic accuracy and
+packaged acceptance still require a separate smoke test.
+
+
+## 2026-10-17 — Preserve Ollama routing and production citation limits
+
+Refines “Resolve Ask Pluto meeting scope semantically before retrieval.” Semantic
+scope selection is enabled only for ChatGPT. Ollama and the existing API-key
+providers retain their prior intent-classification policy and current, named,
+and recent meeting routing. They do not acquire the new scope call or its
+complete-catalog limit. ChatGPT keeps validated semantic IDs, clarification,
+caching, cancellation, request/token admission and answer-headroom safeguards.
+
+Refines the cloud source-span allowance: the production compact-note parser
+requires an explicit ChatGPT provider to allow up to 36 spans. Local experimental
+flags or a larger numeric argument cannot widen Ollama's production three-span
+limit. Existing non-production experiments remain available. Pipeline calls pass
+the actual provider into the parser; the existing Ollama stream preview retains
+the local limit. Tests cover production provider separation and the onboarding
+provider-choice marker while preserving the profile and failure-path assertions.
+
+
+## 2026-10-17 — Bound scope catalogs without duplicate metadata
+
+Refines “Resolve Ask Pluto meeting scope semantically before retrieval.” Encode
+complete meeting headers as compact rows containing the original meeting ID,
+title, and local recording time with its UTC offset. This retains daylight-saving
+ambiguity information without duplicating the same timestamp in two formats.
+The catalog stops locally above 800 headers or 64,000 characters; question context
+still stops above 8,000 characters. Never truncate candidates to claim uniqueness.
+The known-ID schema, independent validation, cached exact-input reuse, and paid
+scope-plus-answer admission checks remain authoritative.
+
+## 2026-10-17 — Package compiled production code and bound idle cleanup
+
+The production Electron output mapping requires an explicit recursive file filter.
+A packaged test must compare its bundled JavaScript with the compiled production
+output; a successful renderer build does not prove which backend was packaged.
+Isolated acceptance packages use a private entry point that fixes their test
+profile before normal bootstrap and refuses overrides to another profile.
+
+Refines “Bound shutdown across background services.” An unused dreaming
+coordinator does not unload a model it never requested, and completed batch
+cleanup is not repeated at close. Idle model release has a five-second deadline
+covering queue admission as well as its HTTP request. The existing ten-second
+application shutdown watchdog remains the final bound. Dreaming close and idle
+model release run concurrently during shutdown so their individual five-second
+cleanup bounds cannot add up to the ten-second watchdog.
+
+## 2026-10-17 — Keep cloud writing and saved-note evidence authoritative
+
+ChatGPT structured-note generation always uses one writer with local validation,
+including callers that omit or request a model-review strategy. Do not silently
+add paid audit or repair calls. Ollama retains its existing review policy.
+
+Normalize structured action owners before deterministic action grounding so
+numbered speaker labels are not mistaken for unsupported quantities in the task.
+Saved action owners and deadlines remain visible in the notes document. Ask
+Pluto uses saved-note decisions rather than stale extraction decisions when its
+evidence kind is a note, and must distinguish scope, access, prerequisites,
+estimates, and confirmed deadlines without inventing causal links.
+
+
+## 2026-10-17 — Preserve the anchor of duration estimates
+
+Extends “Keep cloud writing and saved-note evidence authoritative.” Compact writers
+must preserve the stated starting point and endpoint of an estimate in
+all item kinds. A total wait that includes prerequisite work cannot be restated as
+an additional wait after that work. Preserve uncertainty and do not invent timing
+or causal links. Version the changed prompt as notes-v35 so exact-input caches and
+automatic publication checks do not confuse it with an older writer.
+
+
+## 2026-10-17 — Do not charge for historical cloud rewrites after configuration changes
+
+Supersedes cloud automatic configuration invalidation in “Bound ChatGPT plan
+consumption and reuse identical work” and “Reuse published notes after enrichment
+and retain action deadlines.” For ChatGPT,
+provider, model, prompt, template, and generation-option changes apply to future
+writing. An automatic request retains valid published notes when their source,
+eligibility, and user-note revisions are unchanged, including notes written by
+Ollama. It does not resume historical secondary work under a different generation
+configuration. Explicit regeneration still uses the current configuration, and
+changed source, eligibility, or user notes still require new generation. Malformed
+notes cannot satisfy this reuse guard. Ollama retains its existing automatic
+configuration-invalidation behavior. Usage admission, reservations, and explicit
+background opt-in are unchanged. Startup recovery of previously failed secondary
+work also stops for ChatGPT, including a provider switch between recovery items;
+Ollama keeps its existing recovery attempts. Cloud secondary work can still run
+with a new meeting or an explicit retry.
+
+## 2026-10-17 — Answer explicit ChatGPT questions from the complete scoped context
+
+ChatGPT Ask Pluto uses its answer provider after retrieval rather than returning
+an assignment-only or temporal extract. Those shortcuts can answer only one part
+of a question that also asks about booking status, dependencies, or uncertainty.
+Keep Ollama's existing extractive behavior. Cloud questions still use one scoped
+answer request under the same usage admission policy; semantic scope resolution
+and its cache remain unchanged.
+
+## 2026-10-17 — Keep legacy identity hints out of authoritative note evidence
+
+Extends “Keep cloud writing and saved-note evidence authoritative.” When valid V3
+notes exist, legacy meeting-intelligence participants, topics, and projects cannot
+expand names or add evidence to those notes. Confirmed speaker projections and
+the saved note text remain available through the canonical note projection.
+Legacy meeting-intelligence-only meetings retain their existing evidence. Bump the
+local evidence revision to rebuild derived indexes without model requests;
+changes to unused legacy metadata no longer change that revision. Retrieval results
+also omit legacy meeting-intelligence metadata when valid V3 notes exist, so
+section-level search cannot reintroduce those hints.
+
+## 2026-10-17 — Resolve unresolved action owners with one bounded semantic check
+
+Supersedes the blanket model-audit prohibition in “Keep cloud writing and saved-note
+evidence authoritative” for unresolved ownership only. Keep one notes writer and
+the existing source/provenance checks. When an accepted source-bound action has no
+owner, review its exact cited passages semantically rather than adding ownership
+grammar rules. Check all unresolved owners together, with at most 16 actions and
+12,000 source-data characters, a 90-second timeout, and the publication reserve.
+Names must occur in the cited passage or match its recorded speaker label; unknown,
+malformed, duplicate, foreign, or source-unanchored results cannot assign an owner.
+Update both canonical action projections without changing text, dates, or citations.
+
+For ChatGPT this is at most one additional `notesAudit` request under the existing
+admission ledger, never a second writer or an automatic retry. Reuse identical
+successful audits for ten minutes with the same account/model/context safeguards.
+Failures and blocked admission retain the useful writer result and unresolved
+ownership. Ollama runs the same check locally. Historical published notes retain
+their existing automatic reuse policy; no paid migration or backfill is introduced.
+
+
+## 2026-10-17 — Render local action answers from canonical fields
+
+Keep Ollama's extractive action answers and render owners, deadlines, and completion
+from the canonical note projection, including user edits. Internal evidence tags
+remain available to reasoning and source checks, while answers show owner,
+follow-up, and timing columns without parsing or rewriting the saved prose.
+Do not infer these fields by parsing generated prose. Legacy records without
+structured actions retain the existing extractive fallback.
+
+
+## 2026-10-17 — Quote only validated evidence in Ask Pluto source disclosures
+
+A synthesized answer's source reference identifies its saved-note context; it is
+not a verified verbatim quote. Keep its meeting link and reference count, but
+show quoted excerpts only when `evidence_valid` is true. This also handles saved
+answers without rewriting their history or stripping internal tags from prose.
+Validated excerpts retain their existing display and navigation.
+
+
+## 2026-10-17 — Prioritize accepted commitments before discussion in compact writing
+
+Extends the notes-v35 duration-anchor guidance. Begin compact writer instructions
+with accepted future commitments, including brief colloquial promises between
+longer discussion. Preserve exact speaker ownership, conditions, uncertainty, and
+prerequisites; requests and tentative plans remain discussion unless accepted.
+Exclude routine farewells without a concrete task or arrangement, while retaining
+promised calls about specific work. Only then summarize other material content.
+Keep the existing schema, source
+checks, provider budgets, and local chunking. Version this instruction order as
+notes-v36 so input revisions and caches distinguish it from the prior writer.
+ChatGPT's historical published-note reuse policy continues to prevent paid backfill.
+
+
+## 2026-10-17 — Replace pattern-based commitment recovery with source-bound semantic review
+
+Supersedes “Resolve unresolved action owners with one bounded semantic check” and
+the language-pattern recovery used by “Reuse published notes after enrichment and
+retain action deadlines.” Restore the existing Ollama grounding checks as the
+conservative fallback. Preserve the original writer claim and exact source spans
+in memory before fallback classification; do not rewrite speech using regular
+expressions or grow English commitment/negation patterns.
+
+On the product's deterministic-only writer path, review actions, decisions, and
+items held for source/prose review in one semantic batch before canonical
+projection. Resolve acceptance, owner, due date, conditions and scope from the
+cited passages. Keep material tentative context as a separate source-bound point
+when narrowing an overbroad action. Review complete cited turns and intervening
+source so omitted negation or acceptance is visible. Carry that complete window into canonical
+provenance. Group only exact contiguous excerpts and keep different speakers
+separate; never reconstruct omitted speech. The existing case-data bound applies
+to the expanded window; omit blank turns. Local checks validate complete
+responses, known unique IDs, original or exactly completed source windows, and
+source-anchored owner/date fields. Calendar formatting can validate an equivalent ISO date only when its
+complete date, including year, occurs in the source.
+
+This is at most one additional `notesAudit` request per new writer result, never
+another writer or per-leaf paid fanout. Keep the 16-item and 90-second/publication
+reserve bounds. Bound case data at 12,000 characters locally and 48,000 for ChatGPT, with corresponding 8k/32k
+review contexts. Hold an oversized case without blocking independent smaller
+cases. Retain existing usage admission and the ten-minute exact-response cache. A failure or blocked admission retains conservative notes
+with a review warning and no automatic retry. Ordinary discussion needs no audit.
+The older Ollama two-stage path keeps its existing independent audit without a
+third review. Historical ChatGPT notes retain their existing reuse policy. Version
+the new publication contract as notes-v37.
+
+Move the recovery use cases from synchronous language-pattern unit tests to
+fictional source-first provider evaluations, while unit tests verify source
+boundaries, validation, projection, cancellation, and usage admission. Provider
+evaluation is explicit and never runs or spends model usage in the unit suite.
+
+
+## 2026-10-17 — Keep derived meeting overviews distinct from action lists
+
+- **Status:** Accepted.
+- **Supersedes:** The fallback-overview preference for a topic's first reviewed outcome in **PR completion hardening (2026-08-27)** under Issue #674. The decisions and next-steps section still leads with reviewed outcomes.
+- **Decision:** When the writer provides no explicit overview, derive a short recap from reviewed discussion, decisions, and questions, preserving exact item wording and source spans. Keep action commands and their owners/deadlines in the action section. For an action-only meeting, report the number of recorded follow-ups rather than converting imperative tasks into owner-prefixed prose.
+- **Consequences:** Explicit reviewed overviews remain unchanged. The shared projection applies to both Ollama and ChatGPT without another model call, language-pattern rewriting, or automatic historical regeneration. Overview provenance follows the selected recap material; action data and user edits retain their existing contract.
+
+
+## 2026-10-17 — Integrate ChatGPT intelligence with the MTP source-quality work
+
+- **Status:** Accepted for isolated integration; no release or native MTP promotion.
+- **Extends:** “Replace pattern-based commitment recovery with source-bound semantic review” and the native MTP adoption plan. Preserve both the source-quality snapshot and the verified ChatGPT branch as separate parents.
+- **Decision:** Keep MTP's full-document completion/cancellation checks, exact action-state matching, personal ownership gates, and provider recovery alongside ChatGPT's semantic review, durable usage admission, coalescing, and historical reuse policy. Merge the compact writer guidance for current commitments, completed work, source-reported acceptance, conditions, durations, and unconfirmed arrangements. Version this combined prompt/publication contract as notes-v38.
+- **Boundary:** Recording and transcription stay local. Ollama remains the local route; merging the experimental work does not enable a native MTP provider or bypass its quality gates. Historical ChatGPT notes do not regenerate because of this version change. Validate the integrated source before publishing; both original worktrees and the installed app remain untouched.

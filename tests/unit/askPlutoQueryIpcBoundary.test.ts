@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const main = readFileSync('electron/main.ts', 'utf8');
 const handlerStart = main.indexOf("'intelligence:query',");
@@ -7,6 +7,70 @@ const handlerEnd = main.indexOf("'intelligence:query:cancel'", handlerStart);
 const queryHandler = main.slice(handlerStart, handlerEnd);
 
 describe('Ask Pluto query IPC boundary', () => {
+  it.each(['ollama', 'chatgpt'])(
+    'keeps %s answer routing from shortening a multi-part meeting question',
+    (provider) => {
+      const start = queryHandler.indexOf('const extractiveAnswer =');
+      const end = queryHandler.indexOf(';', start);
+      expect(start).toBeGreaterThan(0);
+      const selectAnswer = new Function(
+        'settings',
+        'useWorkspaceRecall',
+        'conversationResolution',
+        'selfReference',
+        'usePreparedAssigneeRecall',
+        'assigneeRecall',
+        'buildExtractiveTemporalSummary',
+        'effectiveQueryText',
+        'context',
+        `${queryHandler.slice(start, end + 1)} return extractiveAnswer;`,
+      );
+      const summary = vi.fn(() => 'Riley: send the checklist by Monday.');
+      const result = selectAnswer(
+        { llm_provider: provider },
+        false,
+        { relation: 'new_topic' },
+        { refersToSelf: false },
+        false,
+        null,
+        summary,
+        'List the follow-ups. Was the review booked? What must happen before production?',
+        [{}],
+      );
+      expect(result).toBe(
+        provider === 'chatgpt' ? null : 'Riley: send the checklist by Monday.',
+      );
+      expect(summary).toHaveBeenCalledTimes(provider === 'chatgpt' ? 0 : 1);
+    },
+  );
+
+  it('uses complete retrieval rather than assignment-only context for ChatGPT', () => {
+    const start = queryHandler.indexOf('const usePreparedAssigneeRecall =');
+    const end = queryHandler.indexOf(';', start);
+    const selectPrepared = new Function(
+      'settings',
+      'explicitResolvedScope',
+      'temporalResolvedScope',
+      'currentMeetingRequested',
+      'isPlanning',
+      'inheritedScope',
+      'assigneeRecall',
+      'conversationResolution',
+      `${queryHandler.slice(start, end + 1)} return usePreparedAssigneeRecall;`,
+    );
+    const args = [
+      undefined,
+      undefined,
+      false,
+      false,
+      undefined,
+      { coverageLimited: false },
+      { relation: 'new_topic' },
+    ];
+    expect(selectPrepared({ llm_provider: 'ollama' }, ...args)).toBe(true);
+    expect(selectPrepared({ llm_provider: 'chatgpt' }, ...args)).toBe(false);
+  });
+
   it('keeps project recall diagnostics opt-in and model classification disabled by default', () => {
     const debugHandler = main.slice(
       main.indexOf("'intelligence:query:debug'"),
@@ -161,6 +225,22 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(acknowledgmentBranch).toBeLessThan(
       queryHandler.indexOf("sendStatus('retrieving')"),
     );
+  });
+
+  it('keeps semantic scope provider-specific and preserves existing local query routing', () => {
+    const scopeRequest = queryHandler.slice(
+      queryHandler.indexOf('const resolveScope ='),
+      queryHandler.indexOf('const semanticScope ='),
+    );
+    expect(scopeRequest).toContain('needsSemanticMeetingScope({');
+    expect(scopeRequest).toContain('provider: settings.llm_provider');
+    expect(queryHandler).toContain("settings.llm_provider !== 'chatgpt' &&");
+    expect(queryHandler).toContain('resolveExplicitMeetingScope(');
+    expect(queryHandler).toContain(
+      'queryReferencesCurrentMeeting(effectiveQueryText)',
+    );
+    expect(queryHandler).toContain('explicitlyScopedMeetings.length === 0 ||');
+    expect(queryHandler).toContain('semanticScope &&');
   });
 
   it('defers synthesized meeting detail reads until after conversation-only turns', () => {

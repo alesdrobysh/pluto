@@ -38,12 +38,30 @@ it('asks the compact writer for complete items and bounded evidence', () => {
   expect(prompt).toContain('at most 3 copied source descriptors');
   expect(prompt).toContain('owner: string | null');
   expect(prompt).toContain('due: string | null');
+  expect(
+    prompt.startsWith('Start the notes with accepted future commitments'),
+  ).toBe(true);
+  expect(prompt).toContain('Do not substitute an earlier tentative plan');
+  expect(prompt).toContain('Routine farewells');
+  expect(prompt).toContain('A promised call about a specific task');
   expect(prompt).toContain('account for every source turn');
   expect(prompt).toContain('belongs in a kind:"action" item');
   expect(prompt).toContain('no second person needs to approve it');
-  expect(prompt).toContain('speaker\'s exact name or label into owner');
+  expect(prompt).toContain("speaker's exact name or label into owner");
+  expect(prompt).toContain(
+    'retain every accepted future commitment as an action',
+  );
+  expect(prompt).toContain(
+    'scope clarifications and operating expectations as points',
+  );
   expect(prompt).toContain('names, numbers, definitions, reasons');
   expect(prompt).toContain('Stay close to source wording');
+  expect(prompt).toContain(
+    'A total wait that includes approval, testing or provisioning',
+  );
+  expect(prompt).toContain(
+    'must not become an additional wait after those steps',
+  );
   expect(prompt).toContain(
     'withdrawal or replacement explanation is discussion',
   );

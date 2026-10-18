@@ -90,4 +90,21 @@ describe('AutoEndToast component', () => {
     expect(paragraphs[0].textContent).toBe('Meeting ended');
     expect(paragraphs[1].textContent).toBe('No audio detected');
   });
+
+  it('names the closed Meet tab rather than claiming Chrome exited', async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AutoEndToast
+          reason="tab_closed"
+          appName="Google Chrome"
+          onReopen={vi.fn()}
+          onDismiss={vi.fn()}
+        />,
+      );
+    });
+    expect(container.textContent).toContain('Meet tab closed');
+    expect(container.textContent).not.toContain('Google Chrome closed');
+    await act(async () => root.unmount());
+  });
 });

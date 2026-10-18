@@ -59,9 +59,12 @@ def capture(binary, fixture):
         cpu_seconds = int(minutes) * 60 + float(seconds)
         rss_kb = int(usage[1])
     finally:
+        stop_began = time.monotonic()
         child.send_signal(signal.SIGINT) if child.poll() is None else None
+        # Continue draining stdout while the native control queue shuts down.
+        child.communicate(timeout=5)
+        shutdown_ms = (time.monotonic() - stop_began) * 1000
         player.terminate() if player.poll() is None else None
-        child.wait(timeout=5)
         player.wait(timeout=5)
         selector.close()
     if not received:
@@ -75,7 +78,11 @@ def capture(binary, fixture):
         "cpuPercent": cpu_seconds / 20 * 100,
         "rssKiB": rss_kb,
         "nativeHealth": health_events,
+        "shutdownMs": shutdown_ms,
+        "exitCode": child.returncode,
     }
+    assert result["exitCode"] == 0, result
+    assert result["shutdownMs"] < 5000, result
     assert result["pcmSeconds"] > 18, result
     assert result["maxDeliveryGapMs"] < 3000, result
     assert all(event["event"] == "heartbeat" for event in health_events), result

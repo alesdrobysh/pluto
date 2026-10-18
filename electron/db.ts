@@ -119,7 +119,10 @@ import { createCalendarStore } from './calendar/store';
 import type { CalendarEvent } from './calendar/types';
 import { createCommitmentReminderStore } from './commitmentReminderStore';
 import { getApplicationDatabase } from './database/applicationDatabase';
-import { syncActionCompletionToMeetingNotes } from './database/meetingActionSync';
+import {
+  syncActionCompletionToMeetingNotes,
+  syncMeetingActionEntitiesFromUserEdits,
+} from './database/meetingActionSync';
 import {
   type MeetingContextSectionIntegrity,
   type MeetingContextSectionRow,
@@ -524,16 +527,16 @@ export const setSetting = (key: string, value: string) => {
 };
 
 export const deleteCredential = (
-  provider: import('./llm/inferenceTypes').CloudProviderId,
+  provider: import('./llm/inferenceTypes').ApiKeyProviderId,
 ) => secureSettings.delete(`${provider}_api_key`);
 
 export const setCredential = (
-  provider: import('./llm/inferenceTypes').CloudProviderId,
+  provider: import('./llm/inferenceTypes').ApiKeyProviderId,
   value: string,
 ) => secureSettings.set(`${provider}_api_key`, value);
 
 export const getCredentialStatus = (
-  provider: import('./llm/inferenceTypes').CloudProviderId,
+  provider: import('./llm/inferenceTypes').ApiKeyProviderId,
 ) => secureSettings.status(provider);
 
 export const upsertAttentionItem = (
@@ -3722,6 +3725,7 @@ export const publishMeetingNotesIfCurrent = (input: {
       .prepare('SELECT * FROM meetings WHERE id = ?')
       .get(meetingId) as PersistedMeeting | undefined;
     if (!updated) throw new Error('meeting_analysis_publication_missing');
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
     refreshMeetingFts(updated);
     return true;
   })();

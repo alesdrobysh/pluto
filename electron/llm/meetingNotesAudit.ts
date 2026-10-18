@@ -13,7 +13,11 @@ import type {
 import { createEditorTerminologyArtifact } from './meetingNotesEditorTerminology';
 import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import { classifySuspectNotesProse } from './meetingNotesProseQuality';
-import { resolveSourceSpan } from './meetingNotesSource';
+import {
+  completeCitedSourceWindow,
+  groupCitedSourcePassages,
+  resolveSourceSpan,
+} from './meetingNotesSource';
 import {
   type AuditVerdict,
   MeetingNotesError,
@@ -41,6 +45,8 @@ export type AuditedNotes = {
   terminologyArtifact?: MeetingTerminologyArtifactV1;
   issues?: string[];
   proseReviewItems?: NotesProseReviewItem[];
+  semanticChangeCount?: number;
+  reviewOriginals?: ReadonlyMap<string, NotesItem>;
 };
 
 type Block = SupportedText | NotesItem;
@@ -245,7 +251,14 @@ export const parseNotesDraft = (raw: string): NotesDraft => {
 export const parseCompactNotesDraft = (
   raw: string,
   maxSourceSpans = 3,
+  provider?: string,
 ): NotesDraft => {
+  const sourceSpanLimit =
+    provider === 'chatgpt'
+      ? Math.min(maxSourceSpans, 36)
+      : NOTES_EXPERIMENTS_ENABLED
+        ? maxSourceSpans
+        : 3;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -309,8 +322,7 @@ export const parseCompactNotesDraft = (
           !(optionalMetadata && item.due === undefined)) ||
         !Array.isArray(item.sources) ||
         item.sources.length === 0 ||
-        item.sources.length >
-          (NOTES_EXPERIMENTS_ENABLED ? maxSourceSpans : 3) ||
+        item.sources.length > sourceSpanLimit ||
         item.sources.some((source) => parseSpan(source) === null)
       ) {
         throw new MeetingNotesError('notes_writer_invalid');
@@ -346,11 +358,9 @@ export const parseCompactNotesDraft = (
           Array.isArray(parsed.title.sources) &&
           parsed.title.sources.length > 0 &&
           parsed.title.sources.length <=
-            (NOTES_EXPERIMENTS_ENABLED && maxSourceSpans > 3
+            (NOTES_EXPERIMENTS_ENABLED && sourceSpanLimit > 3
               ? 96
-              : NOTES_EXPERIMENTS_ENABLED
-                ? maxSourceSpans
-                : 3) &&
+              : sourceSpanLimit) &&
           parsed.title.sources.every((source) => parseSpan(source) !== null)
         ? {
             id: 'title',
@@ -583,42 +593,42 @@ const hasOutcomes = (draft: NotesDraft) =>
 const topicSummary = (section: NotesSection, outcomes: boolean) =>
   outcomes ? undefined : section.items.find((item) => item.kind === 'point');
 
-const summaryText = (item: NotesItem): string => {
-  if (item.kind !== 'action') return item.text;
-  if (!item.owner) return `Action: ${item.text}`;
-  const text = item.text.toLowerCase();
-  const owner = item.owner.toLowerCase();
-  return text.startsWith(`${owner} `) || text.startsWith(`${owner}:`)
-    ? item.text
-    : `${item.owner}: ${item.text}`;
-};
-
 const overviewForDraft = (draft: NotesDraft): SupportedText | null => {
   if (draft.overview) return draft.overview;
-  const outcomes = hasOutcomes(draft);
+  const discussion = (item: NotesItem) => item.kind !== 'action';
   const firstItems = draft.sections.flatMap((section) => {
-    const first = outcomes ? section.items.find(isOutcome) : section.items[0];
+    const first = section.items.find(discussion);
     return first ? [first] : [];
   });
   const selectedIds = new Set(firstItems.map((item) => item.id));
   const remainingItems = draft.sections.flatMap((section) =>
     section.items.filter(
-      (item) => !selectedIds.has(item.id) && (!outcomes || isOutcome(item)),
+      (item) => !selectedIds.has(item.id) && discussion(item),
     ),
   );
   const items = [...firstItems, ...remainingItems].slice(0, 3);
-  return items.length
-    ? {
-        id: 'derived-overview',
-        text: items
-          .map((item) => {
-            const text = summaryText(item);
-            return /[.!?…]["'”’)\]]*$/u.test(text) ? text : `${text}.`;
-          })
-          .join(' '),
-        sources: items.flatMap((item) => item.sources),
-      }
-    : null;
+  if (!items.length) {
+    const actions = draft.sections.flatMap((section) =>
+      section.items.filter((item) => item.kind === 'action'),
+    );
+    return actions.length
+      ? {
+          id: 'derived-overview',
+          text: `The meeting recorded ${actions.length} follow-up${actions.length === 1 ? '' : 's'}.`,
+          sources: actions.flatMap((item) => item.sources),
+        }
+      : null;
+  }
+  return {
+    id: 'derived-overview',
+    text: items
+      .map((item) => {
+        const text = item.text;
+        return /[.!?…]["'”’)\]]*$/u.test(text) ? text : `${text}.`;
+      })
+      .join(' '),
+    sources: items.flatMap((item) => item.sources),
+  };
 };
 
 const sourceMetadata = (draft: NotesDraft) => {
@@ -1098,12 +1108,9 @@ export const applyNotesAudit = ({
     section.items = section.items.flatMap((item) => {
       if (item.kind !== 'action' && item.kind !== 'decision') return [item];
       const evidence = sourceText(source, item.sources);
-      const sourceLines = item.sources.map((span) => {
-        const segment = source.segments.find(
-          (entry) => entry.index === span.segment,
-        )!;
-        return `${segment.speaker ?? 'Speaker'}: ${resolveSourceSpan(source, span)}`;
-      });
+      const sourceLines = groupCitedSourcePassages(source, item.sources).map(
+        ({ speaker, text }) => `${speaker ?? 'Speaker'}: ${text}`,
+      );
       const checked = groundSourceReviewedItem(
         { ...item, kind: item.kind },
         {
@@ -1199,6 +1206,11 @@ export const acceptEditedNotes = ({
   compactNormalization?: boolean;
 }): AuditedNotes => {
   const next = structuredClone(draft);
+  const reviewOriginals = new Map(
+    draft.sections.flatMap((section) =>
+      section.items.map((item) => [item.id, structuredClone(item)] as const),
+    ),
+  );
   const issues: string[] = [];
   for (const block of blocksForDraft(next)) {
     validateSources(source, block.sources);
@@ -1215,6 +1227,10 @@ export const acceptEditedNotes = ({
     section.items = section.items.flatMap((item) => {
       if (item.kind !== 'action' && item.kind !== 'decision') return [item];
       const evidence = sourceText(source, item.sources);
+      const sourceLines = groupCitedSourcePassages(source, item.sources).map(
+        ({ speaker, text }) => `${speaker ?? 'Speaker'}: ${text}`,
+      );
+      const discussionText = sourceLines.join('\n');
       const declaredDecisionOwner =
         compactNormalization && item.kind === 'decision'
           ? explicitDecisionOwner(source, item)
@@ -1244,21 +1260,16 @@ export const acceptEditedNotes = ({
           `notes_editor_invalid_commitment:${item.id}:conditional_willingness_is_not_accepted__change_kind_to_point_and_preserve_can_or_could_not_will_in_text`,
         );
       }
-      const sourceLines = item.sources.map((span) => {
-        const segment = source.segments.find(
-          (entry) => entry.index === span.segment,
-        )!;
-        return `${segment.speaker ?? 'Speaker'}: ${resolveSourceSpan(source, span)}`;
-      });
+      const resolved = {
+        evidence,
+        quotedEvidence: evidence,
+        sourceLines,
+        sourceLine: sourceLines.join(' '),
+        lineIndex: item.sources[0]!.segment,
+      };
       const checked = groundSourceReviewedItem(
         { ...reviewedItem, kind: item.kind },
-        {
-          evidence,
-          quotedEvidence: evidence,
-          sourceLines,
-          sourceLine: sourceLines.join(' '),
-          lineIndex: item.sources[0]!.segment,
-        },
+        resolved,
       );
       if (!checked) {
         const statusExplanation =
@@ -1298,12 +1309,14 @@ export const acceptEditedNotes = ({
         }
         if (acceptancePolicy === 'conservative') {
           issues.push(`deterministic_unsupported_commitment:${item.id}`);
-          // Keep the evidence, not the writer's unsupported settled claim.
+          issues.push(`deterministic_preserved_discussion:${item.id}`);
+          // A rejected commitment classification must not erase the source.
+          // Copy its exact evidence, never the rejected model assertion.
           return [
             {
               ...item,
               kind: 'point' as const,
-              text: evidence.trim(),
+              text: discussionText,
               owner: null,
               due: null,
             },
@@ -1312,6 +1325,22 @@ export const acceptEditedNotes = ({
         throw new MeetingNotesError(
           `notes_editor_invalid_commitment:${item.id}:correct_wording_kind_owner_or_due_from_source`,
         );
+      }
+      if (
+        acceptancePolicy === 'conservative' &&
+        item.kind === 'action' &&
+        !checked.owner
+      ) {
+        issues.push(`deterministic_preserved_unowned_discussion:${item.id}`);
+        return [
+          {
+            ...item,
+            kind: 'point' as const,
+            text: discussionText,
+            owner: null,
+            due: null,
+          },
+        ];
       }
       const ownerChanged =
         Boolean(item.owner) &&
@@ -1347,6 +1376,7 @@ export const acceptEditedNotes = ({
   const proseReviewItems = extractSuspectProse(source, next, issues);
   const result: AuditedNotes = {
     source,
+    reviewOriginals,
     draft: next,
     verdicts: new Map(),
     acceptedTerminology: structuredClone(proposals),
@@ -1365,6 +1395,77 @@ export const acceptEditedNotes = ({
   };
   reviewedResults.add(result);
   return result;
+};
+
+export type SourceBoundNotesReplacement = NotesItem & {
+  discussion?: string | null;
+};
+
+export const applySourceBoundSemanticReview = (
+  audited: AuditedNotes,
+  replacements: SourceBoundNotesReplacement[],
+): AuditedNotes => {
+  if (!reviewedResults.has(audited))
+    throw new MeetingNotesError('notes_unreviewed_projection');
+  const next = { ...audited, draft: structuredClone(audited.draft) };
+  const byId = new Map(replacements.map((item) => [item.id, item]));
+  if (byId.size !== replacements.length)
+    throw new MeetingNotesError('invalid_notes_audit');
+  const existingIds = new Set(
+    blocksForDraft(next.draft).map((block) => block.id),
+  );
+  for (const section of next.draft.sections) {
+    section.items = section.items.flatMap((item) => {
+      const replacement = byId.get(item.id);
+      if (!replacement) return [item];
+      if (
+        JSON.stringify(replacement.sources) !== JSON.stringify(item.sources) &&
+        JSON.stringify(replacement.sources) !==
+          JSON.stringify(
+            completeCitedSourceWindow(audited.source, item.sources),
+          )
+      )
+        throw new MeetingNotesError('notes_source_out_of_scope');
+      const { discussion, ...fields } = replacement;
+      const contextId = `${item.id}:semantic-context`;
+      if (discussion && existingIds.has(contextId))
+        throw new MeetingNotesError('invalid_notes_audit');
+      byId.delete(item.id);
+      return [
+        fields,
+        ...(discussion
+          ? [
+              {
+                id: contextId,
+                kind: 'point' as const,
+                text: discussion,
+                owner: null,
+                due: null,
+                sources: replacement.sources,
+              },
+            ]
+          : []),
+      ];
+    });
+  }
+  if (byId.size) throw new MeetingNotesError('invalid_notes_audit');
+  const ids = new Set(replacements.map((item) => item.id));
+  next.issues = audited.issues?.filter(
+    (issue) =>
+      !replacements.some(
+        (item) =>
+          issue.startsWith('deterministic_') && issue.endsWith(`:${item.id}`),
+      ),
+  );
+  next.proseReviewItems = audited.proseReviewItems?.filter(
+    (item) => !ids.has(item.id),
+  );
+  next.semanticChangeCount =
+    (audited.semanticChangeCount ?? 0) +
+    replacements.length +
+    replacements.filter((item) => item.discussion).length;
+  reviewedResults.add(next);
+  return next;
 };
 
 export const projectAuditedNotes = (
@@ -1397,7 +1498,7 @@ export const projectAuditedNotes = (
         }));
       return {
         title: section.title.text,
-        summary: summary ? summaryText(summary) : '',
+        summary: summary?.text ?? '',
         key_points: points.map((point) => ({ text: point.text })),
         decisions,
         action_items: actions,
@@ -1455,7 +1556,7 @@ export const projectAuditedNotes = (
       audit_status: audited.issues?.length
         ? 'complete_with_warnings'
         : 'complete',
-      audit_change_count: 0,
+      audit_change_count: audited.semanticChangeCount ?? 0,
       source_provenance: {
         schema_version: 1,
         source_revision: audited.source.revision,

@@ -70,6 +70,20 @@ it('uses a conservative shared token estimate for dense and ordinary source text
   );
 });
 
+it('keeps token estimates conservative at long-run and Unicode boundaries', () => {
+  for (const character of ['a', '7', '_', '$', 'é', '東', '😀']) {
+    const text = character.repeat(65);
+    expect(estimateNotesTokens(text)).toBe(Buffer.byteLength(text));
+  }
+  for (const separator of [' ', '\t', '\n', '\u00a0', '.', '-']) {
+    const text = `${'a'.repeat(64)}${separator}${'a'.repeat(64)}`;
+    expect(estimateNotesTokens(text)).toBe(
+      Math.ceil(Math.ceil(Buffer.byteLength(text) / 3) * 1.25),
+    );
+  }
+  expect(estimateNotesTokens(' \t\n\u00a0')).toBe(3);
+});
+
 it('partitions every source turn exactly once as primary coverage without tail loss', () => {
   const source = createNotesSource(
     JSON.stringify({

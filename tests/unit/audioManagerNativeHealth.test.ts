@@ -83,5 +83,5 @@ it('overlaps native PCM startup with independent meeting setup without weakening
   expect(recordingState).toBeGreaterThan(microphoneRecorderStart);
   expect(abortStart).toContain('cancelSystemAudioHealthTimeoutRef.current?.()');
   expect(abortStart).toContain('nativeAudioUnsubscribeRef.current?.()');
-  expect(abortStart).toContain("invoke('NATIVE_AUDIO_STOP')");
+  expect(abortStart).toContain('await releaseCaptureResources(meetingId)');
 });

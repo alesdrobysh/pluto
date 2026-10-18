@@ -9,6 +9,7 @@ export type CaptureSessionLease = {
 
 export const createCaptureSessionLeaseRegistry = () => {
   let active: CaptureSessionLease | null = null;
+  let captureStopRequested = false;
 
   const requireOwner = (meetingId: string, ownerId: number) => {
     if (active?.meetingId !== meetingId || active.ownerId !== ownerId) {
@@ -21,6 +22,7 @@ export const createCaptureSessionLeaseRegistry = () => {
     current: () => (active ? { ...active } : null),
     acquire(meetingId: string, ownerId: number) {
       if (!active) {
+        captureStopRequested = false;
         active = { meetingId, ownerId, phase: 'recording' };
         return { status: 'acquired' as const, lease: { ...active } };
       }
@@ -52,6 +54,20 @@ export const createCaptureSessionLeaseRegistry = () => {
       return { ...owned };
     },
 
+    requireCaptureStartOwner(meetingId: string, ownerId: number) {
+      const owned = requireOwner(meetingId, ownerId);
+      if (owned.phase !== 'recording' || captureStopRequested) {
+        throw new Error(CAPTURE_SESSION_NOT_OWNED);
+      }
+      return { ...owned };
+    },
+
+    beginCaptureStop(meetingId: string, ownerId: number) {
+      requireOwner(meetingId, ownerId);
+      // Retain write authority for final chunks; only new capture is revoked.
+      captureStopRequested = true;
+    },
+
     markStopped(meetingId: string, ownerId: number) {
       const owned = requireOwner(meetingId, ownerId);
       if (owned.phase !== 'recording') {
@@ -73,6 +89,17 @@ export const createCaptureSessionLeaseRegistry = () => {
       if (active?.meetingId !== meetingId || active.ownerId !== ownerId) {
         return false;
       }
+      active = null;
+      return true;
+    },
+
+    releaseAfterCaptureStop(meetingId: string, ownerId: number) {
+      if (
+        !captureStopRequested ||
+        active?.meetingId !== meetingId ||
+        active.ownerId !== ownerId
+      )
+        return false;
       active = null;
       return true;
     },

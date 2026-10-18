@@ -111,7 +111,7 @@ export const buildDreamingResponseSchema = (
 });
 
 export interface DreamingGenerationRequest {
-  model: typeof DREAMING_MODEL;
+  model: string;
   promptVersion: typeof DREAMING_PROMPT_VERSION;
   prompt: string;
   schema: JsonSchema;

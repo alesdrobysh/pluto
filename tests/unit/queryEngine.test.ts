@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../electron/db';
+import { restrictEvidenceToMeetingIds } from '../../electron/intelligence/askPlutoProjectScopes';
+import { resolveSemanticMeetingScope } from '../../electron/intelligence/askPlutoSemanticScope';
+import { buildSynthesizedAnswerPresentation } from '../../electron/intelligence/citationEngine';
 import {
   applyAssigneeCommitmentState,
   buildAssigneeActionRecall,
@@ -37,6 +40,83 @@ import * as factoryModule from '../../electron/llm/factory';
 import type { LLMProvider, LLMSettings } from '../../electron/llm/provider';
 
 type MockProvider = Pick<LLMProvider, 'classifyQueryIntent'>;
+
+it('renders canonical action fields naturally for local extracts without reading legacy identities', () => {
+  const meeting = {
+    id: 'natural-actions',
+    title: 'Pilot review',
+    started_at: '2026-10-15T22:42:00Z',
+    analysis_json: JSON.stringify({
+      analysis_schema_version: 3,
+      overview: 'Pilot readiness.',
+      topics: [],
+      all_decisions: [],
+      all_action_items: [
+        { text: 'Send the checklist.', assignee: 'Riley', due: 'Monday' },
+        {
+          text: 'Update the runbook after the checklist arrives',
+          assignee: 'Avery',
+        },
+      ],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    }),
+    mid_json: JSON.stringify({
+      participants: [{ name: 'Riley Quinn' }],
+      topics: [{ name: 'Superseded topic' }],
+      action_items: [{ description: 'Superseded action' }],
+    }),
+  } as dbModule.PersistedMeeting;
+  const result = buildMeetingRetrievalResult(meeting);
+  expect(result.mid).toBeNull();
+  expect(result.note_actions?.[0]).toMatchObject({
+    assignee: 'Riley',
+    due: 'Monday',
+  });
+  const answer = buildExtractiveTemporalSummary('What are the next steps?', [
+    result,
+  ]);
+  expect(answer).toContain('| Riley | Send the checklist. | Monday |');
+  expect(answer).toContain(
+    '| Avery | Update the runbook after the checklist arrives | Not stated |',
+  );
+  expect(answer).not.toContain('[Owner:');
+  expect(answer).not.toContain('[Due:');
+  expect(answer).not.toContain('Quinn');
+  expect(
+    buildSynthesizedAnswerPresentation(answer!, [result]).answer,
+  ).toContain(
+    '| Avery | Update the runbook after the checklist arrives | Not stated |',
+  );
+  const completed = buildMeetingRetrievalResult({
+    ...meeting,
+    user_edits_json: JSON.stringify({
+      'completion:all_action_items:0': {
+        original: 'false',
+        edited: 'true',
+        edited_at: '2026-10-17T00:00:00Z',
+      },
+    }),
+  });
+  expect(completed.note_actions?.[0]?.completed).toBe(true);
+  expect(
+    buildExtractiveTemporalSummary('What are the next steps?', [completed]),
+  ).toContain('| Riley | Send the checklist. | Monday · Completed |');
+  result.note_actions![0]!.text =
+    'Riley agreed to send a checklist | with two parts.\nKeep the condition.';
+  const reported = buildExtractiveTemporalSummary('What are the next steps?', [
+    result,
+  ]);
+  expect(reported).toContain(
+    '| Riley | Riley agreed to send a checklist \\| with two parts. Keep the condition. | Monday |',
+  );
+  expect(reported).not.toContain('Riley: Riley');
+});
 type EntitySearchRow = ReturnType<
   typeof dbModule.searchEntitiesWithMeetingContext
 >[number];
@@ -83,6 +163,17 @@ vi.mock('../../electron/llm/factory', () => ({
 }));
 
 describe('Query Engine', () => {
+  it('uses the semantic plan classification without a second intent-model call', async () => {
+    vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([]);
+    const parsed = await parseQuery('What did the team decide?', {
+      useModelClassification: false,
+      classification: { intent: 'comparative', expanded_keywords: ['pilot'] },
+    });
+    expect(parsed.intent).toBe('comparative');
+    expect(parsed.expanded_keywords).toContain('pilot');
+    expect(factoryModule.getProvider).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(dbModule.searchMeetingsFts).mockReturnValue([]);
@@ -4118,4 +4209,49 @@ it('retains matching middle evidence when rebuilding a prior cited source for re
   );
   expect(result.evidence_text).toContain('Morgan owns the acceptance report.');
   expect(result.evidence_text.length).toBeLessThan(2400);
+});
+
+it('carries a semantic single-meeting scope through retrieval and citation presentation', async () => {
+  const meetings = [
+    {
+      id: 'specified',
+      title: 'Meeting',
+      started_at: '2026-10-15T22:42:00Z',
+      enhanced_notes: 'Riley will send the pilot checklist by Monday.',
+    },
+    {
+      id: 'other',
+      title: 'Meeting',
+      started_at: '2026-10-15T23:00:00Z',
+      enhanced_notes: 'Unrelated rollout details.',
+    },
+  ] as dbModule.PersistedMeeting[];
+  const plan = await resolveSemanticMeetingScope({
+    query:
+      'For Meeting recorded at 3:42 PM on October 15, who sends the checklist?',
+    meetings,
+    timeZone: 'America/Los_Angeles',
+    provider: {
+      classifyQueryIntent: vi.fn(async () =>
+        JSON.stringify({
+          kind: 'single',
+          meetingIds: ['specified'],
+          intent: 'factual',
+          expanded_keywords: [],
+        }),
+      ),
+    },
+  });
+  expect(plan.kind).toBe('single');
+  const selected = restrictEvidenceToMeetingIds(
+    meetings.map((m) => buildMeetingRetrievalResult(m)),
+    plan.meetingIds,
+  );
+  const result = buildSynthesizedAnswerPresentation(
+    'Riley sends the checklist by Monday.',
+    selected,
+  );
+  expect(selected.map((source) => source.meeting_id)).toEqual(['specified']);
+  expect(result.citations.map((c) => c.meeting_id)).toEqual(['specified']);
+  expect(result.answer).toContain('Monday');
 });

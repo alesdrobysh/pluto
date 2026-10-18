@@ -29,7 +29,13 @@ export const createActiveCallAlertController = ({
   rendererDist,
 }: ActiveCallAlertControllerOptions) => {
   let activeCallAlertWin: BrowserWindow | null = null;
-  let currentAlertType: 'call' | 'calendar' | null = null;
+  let currentAlertType:
+    | 'call'
+    | 'calendar'
+    | 'ended'
+    | 'calendar-end-check'
+    | null = null;
+  let loadedAlertWin: BrowserWindow | null = null;
 
   const enforceAlertBounds = (win: BrowserWindow, x: number, y: number) => {
     if (win.isDestroyed()) return;
@@ -45,6 +51,7 @@ export const createActiveCallAlertController = ({
 
   const close = () => {
     currentAlertType = null;
+    loadedAlertWin = null;
     if (!activeCallAlertWin || activeCallAlertWin.isDestroyed()) {
       activeCallAlertWin = null;
       return;
@@ -128,9 +135,11 @@ export const createActiveCallAlertController = ({
       if (activeCallAlertWin === alertWin) {
         activeCallAlertWin = null;
         currentAlertType = null;
+        loadedAlertWin = null;
       }
     });
     alertWin.webContents.once('did-finish-load', () => {
+      if (activeCallAlertWin === alertWin) loadedAlertWin = alertWin;
       reveal();
     });
 
@@ -214,9 +223,77 @@ export const createActiveCallAlertController = ({
     }
   };
 
+  const showMeetingEnded = (
+    detail: string,
+    durationMs: number,
+    theme: string,
+    anchorBounds?: Rectangle,
+  ) => {
+    const { win: alertWin } = createAlertWindow(anchorBounds);
+    currentAlertType = 'ended';
+    const query = {
+      type: 'ended',
+      detail: detail.slice(0, 120),
+      durationMs: String(durationMs),
+      theme,
+    };
+    if (devServerUrl) {
+      const url = new URL('active-call-alert.html', devServerUrl);
+      for (const [key, value] of Object.entries(query))
+        url.searchParams.set(key, value);
+      void alertWin.loadURL(url.toString());
+    } else {
+      void alertWin.loadFile(
+        path.join(rendererDist, 'active-call-alert.html'),
+        {
+          query,
+        },
+      );
+    }
+  };
+
+  const showCalendarEndCheck = (theme: string, anchorBounds?: Rectangle) => {
+    const { win: alertWin } = createAlertWindow(anchorBounds);
+    currentAlertType = 'calendar-end-check';
+    const query = { type: 'calendar-end-check', theme };
+    if (devServerUrl) {
+      const url = new URL('active-call-alert.html', devServerUrl);
+      for (const [key, value] of Object.entries(query))
+        url.searchParams.set(key, value);
+      void alertWin.loadURL(url.toString());
+    } else {
+      void alertWin.loadFile(
+        path.join(rendererDist, 'active-call-alert.html'),
+        {
+          query,
+        },
+      );
+    }
+  };
+
+  const closeCalendarEndCheck = () => {
+    if (currentAlertType === 'calendar-end-check') close();
+  };
+
+  const isCalendarEndCheckVisible = () =>
+    currentAlertType === 'calendar-end-check' &&
+    activeCallAlertWin !== null &&
+    activeCallAlertWin === loadedAlertWin &&
+    !activeCallAlertWin.isDestroyed() &&
+    activeCallAlertWin.isVisible();
+
+  const owns = (webContentsId: number, type: 'ended' | 'calendar-end-check') =>
+    currentAlertType === type &&
+    activeCallAlertWin?.webContents.id === webContentsId;
+
   return {
     show,
     showCalendarPrompt,
+    showMeetingEnded,
+    showCalendarEndCheck,
+    closeCalendarEndCheck,
+    isCalendarEndCheckVisible,
+    owns,
     close,
     closeCallAlert,
     closeCalendarPrompt,

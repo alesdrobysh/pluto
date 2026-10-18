@@ -1,3 +1,8 @@
+// Application request budgets, separate from a model's advertised context window.
+// Cloud notes use one full-source request; the local model retains bounded leaves.
+export const notesContextTokens = (provider: unknown): number =>
+  provider === 'chatgpt' ? 131_072 : 16_384;
+
 import {
   MeetingNotesError,
   type NotesSource,
@@ -21,12 +26,29 @@ export type NotesSourceWindow = {
 };
 
 const isTokenDense = (text: string): boolean => {
-  const nonWhitespace = text.replaceAll(/\s/g, '');
-  if (!nonWhitespace) return false;
-  const asciiLetters = (nonWhitespace.match(/[A-Za-z]/g) ?? []).length;
-  return (
-    asciiLetters < nonWhitespace.length / 2 || /[\p{L}\p{N}_$]{65,}/u.test(text)
-  );
+  let nonWhitespace = 0;
+  let asciiLetters = 0;
+  let wordLength = 0;
+  for (const character of text) {
+    const code = character.codePointAt(0)!;
+    const letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+    const whitespace =
+      code <= 127
+        ? code === 32 || (code >= 9 && code <= 13)
+        : character.trim().length === 0;
+    if (!whitespace) nonWhitespace += character.length;
+    if (letter) asciiLetters += 1;
+    // Non-ASCII runs are conservatively dense, including symbols and punctuation.
+    const wordCharacter =
+      letter ||
+      (code >= 48 && code <= 57) ||
+      code === 95 ||
+      code === 36 ||
+      (code > 127 && !whitespace);
+    wordLength = wordCharacter ? wordLength + 1 : 0;
+    if (wordLength >= 65) return true;
+  }
+  return asciiLetters < nonWhitespace / 2;
 };
 
 export const estimateNotesTokens = (text: string): number => {
@@ -243,3 +265,7 @@ export const partitionNotesSource = (
       : window;
   });
 };
+
+// Real cloud transcripts can fragment a single claim across many short turns.
+export const notesSourceSpanLimit = (provider: unknown): number =>
+  provider === 'chatgpt' ? 36 : 3;

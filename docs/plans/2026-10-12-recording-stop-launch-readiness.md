@@ -1,6 +1,27 @@
 # Recording shutdown and launch readiness
 
-Status: proposed implementation and acceptance plan. No runtime changes made by this document.
+Status: shutdown implementation submitted for review; packaged hardware acceptance remains open.
+
+## Implementation and verification update
+
+The implementation addresses independent bounded renderer cleanup, acknowledged native termination with escalation, terminal capture lease fencing, final PCM transport draining, native signal/parent-loss cleanup, active deletion and owner-loss cleanup, probe cancellation, and truthful automatic-stop acknowledgement. Fixed stop diagnostic codes use the existing local capture report.
+
+Automatic probes remain paused after terminal stop until passive detection positively observes closure of the last detected app/tab, or the user explicitly starts another recording. Explicit permission checks remain available. This intentionally limits rediscovery of the same still-open call; reliable joined/left evidence in workstream 5 remains separate.
+
+Fresh local verification on this branch:
+
+- Native Swift compilation, TypeScript checking, lint, and renderer/main Vite production bundles pass.
+- The full Vitest suite passes all 6,505 tests; an additional transport-drain regression also passes in the focused native suite.
+- Shutdown regression coverage includes independent cleanup failures, missing recorder events, hung IPC/context, native escalation, final stdout draining, duplicate stop, lease fencing, and failed auto-end acknowledgement.
+- 100 sequential real child-process stop cycles pass. These are process lifecycle cycles, not 100 complete recording UI sessions.
+- A disposable Electron synthetic recording releases tracks and context in 89 ms normally and 1,004 ms with the stop event suppressed. Both retain 7,058 encoded bytes. This checks encoded data availability, not final-utterance semantic accuracy.
+- A 20-second native capture of an explicitly targeted muted synthetic player delivers 19.45 seconds of PCM, with maximum delivery gap 19.47 ms, then exits normally in 29.94 ms.
+- A silent, explicitly targeted native probe exits within 82 ms after its test parent exits.
+- Existing real Electron capture-continuity verification passes normal sample equality plus injected native stall, delivery loss, and disk-write failure classification.
+
+These checks do not prove the reporter's output-route symptom is resolved on their hardware. The packaged built-in/USB/Bluetooth matrix, sleep/wake, one-hour recording, 100 full recording cycles, second Mac, final-utterance review, and RC observation period below remain release gates. The PR requests a macOS installer verification build; no public release is authorized by this change.
+
+The diagnosis table below records the pre-change findings, not defects still intentionally present.
 
 ## Outcome and corrected diagnosis
 

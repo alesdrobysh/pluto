@@ -1,3 +1,5 @@
+import { ChatGPTError, chatGPTErrorMessage } from '../chatgpt/auth';
+
 export type AskPlutoFailureReason =
   | 'timeout'
   | 'provider_unavailable'
@@ -7,6 +9,12 @@ export type AskPlutoFailureReason =
 export const classifyAskPlutoFailure = (
   error: unknown,
 ): { reason: AskPlutoFailureReason; answer: string } => {
+  if (error instanceof ChatGPTError) {
+    return {
+      reason: 'provider_unavailable',
+      answer: chatGPTErrorMessage(error),
+    };
+  }
   const name = error instanceof Error ? error.name : '';
   const message = error instanceof Error ? error.message : String(error ?? '');
 

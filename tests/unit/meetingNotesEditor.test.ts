@@ -198,7 +198,7 @@ it.each([
     expect(reviewed.draft.sections[0]!.items).toEqual([
       expect.objectContaining({
         kind: 'point',
-        text,
+        text: `Ben: ${text}`,
         sources,
         owner: null,
         due: null,
@@ -332,7 +332,7 @@ it('does not let an explicit decision label bypass unsettled or contradictory so
   expect(projectAuditedNotes(accepted).all_decisions).toEqual([]);
   expect(accepted.draft.sections[0]!.items[0]).toMatchObject({
     kind: 'point',
-    text,
+    text: `Ben: ${text}`,
   });
   expect(() =>
     acceptEditedNotes({ source, draft, compactNormalization: true }),

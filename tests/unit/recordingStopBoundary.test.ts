@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('recording stop checkpoint boundary', () => {
   const audioManager = readFileSync('src/components/AudioManager.tsx', 'utf8');
-  const stopStart = audioManager.indexOf('const stopSession = async (');
+  const stopStart = audioManager.indexOf('const finishSession = async (');
   const stopEnd = audioManager.indexOf(
     'useImperativeHandle(ref, () => ({ startSession, stopSession }));',
     stopStart,
@@ -12,7 +12,7 @@ describe('recording stop checkpoint boundary', () => {
 
   it('admits the MediaRecorder final interval before finishing EOU', () => {
     const recorderStop = stopSession.indexOf(
-      'const micBlob = await stopRecorder(',
+      'const stopped = await resourceStop;',
     );
     const captureDrain = stopSession.indexOf(
       'await captureActivitySessionRef.current?.drain();',

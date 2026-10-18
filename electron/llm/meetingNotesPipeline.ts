@@ -11,6 +11,7 @@ import {
   parseNotesDraft,
   projectAuditedNotes,
 } from './meetingNotesAudit';
+import { notesSourceSpanLimit } from './meetingNotesBudget';
 import {
   bisectNotesSourceSpans,
   estimateNotesTokens,
@@ -530,13 +531,20 @@ const writeDraft = async (
     (raw) => {
       const parsed =
         task === 'notesWriter' && input.compactWriterContract
-          ? parseCompactNotesDraft(raw, input.sourceParagraphs ? 36 : 3)
+          ? parseCompactNotesDraft(
+              raw,
+              input.sourceParagraphs
+                ? 36
+                : notesSourceSpanLimit(input.provider),
+              input.provider,
+            )
           : parseNotesDraft(raw);
       assertAllowedSources(parsed, allowedSpans);
       return parsed;
     },
     allowedSpans,
-    !(input.compactWriterContract && input.reviewProtocol === 'editor'),
+    input.provider !== 'chatgpt' &&
+      !(input.compactWriterContract && input.reviewProtocol === 'editor'),
   );
   input.stageCache?.set(key, draft);
   return draft;
@@ -853,7 +861,8 @@ const auditDraft = async (
       };
     },
     evidenceSpans,
-    !(input.compactWriterContract && input.reviewProtocol === 'editor'),
+    input.provider !== 'chatgpt' &&
+      !(input.compactWriterContract && input.reviewProtocol === 'editor'),
   );
   assertNotCancelled(input);
   return result;
@@ -919,6 +928,14 @@ const auditDraftWithinOptionalBudget = async (
   }
 };
 
+const projectFinalNotes = async (
+  input: GenerateMeetingNotesInput,
+  audited: AuditedNotes,
+) =>
+  projectAuditedNotes(
+    await (input.reviewSourceBoundNotes?.(audited) ?? audited),
+  );
+
 const metadataFor = (
   input: GenerateMeetingNotesInput,
   document: AnalysisDocumentV3,
@@ -948,7 +965,9 @@ const metadataFor = (
     audit_status: document.quality.issues.length
       ? 'complete_with_warnings'
       : 'complete',
-    audit_change_count: auditChangeCount,
+    audit_change_count:
+      auditChangeCount +
+      (document.generation_metadata?.audit_change_count ?? 0),
     ...(hierarchy ? { hierarchy } : {}),
   };
   return document;
@@ -1532,7 +1551,7 @@ const runHierarchy = async (
   const root = level[0];
   if (!root) throw new MeetingNotesError('notes_context_exhausted');
   root.audited.issues = [...new Set(hierarchyIssues)];
-  const document = projectAuditedNotes(root.audited);
+  const document = await projectFinalNotes(input, root.audited);
   return metadataFor(input, document, 'hierarchical', root.changeCount, {
     depth: root.depth,
     nodes: generatedNodes,
@@ -1659,6 +1678,7 @@ const runBoundedCompactNotes = async (
   // six-call budget to replace it with two smaller packets; any review calls
   // that no longer fit fall back to the same deterministic source checks.
   const reviewedDrafts: NotesDraft[] = [];
+  const reviewOriginals = new Map<string, NotesItem>();
   const issues: string[] = [];
   let changes = 0;
   for (const { draft, evidenceSpans, idPrefix } of writtenLeaves) {
@@ -1699,6 +1719,8 @@ const runBoundedCompactNotes = async (
         );
       }
     }
+    for (const [id, item] of reviewed.audited.reviewOriginals ?? [])
+      reviewOriginals.set(id, item);
     reviewedDrafts.push(reviewed.draft);
     changes += reviewed.changeCount;
     issues.push(...(reviewed.audited.issues ?? []));
@@ -1788,6 +1810,7 @@ const runBoundedCompactNotes = async (
     draft: finalReviewed.draft,
     acceptancePolicy: 'conservative',
   });
+  accepted.reviewOriginals = reviewOriginals;
   accepted.issues = [
     ...new Set([
       ...(accepted.issues ?? []),
@@ -1797,7 +1820,7 @@ const runBoundedCompactNotes = async (
   ];
   return metadataFor(
     input,
-    projectAuditedNotes(accepted),
+    await projectFinalNotes(input, accepted),
     'hierarchical',
     changes,
     {
@@ -1835,6 +1858,7 @@ const runMeetingNotes = async (
     ? buildCompactNotesWriterPrompt
     : buildNotesWriterPrompt;
   const writerPrompt = writerPromptBuilder({
+    maxSourceSpans: notesSourceSpanLimit(input.provider),
     sourceText,
     userNotes: input.context.userNotes,
     knownTerms,
@@ -1852,6 +1876,9 @@ const runMeetingNotes = async (
       ? COMPACT_WRITER_OUTPUT_TOKENS
       : WRITER_OUTPUT_TOKENS;
     if (!fits(input, writerPrompt, writerOutputTokens, evidenceSpans)) {
+      // Never turn one paid cloud request into an automatic leaf/merge fan-out.
+      if (input.provider === 'chatgpt')
+        throw new MeetingNotesError('notes_context_exhausted');
       if (input.compactWriterContract) {
         const compactInput = { ...input, reviewProtocol: 'editor' as const };
         const leaves = planBoundedCompactLeaves(compactInput, knownTerms);
@@ -1870,7 +1897,7 @@ const runMeetingNotes = async (
     const checked = deterministicallyAcceptedDraft(input, draft, evidenceSpans);
     return metadataFor(
       input,
-      projectAuditedNotes(checked.audited),
+      await projectFinalNotes(input, checked.audited),
       'direct',
       0,
     );
@@ -1888,6 +1915,8 @@ const runMeetingNotes = async (
     evidenceSpans,
   );
   if (capacity.mode !== 'direct') {
+    if (input.provider === 'chatgpt')
+      throw new MeetingNotesError('notes_context_exhausted');
     if (compactEditor) {
       const leaves = planBoundedCompactLeaves(input, knownTerms);
       if (leaves.length <= MAX_BOUNDED_COMPACT_LEAVES) {
@@ -1976,7 +2005,7 @@ const runMeetingNotes = async (
   assertNotCancelled(input);
   return metadataFor(
     input,
-    projectAuditedNotes(audited.audited),
+    await projectFinalNotes(input, audited.audited),
     'direct',
     audited.changeCount,
   );
@@ -2052,7 +2081,7 @@ export const generateMeetingNotes = async (
         error.code !== 'notes_input_overflow'
       )
         throw error;
-      if (isBoundedCompact) {
+      if (isBoundedCompact || input.provider === 'chatgpt') {
         throw error;
       }
       planningTokens = Math.floor(planningTokens * 0.75);

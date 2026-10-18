@@ -13,6 +13,7 @@ export type NotesKnownTerm = {
 };
 
 type WriterPromptInput = {
+  maxSourceSpans?: number;
   sourceText: string;
   userNotes: string;
   knownTerms: NotesKnownTerm[];
@@ -139,17 +140,25 @@ export const buildCompactNotesWriterPrompt = ({
   userNotes,
   knownTerms,
   template,
+  maxSourceSpans = 3,
 }: WriterPromptInput): string =>
   [
+    "Start the notes with accepted future commitments: find each speaker's actual promise anywhere in the source, including brief colloquial promises between long discussions. A fragmented 'let me' promise can span adjacent fragments from the same identified speaker; retain all necessary fragments and its condition. Do not substitute an earlier tentative plan, proposed meeting time, or request from somebody else. State each promise close to its source wording as kind action with its actual speaker owner. Only after covering current commitments, summarize other material discussion. Separate uncertain access approval, testing, a later production request and production availability; do not turn an estimate into a promise.",
+    'Track concrete work and scheduling commitments. Routine farewells or saying people will speak later, without a defined topic, task or arrangement, are not action items. A promised call about a specific task or an arranged meeting remains an action.',
+    'Preserve epistemic status: believed, expected, requested and confirmed are distinct. Preserve every prerequisite step and actor in order; an anticipated approval is not a confirmed approval.',
     'You produce compact, source-grounded Pluto meeting-note drafts.',
     notesContentGuidance,
     notesProseGuidance,
-    'Return useful note items and an overall meeting title; code derives overview and heading evidence.',
+    'Return the overall meeting title plus useful note items. Code derives the overview and section-heading evidence; do not substitute the first section heading for the overall title.',
     'Read and account for every source turn: retain material names, numbers, definitions, reasons and current commitments. Later success/fixes retire the matching task and current-failure claims everywhere; keep results, separate unfinished work and conditions. Compact repetition, not facts.',
-    'Every current accepted future commitment belongs in a kind:"action" item, not only a point or summary. A speaker\'s own firm promise ("I will set up the repository", "I\'ll review the results") is acceptance; no second person needs to approve it. Copy that speaker\'s exact name or label into owner. Keep tentative offers, unaccepted requests, reported speech and completed work as discussion.',
-    "For actions/decisions, copy supported owner and due (null when absent). Join an earlier request's scope, recipient, prerequisite and deadline to the later accepting speaker's action; requester is not owner. Keep these in the action text.",
+    'Every current accepted future commitment belongs in a kind:"action" item, not only a point or summary. A speaker\'s own firm promise ("I will set up the repository", "I\'ll review the results") is acceptance; no second person needs to approve it. Copy that speaker\'s exact name or label into owner. Keep tentative offers, unaccepted requests, predictions about another person and completed work as discussion; an explicit source report of their agreement can establish acceptance.',
+    'Read the final turns again before returning: retain every accepted future commitment as an action, even when it is a short scheduling or notification promise after a long discussion. Cite the promise and its condition, not an earlier tentative plan about the same person.',
+    'Keep every duration estimate tied to its stated starting point and endpoint. A total wait that includes approval, testing or provisioning must not become an additional wait after those steps. Preserve prerequisites and uncertainty in discussion points as well as actions; do not invent a relative date or a causal link.',
+    'Fictional writing example, not meeting facts: source "I think the sandbox approval went through. Once validation finishes, we can request live access. All of that should take another two or three working days." becomes "Sandbox approval was believed complete. Validation must finish before live access is requested. The total estimate, including those steps, was another two or three working days." Apply the same fidelity to the actual source; never copy facts from this example.',
+    'Keep scope clarifications and operating expectations as points unless the source explicitly settles a choice. A suggested helper, a request to book a session, or an agreed time without a booking confirmation must not become an accepted assignment or completed booking. Retain material proposed arrangements as discussion points, including their proposed time and unconfirmed booking status; uncertainty changes their classification, not whether they belong in the notes.',
+    'For actions and decisions, copy the supported owner and deadline into owner and due. Use null when absent. Join an earlier request’s scope, recipient, prerequisite and deadline to the later accepting speaker’s action; requester is not owner. Keep the task, recipient, condition and deadline clear in the text itself.',
     'Stay close to source wording in actions and decisions so deterministic evidence checks can verify them. For an explicit "the decision is" statement, use its speaker as owner. A withdrawal or replacement explanation is discussion, not a separate decision, unless the source explicitly settles it as a choice.',
-    'For each item, cite only the 1 to 3 source labels needed to support its exact claim.',
+    `For each item, cite only the 1 to ${maxSourceSpans} source labels needed to support its exact claim.`,
     notesSourceGuidance,
     '',
     `Known terminology hints (entity hints are not trusted corrections): ${termsPacket(knownTerms)}`,
@@ -160,7 +169,10 @@ export const buildCompactNotesWriterPrompt = ({
     sourcePacket(sourceText),
     '',
     'Return compact JSON only using these fields:',
-    compactNotesDraftSchema,
+    compactNotesDraftSchema.replaceAll(
+      'at most 3',
+      `at most ${maxSourceSpans}`,
+    ),
   ].join('\n');
 
 export const buildNotesAuditPrompt = ({

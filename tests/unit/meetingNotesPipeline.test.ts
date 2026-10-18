@@ -7,8 +7,10 @@ import {
   generateMeetingNotes,
 } from '../../electron/llm/meetingNotesPipeline';
 import { buildCompactNotesWriterPrompt } from '../../electron/llm/meetingNotesPrompts';
+import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
 import {
   MeetingNotesError,
+  NOTES_PROMPT_VERSION,
   type NotesDraft,
   type NotesRequest,
 } from '../../electron/llm/meetingNotesTypes';
@@ -119,7 +121,7 @@ it('uses one writer and one complete-document editor without segmentation or a t
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v36',
+    prompt_version: NOTES_PROMPT_VERSION,
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
@@ -718,7 +720,7 @@ it('splits a truncated compact leaf instead of retrying the same packet', async 
       generate,
       provider: 'ollama',
       model: 'gemma4:12b',
-      contextTokens: 8_192,
+      contextTokens: 10_240,
       onRepartition,
     });
 
@@ -1098,77 +1100,98 @@ it('recovers deterministically and records missing_action as advisory when leaf 
   }
 });
 
-it('checks later cancellations across compact leaves before publishing future actions', async () => {
-  const source = makeSyntheticNotesSource([
-    {
-      speaker: 'Milo',
-      text: `I will send the outline. ${'Background. '.repeat(2000)}`,
-    },
-    {
-      speaker: 'Milo',
-      text: `I will not send the outline because the launch was cancelled. ${'Background. '.repeat(2000)}`,
-    },
-  ]);
-  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
-    source.segments.map((segment) => {
-      const span = {
-        segment: segment.index,
-        start: 0,
-        end: segment.text.length,
-      };
-      return {
-        primarySpans: [span],
-        overlapSpans: [],
-        primaryText: segment.text,
-        sourceText: segment.text,
-        sourceRevision: source.revision,
-      };
-    }),
-  );
-  const generate = vi.fn(async (request: NotesRequest) => {
-    const { descriptor: span } = sourceDescriptors(request.prompt)[0]!;
-    return JSON.stringify({
-      title: null,
-      sections: [
-        {
-          title: 'Outline',
-          items: [
-            {
-              kind: span.segment === 0 ? 'action' : 'point',
-              text:
-                span.segment === 0
-                  ? 'Send the outline.'
-                  : 'Milo will not send the outline because the launch was cancelled.',
-              owner: span.segment === 0 ? 'Milo' : null,
-              due: null,
-              sources: [span],
-            },
-          ],
-        },
-      ],
-    });
-  });
-  try {
-    const result = await generateMeetingNotes({
-      source,
-      context: makeNotesContext(),
-      generate,
-      provider: 'ollama',
-      model: 'gemma4:12b',
-      contextTokens: 16384,
-      compactWriterContract: true,
-      hierarchyAuditStrategy: 'deterministic_only',
-    });
-    expect(generate).toHaveBeenCalledTimes(2);
-    expect(result.all_action_items).toEqual([]);
-    expect(JSON.stringify(result.topics)).toContain('launch was cancelled');
-    expect(result.quality.issues).toEqual(
-      expect.arrayContaining([expect.stringContaining('conflicting_action')]),
+it.each(['cancellation', 'completion'])(
+  'keeps later %s authoritative through compact leaves and semantic review',
+  async (resolution) => {
+    const source = makeSyntheticNotesSource([
+      {
+        speaker: 'Milo',
+        text: `I will send the outline. ${'Background. '.repeat(2000)}`,
+      },
+      {
+        speaker: 'Milo',
+        text: `${resolution === 'cancellation' ? 'I will not send the outline because the launch was cancelled.' : 'I have sent the outline. The task is complete.'} ${'Background. '.repeat(2000)}`,
+      },
+    ]);
+    const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+      source.segments.map((segment) => {
+        const span = {
+          segment: segment.index,
+          start: 0,
+          end: segment.text.length,
+        };
+        return {
+          primarySpans: [span],
+          overlapSpans: [],
+          primaryText: segment.text,
+          sourceText: segment.text,
+          sourceRevision: source.revision,
+        };
+      }),
     );
-  } finally {
-    plan.mockRestore();
-  }
-});
+    const generate = vi.fn(async (request: NotesRequest) => {
+      const { descriptor: span } = sourceDescriptors(request.prompt)[0]!;
+      return JSON.stringify({
+        title: null,
+        sections: [
+          {
+            title: 'Outline',
+            items: [
+              {
+                kind: span.segment === 0 ? 'action' : 'point',
+                text:
+                  span.segment === 0
+                    ? 'Send the outline.'
+                    : resolution === 'cancellation'
+                      ? 'Milo will not send the outline because the launch was cancelled.'
+                      : 'Milo sent the outline; the task is complete.',
+                owner: span.segment === 0 ? 'Milo' : null,
+                due: null,
+                sources: [span],
+              },
+            ],
+          },
+        ],
+      });
+    });
+    const semanticGenerate = vi.fn(async () => {
+      throw new Error(
+        'No semantic request is needed for the retained discussion.',
+      );
+    });
+    const review = vi.fn(
+      (notes: Parameters<typeof reviewSourceBoundNotes>[0]) =>
+        reviewSourceBoundNotes(notes, semanticGenerate),
+    );
+    try {
+      const result = await generateMeetingNotes({
+        source,
+        context: makeNotesContext(),
+        generate,
+        provider: 'ollama',
+        model: 'gemma4:12b',
+        contextTokens: 16384,
+        compactWriterContract: true,
+        hierarchyAuditStrategy: 'deterministic_only',
+        reviewSourceBoundNotes: review,
+      });
+      expect(generate).toHaveBeenCalledTimes(2);
+      expect(result.all_action_items).toEqual([]);
+      expect(JSON.stringify(result.topics)).toContain(
+        resolution === 'cancellation'
+          ? 'launch was cancelled'
+          : 'task is complete',
+      );
+      expect(review).toHaveBeenCalledOnce();
+      expect(semanticGenerate).not.toHaveBeenCalled();
+      expect(result.quality.issues).toEqual(
+        expect.arrayContaining([expect.stringContaining('conflicting_action')]),
+      );
+    } finally {
+      plan.mockRestore();
+    }
+  },
+);
 
 it('filters conflicting actions and records missing_action in deterministic_only compact leaves', async () => {
   const text =

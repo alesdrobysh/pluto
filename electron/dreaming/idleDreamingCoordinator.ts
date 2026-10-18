@@ -57,6 +57,7 @@ export const DREAMING_STREAMING_IDLE_TIMEOUT_MS = 2 * 60_000;
 
 export interface IdleDreamingCoordinatorDeps {
   getPolicy: () => IdleDreamingPolicy;
+  getModel?: () => Promise<string | undefined>;
   getNextDirtyEntityId: () => DirtyEntityCandidate | null | undefined;
   packageNotes: (entityId: string) => DreamingInputPackage | null;
   generate: (
@@ -162,6 +163,7 @@ export const createIdleDreamingCoordinator = (
   let activeCandidate: DirtyEntityCandidate | null = null;
   let activeMode: 'automatic' | 'manual' | null = null;
   let unloadPromise: Promise<void> | null = null;
+  let needsModelCleanup = false;
   let closed = false;
   const isEntityType = (value: string): value is DreamingEntityType =>
     value === 'project' || value === 'person';
@@ -178,6 +180,8 @@ export const createIdleDreamingCoordinator = (
   };
 
   const unloadModel = (): Promise<void> => {
+    if (!needsModelCleanup) return unloadPromise ?? Promise.resolve();
+    needsModelCleanup = false;
     const controller = new AbortController();
     const timer = scheduleTimeout(() => controller.abort(), cleanupDeadlineMs);
     try {
@@ -279,6 +283,7 @@ export const createIdleDreamingCoordinator = (
         }
       };
       signal.addEventListener('abort', onAbort, { once: true });
+      needsModelCleanup = true;
       void deps
         .generate(
           request.prompt,
@@ -323,6 +328,11 @@ export const createIdleDreamingCoordinator = (
       }
 
       const request = buildDreamingGenerationRequest(pkg);
+      if (deps.getModel) {
+        const selectedModel = await deps.getModel();
+        if (selectedModel) request.model = selectedModel;
+        signal.throwIfAborted();
+      }
       if (deps.proposalStore) {
         const start = deps.proposalStore.startRun({
           entityId: pkg.entityId,

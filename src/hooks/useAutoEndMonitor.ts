@@ -1,212 +1,202 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MutableRefObject } from 'react';
-import { autoEndDecision } from '../autoEnd/decision';
+import {
+  type MutableRefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import {
+  type DepartureStatus,
+  DEPARTURE_IPC as IPC,
+} from '../../electron/activeCall/departureTypes';
 
-const AUTO_END_POLL_INTERVAL_MS = 5_000;
-const TOAST_AUTO_DISMISS_MS = 30_000;
-
-type UseAutoEndMonitorArgs = {
+type Args = {
   isRecording: boolean;
+  meetingId?: string;
   autoEndEnabled: boolean;
-  stopSessionRef: MutableRefObject<((endReason?: string) => void) | null>;
+  onReopen?: () => void;
+  stopSessionRef: MutableRefObject<
+    ((endReason?: string) => Promise<boolean>) | null
+  >;
 };
 
-type AutoEndState = {
-  autoEndTriggered: boolean;
-  autoEndReason: string | null;
-  autoEndAppName: string | null;
-};
-
+/** UI bridge only: all evidence decisions and stop authorization live in main. */
 export const useAutoEndMonitor = ({
   isRecording,
+  meetingId,
   autoEndEnabled,
+  onReopen,
   stopSessionRef,
-}: UseAutoEndMonitorArgs) => {
-  const [state, setState] = useState<AutoEndState>({
-    autoEndTriggered: false,
-    autoEndReason: null,
-    autoEndAppName: null,
-  });
-
-  const graceTimerRef = useRef<number | null>(null);
-  const graceActiveRef = useRef(false);
-  const trackedAppRef = useRef<string | null>(null);
-  const trackedSourceAppRef = useRef<string | null>(null);
-  const pollInFlightRef = useRef(false);
-  const dismissTimeoutRef = useRef<number | null>(null);
-
-  const clearGraceTimer = useCallback(() => {
-    if (graceTimerRef.current !== null) {
-      window.clearTimeout(graceTimerRef.current);
-      graceTimerRef.current = null;
-    }
-    graceActiveRef.current = false;
-  }, []);
-
+}: Args) => {
+  const [departureStatus, setDepartureStatus] =
+    useState<DepartureStatus | null>(null);
+  const [toast, setToast] = useState<{
+    reason: string;
+    appName: string | null;
+  } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestMeeting = useRef(meetingId);
+  latestMeeting.current = meetingId;
+  const reopenRef = useRef(onReopen);
+  reopenRef.current = onReopen;
   const dismissAutoEndToast = useCallback(() => {
-    setState({
-      autoEndTriggered: false,
-      autoEndReason: null,
-      autoEndAppName: null,
-    });
-    if (dismissTimeoutRef.current !== null) {
-      window.clearTimeout(dismissTimeoutRef.current);
-      dismissTimeoutRef.current = null;
-    }
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = null;
+    setToast(null);
   }, []);
 
   useEffect(() => {
-    if (!isRecording || !autoEndEnabled) {
-      clearGraceTimer();
-      trackedAppRef.current = null;
-      trackedSourceAppRef.current = null;
-      pollInFlightRef.current = false;
+    if (!window.ipcRenderer) return;
+    return window.ipcRenderer.on('MEETING_ENDED_REOPEN', () => {
+      dismissAutoEndToast();
+      reopenRef.current?.();
+    });
+  }, [dismissAutoEndToast]);
+
+  useEffect(() => {
+    if (!isRecording || !meetingId || !autoEndEnabled || !window.ipcRenderer) {
+      setDepartureStatus(null);
       return;
     }
-
     let cancelled = false;
-    let stopRequested = false;
-
-    const poll = async () => {
-      if (pollInFlightRef.current || cancelled || stopRequested) return;
-      pollInFlightRef.current = true;
-
+    let session: DepartureStatus | null = null;
+    let executing: string | null = null;
+    const end = () => {
+      if (session)
+        void window.ipcRenderer.invoke(IPC.end, session).catch(() => {});
+    };
+    const receive = async (status: DepartureStatus) => {
+      if (
+        cancelled ||
+        !status ||
+        status.meetingId !== meetingId ||
+        (session && status.generation !== session.generation)
+      )
+        return;
+      session = status;
+      setDepartureStatus(status);
+      const request = status.stop;
+      if (!request || executing || status.phase !== 'departure_confirmed')
+        return;
+      executing = request.requestId;
       try {
-        const result = trackedSourceAppRef.current
-          ? await window.ipcRenderer.invoke(
-              'DETECT_ACTIVE_CALL',
-              trackedSourceAppRef.current,
-            )
-          : await window.ipcRenderer.invoke('DETECT_ACTIVE_CALL');
-        if (cancelled) return;
-
-        const action = autoEndDecision({
-          poll: {
-            active: Boolean(result?.active),
-            appName:
-              typeof result?.appName === 'string' ? result.appName : null,
-            confidence:
-              result?.confidence === 'high' ||
-              result?.confidence === 'medium' ||
-              result?.confidence === 'low'
-                ? result.confidence
-                : 'low',
-            reason: typeof result?.reason === 'string' ? result.reason : '',
-          },
-          trackedApp: trackedAppRef.current,
-          graceActive: graceActiveRef.current,
-        });
-
-        switch (action.type) {
-          case 'lock_app':
-            trackedAppRef.current = action.appName;
-            trackedSourceAppRef.current =
-              typeof result?.sourceApp === 'string' ? result.sourceApp : null;
-            void window.ipcRenderer.invoke('LOG_AUTO_END_EVENT', {
-              reason_code: 'call_app_locked',
-              app_name: action.appName,
-            });
-            break;
-
-          case 'cancel_grace':
-            console.log('[AutoEnd] Call resumed, cancelling grace timer');
-            void window.ipcRenderer.invoke('LOG_AUTO_END_EVENT', {
-              reason_code: 'grace_cancelled',
-              app_name: trackedAppRef.current,
-            });
-            clearGraceTimer();
-            break;
-
-          case 'start_grace': {
-            clearGraceTimer();
-            const { graceMs, reasonCode } = action;
-            const graceSeconds = Math.round(graceMs / 1000);
-
-            console.log(
-              `[AutoEnd] Call inactive (${reasonCode}), starting ${graceSeconds}s grace period`,
-            );
-            void window.ipcRenderer.invoke('LOG_AUTO_END_EVENT', {
-              reason_code: reasonCode,
-              app_name: trackedAppRef.current,
-              grace_seconds: graceSeconds,
-            });
-
-            graceActiveRef.current = true;
-            const finish = () => {
-              if (cancelled) return;
-              stopRequested = true;
-              graceTimerRef.current = null;
-              graceActiveRef.current = false;
-
-              const endReasonStr = `auto:${reasonCode}`;
-              console.log(
-                `[AutoEnd] Grace expired, ending session (${endReasonStr})`,
-              );
-
-              void window.ipcRenderer.invoke('LOG_AUTO_END_EVENT', {
-                reason_code: 'auto_end_completed',
-                app_name: trackedAppRef.current,
-                grace_seconds: graceSeconds,
-              });
-
-              if (stopSessionRef.current) {
-                stopSessionRef.current(endReasonStr);
-              }
-
-              setState({
-                autoEndTriggered: true,
-                autoEndReason: reasonCode,
-                autoEndAppName: trackedAppRef.current,
-              });
-
-              dismissTimeoutRef.current = window.setTimeout(() => {
-                dismissAutoEndToast();
-              }, TOAST_AUTO_DISMISS_MS);
-            };
-            if (graceMs === 0) {
-              finish();
-            } else {
-              graceTimerRef.current = window.setTimeout(finish, graceMs);
-            }
-            break;
-          }
-
-          case 'no_op':
-            break;
+        const claimed = await window.ipcRenderer.invoke(
+          IPC.claim,
+          status,
+          request.requestId,
+        );
+        if (!claimed) return;
+        if (cancelled || latestMeeting.current !== meetingId) {
+          await window.ipcRenderer.invoke(
+            IPC.acknowledge,
+            status,
+            request.requestId,
+            false,
+          );
+          return;
         }
-      } catch (err) {
-        console.error('[AutoEnd] Poll failed:', err);
+        let released = false;
+        try {
+          const endReason = `auto:${request.reason}${request.provider ? `:${request.provider}` : ''}`;
+          released = (await stopSessionRef.current?.(endReason)) === true;
+        } catch {
+          /* Release failure stays retryable. */
+        }
+        const accepted = await window.ipcRenderer.invoke(
+          IPC.acknowledge,
+          status,
+          request.requestId,
+          released,
+        );
+        if (released && accepted && latestMeeting.current === meetingId) {
+          let external = false;
+          try {
+            external =
+              (await window.ipcRenderer.invoke('SHOW_MEETING_ENDED_ALERT', {
+                reason: request.reason,
+                appName: request.appName,
+              })) === true;
+          } catch {
+            /* Fall back to the in-app notice. */
+          }
+          if (external) {
+            dismissAutoEndToast();
+          } else {
+            setToast({ reason: request.reason, appName: request.appName });
+            if (toastTimer.current) clearTimeout(toastTimer.current);
+            toastTimer.current = setTimeout(
+              () => {
+                toastTimer.current = null;
+                setToast(null);
+              },
+              request.reason === 'calendar_quiet_timeout' ||
+                request.reason === 'calendar_user_confirmed'
+                ? 30_000
+                : 8_000,
+            );
+          }
+        }
+      } catch {
+        /* Next status retries; never announce an unacknowledged stop. */
       } finally {
-        pollInFlightRef.current = false;
+        executing = null;
+        if (cancelled) end();
       }
     };
-
-    void poll();
-    const intervalId = window.setInterval(() => {
-      void poll();
-    }, AUTO_END_POLL_INTERVAL_MS);
-
+    const off = window.ipcRenderer.on(
+      IPC.status,
+      (_event, status: DepartureStatus) => {
+        void receive(status);
+      },
+    );
+    void window.ipcRenderer
+      .invoke(IPC.begin, meetingId)
+      .then((status: DepartureStatus | null) => {
+        if (status && cancelled) {
+          session = status;
+          end();
+        } else if (status) void receive(status);
+      })
+      .catch(() => setDepartureStatus(null));
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
-      clearGraceTimer();
-      trackedAppRef.current = null;
-      trackedSourceAppRef.current = null;
+      off();
+      if (!executing) end();
     };
-  }, [isRecording, autoEndEnabled]);
+  }, [
+    isRecording,
+    meetingId,
+    autoEndEnabled,
+    stopSessionRef,
+    dismissAutoEndToast,
+  ]);
 
-  useEffect(() => {
-    return () => {
-      if (dismissTimeoutRef.current !== null) {
-        window.clearTimeout(dismissTimeoutRef.current);
-      }
-    };
-  }, []);
-
+  useEffect(
+    () => () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+  const selectSource = (sourceId: string) => {
+    if (departureStatus)
+      void window.ipcRenderer.invoke(IPC.select, departureStatus, sourceId);
+  };
+  const keepRecording = () => {
+    if (departureStatus)
+      void window.ipcRenderer.invoke(IPC.keep, departureStatus);
+  };
+  const confirmEnd = () => {
+    if (departureStatus)
+      void window.ipcRenderer.invoke(IPC.endMeeting, departureStatus);
+  };
   return {
-    autoEndTriggered: state.autoEndTriggered,
-    autoEndReason: state.autoEndReason,
-    autoEndAppName: state.autoEndAppName,
+    departureStatus,
+    selectSource,
+    keepRecording,
+    confirmEnd,
+    autoEndTriggered: toast !== null,
+    autoEndReason: toast?.reason ?? null,
+    autoEndAppName: toast?.appName ?? null,
     dismissAutoEndToast,
   };
 };

@@ -13,6 +13,8 @@ import { formatRelativeStartTime } from '../../utils/relativeStartTime';
 const LIFETIME_MS = 15_000;
 
 type AlertData =
+  | { type: 'ended'; detail: string; durationMs: number }
+  | { type: 'calendar-end-check' }
   | {
       type: 'call';
       appName: string;
@@ -45,6 +47,15 @@ const resolveAlertTheme = (
 const getAlertData = (): AlertData => {
   const params = new URLSearchParams(window.location.search);
   const type = params.get('type');
+
+  if (type === 'ended') {
+    return {
+      type: 'ended',
+      detail: (params.get('detail') || 'Recording saved').slice(0, 120),
+      durationMs: params.get('durationMs') === '30000' ? 30_000 : 8_000,
+    };
+  }
+  if (type === 'calendar-end-check') return { type: 'calendar-end-check' };
 
   if (type === 'calendar') {
     const rawTitle = params.get('title');
@@ -86,6 +97,12 @@ const getAlertData = (): AlertData => {
 
 export const ActiveCallAlertWindow = () => {
   const alertData = useMemo(getAlertData, []);
+  const lifetimeMs =
+    alertData.type === 'ended'
+      ? alertData.durationMs
+      : alertData.type === 'calendar-end-check'
+        ? 20_000
+        : LIFETIME_MS;
   const [theme, setTheme] = useState(() => resolveAlertTheme());
   useLayoutEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -104,7 +121,7 @@ export const ActiveCallAlertWindow = () => {
   const rafRef = useRef(0);
   const isPausedRef = useRef(false);
   const pausedAtRef = useRef(0);
-  const deadlineTsRef = useRef(Date.now() + LIFETIME_MS);
+  const deadlineTsRef = useRef(Date.now() + lifetimeMs);
 
   const [relativeTime, setRelativeTime] = useState(() =>
     alertData.type === 'calendar'
@@ -128,6 +145,15 @@ export const ActiveCallAlertWindow = () => {
         action: 'dismiss',
         occurrenceKey: alertData.occurrenceKey,
       });
+    } else if (alertData.type === 'ended') {
+      window.ipcRenderer?.send('MEETING_ENDED_ALERT_ACTION', {
+        action: 'dismiss',
+      });
+    } else if (alertData.type === 'calendar-end-check') {
+      window.ipcRenderer?.send('CALENDAR_END_CHECK_ACTION', {
+        action: 'keep',
+      });
+      return;
     }
     window.close();
   }, [alertData]);
@@ -135,19 +161,19 @@ export const ActiveCallAlertWindow = () => {
   const updateProgress = useCallback(() => {
     const now = Date.now();
     const remainingMs = Math.max(0, deadlineTsRef.current - now);
-    const ratio = Math.max(0, Math.min(1, remainingMs / LIFETIME_MS));
+    const ratio = Math.max(0, Math.min(1, remainingMs / lifetimeMs));
     if (progressBarRef.current) {
       progressBarRef.current.style.transform = `scaleX(${ratio})`;
     }
 
     if (remainingMs <= 0) {
-      handleDismiss();
+      if (alertData.type !== 'calendar-end-check') handleDismiss();
       return;
     }
 
     if (isPausedRef.current) return;
     rafRef.current = window.requestAnimationFrame(updateProgress);
-  }, [handleDismiss]);
+  }, [alertData.type, handleDismiss, lifetimeMs]);
 
   const pauseCountdown = () => {
     if (isPausedRef.current) return;
@@ -198,6 +224,20 @@ export const ActiveCallAlertWindow = () => {
     window.close();
   };
 
+  const handleReopen = () => {
+    window.cancelAnimationFrame(rafRef.current);
+    window.ipcRenderer?.send('MEETING_ENDED_ALERT_ACTION', {
+      action: 'reopen',
+    });
+  };
+
+  const handleCalendarEndNow = () => {
+    window.cancelAnimationFrame(rafRef.current);
+    window.ipcRenderer?.send('CALENDAR_END_CHECK_ACTION', {
+      action: 'end',
+    });
+  };
+
   useEffect(() => {
     rafRef.current = window.requestAnimationFrame(updateProgress);
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -214,15 +254,19 @@ export const ActiveCallAlertWindow = () => {
   }, [handleDismiss, updateProgress]);
 
   const isCalendar = alertData.type === 'calendar';
+  const isEnded = alertData.type === 'ended';
+  const isCalendarEndCheck = alertData.type === 'calendar-end-check';
 
   return (
     <div
       className={`active-call-alert active-call-alert--${isCalendar ? 'calendar' : 'call'} alert-theme--${theme}`}
-      onMouseEnter={pauseCountdown}
-      onMouseLeave={resumeCountdown}
+      onMouseEnter={isCalendarEndCheck ? undefined : pauseCountdown}
+      onMouseLeave={isCalendarEndCheck ? undefined : resumeCountdown}
     >
       <div className="status-icon" aria-hidden="true">
-        {isCalendar ? (
+        {isEnded || isCalendarEndCheck ? (
+          <span aria-hidden="true">✓</span>
+        ) : isCalendar ? (
           alertData.hasLink ? (
             <svg
               viewBox="0 0 24 24"
@@ -261,7 +305,13 @@ export const ActiveCallAlertWindow = () => {
       <div className="left-block">
         <div className="meta">
           <p className="title" title={isCalendar ? alertData.title : undefined}>
-            {isCalendar ? alertData.title : 'Call detected'}
+            {isEnded
+              ? 'Meeting ended'
+              : isCalendarEndCheck
+                ? 'Still in the meeting?'
+                : isCalendar
+                  ? alertData.title
+                  : 'Call detected'}
           </p>
           {isCalendar ? (
             <div className="subtitle-row">
@@ -276,6 +326,16 @@ export const ActiveCallAlertWindow = () => {
                 </>
               )}
             </div>
+          ) : isCalendarEndCheck ? (
+            <div className="app-row">
+              <p className="app">Quiet after calendar end · ending soon</p>
+            </div>
+          ) : isEnded ? (
+            <div className="app-row">
+              <p className="app" title={alertData.detail}>
+                {alertData.detail}
+              </p>
+            </div>
           ) : (
             <div className="app-row">
               <p className="app" title={alertData.appName}>
@@ -286,7 +346,28 @@ export const ActiveCallAlertWindow = () => {
         </div>
       </div>
       <div className="actions">
-        {isCalendar ? (
+        {isCalendarEndCheck ? (
+          <>
+            <button
+              type="button"
+              className="prepare-brief"
+              onClick={handleDismiss}
+            >
+              Keep recording
+            </button>
+            <button
+              type="button"
+              className="take-notes"
+              onClick={handleCalendarEndNow}
+            >
+              End now
+            </button>
+          </>
+        ) : isEnded ? (
+          <button type="button" className="take-notes" onClick={handleReopen}>
+            Reopen
+          </button>
+        ) : isCalendar ? (
           <>
             <button
               type="button"
@@ -318,7 +399,13 @@ export const ActiveCallAlertWindow = () => {
         type="button"
         className="close-alert"
         aria-label={
-          isCalendar ? 'Dismiss meeting prompt' : 'Dismiss call detected alert'
+          isCalendarEndCheck
+            ? 'Keep recording'
+            : isEnded
+              ? 'Dismiss meeting ended alert'
+              : isCalendar
+                ? 'Dismiss meeting prompt'
+                : 'Dismiss call detected alert'
         }
         onClick={handleDismiss}
       >

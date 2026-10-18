@@ -940,6 +940,14 @@ const NoteBlock = ({
             onSaved={onSaved}
           />
         )}
+        {block.assignee || (block.due && !reminderControls) ? (
+          <div className="meeting-note-assignment">
+            {block.assignee ? <span>Owner: {block.assignee}</span> : null}
+            {block.due && !reminderControls ? (
+              <span>Due {block.due}</span>
+            ) : null}
+          </div>
+        ) : null}
         <div className="meeting-note-block__meta">
           {block.blockType === 'review' ? (
             <span>Not included in finished notes</span>
@@ -953,8 +961,6 @@ const NoteBlock = ({
             </span>
           )}
           {block.speaker ? <span>{block.speaker}</span> : null}
-          {block.assignee ? <span>Owner: {block.assignee}</span> : null}
-          {block.due && !reminderControls ? <span>Due {block.due}</span> : null}
           {block.edited ? (
             <span>
               <Pencil aria-hidden="true" size={10} /> Edited

@@ -24,6 +24,7 @@ const SECRET_SETTING_KEYS = new Set([
   'openrouter_api_key',
   'claude_api_key',
   'hf_token',
+  'chatgpt_session',
 ]);
 
 export function isSecretSettingKey(key: string) {

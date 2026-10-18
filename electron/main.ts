@@ -49,6 +49,8 @@ import {
 } from '../src/utils/ollamaModels';
 import { readProjectDisplayTitle } from '../src/utils/projectBriefing';
 import { parseTranscriptSegments } from '../src/utils/transcript';
+import { registerDepartureService } from './activeCall/departureService';
+import type { DepartureSession } from './activeCall/departureTypes';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   AUDIO_STORAGE_BUDGET_SETTING,
@@ -130,6 +132,10 @@ import {
   getProjectFacetKeywords,
   restrictEvidenceToMeetingIds,
 } from './intelligence/askPlutoProjectScopes';
+import {
+  needsSemanticMeetingScope,
+  resolveSemanticMeetingScope,
+} from './intelligence/askPlutoSemanticScope';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import {
@@ -159,6 +165,7 @@ import {
 } from './meetingPrepBrief';
 import {
   canReuseRunningCaptureForProbe,
+  stopNativeAudioProcess,
   waitForNativeAudioPcm,
 } from './nativeAudioCapture';
 import { createNativeSettingsNavigation } from './nativeSettingsNavigation';
@@ -378,6 +385,10 @@ const reportProblemFromMenu = (): void => {
 
 const checkForUpdatesFromMenu = async (): Promise<void> => {
   if (checkingFromMenu || !updateChecker) return;
+  if (updateChecker.isApplying) {
+    focusPrimaryWindow();
+    return;
+  }
   checkingFromMenu = true;
   try {
     const status = await updateChecker.checkForUpdates();
@@ -615,6 +626,11 @@ import {
   createBackgroundKnowledgeRefreshCoordinator,
 } from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
+import { ChatGPTAuth } from './chatgpt/auth';
+import { registerChatGPTHandlers } from './chatgpt/ipc';
+import { getChatGPTUsage, initializeChatGPTAuth } from './chatgpt/runtime';
+import { createChatGPTStorage } from './chatgpt/storage';
+import { ChatGPTUsage } from './chatgpt/usage';
 import { resolveDatabaseStorageMode } from './database/storageSetup';
 import * as db from './db';
 import {
@@ -803,7 +819,7 @@ import {
   getProvider,
   invalidateProviderCache,
 } from './llm/factory';
-import type { CloudProviderId } from './llm/inferenceTypes';
+import type { ApiKeyProviderId } from './llm/inferenceTypes';
 import { createNotesSource } from './llm/meetingNotesSource';
 import {
   MEETING_NOTES_DEFAULT_TEMPLATE_SETTING,
@@ -835,6 +851,7 @@ import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
 } from './recordingReadiness';
+import { createElectronSecureSettingsBackend } from './secureSettings';
 import { isSecretSettingKey } from './secureSettings';
 import { createSpeakerEnrollmentAudio } from './speakerEnrollmentAudio';
 import { buildSpeakerEnrollmentCandidate } from './speakerEnrollmentCandidate';
@@ -1228,12 +1245,18 @@ function abortMeetingTasks(meetingId: string) {
 let stopIdentityReconciliation: (() => void) | undefined;
 let stopVoiceCandidateBackfill: (() => void) | undefined;
 let chatgptConnection: ReturnType<typeof createPlutoMcpConnection> | undefined;
+let stopOwnedAudioForShutdown: () => Promise<unknown> = async () => {};
 const shutdownMainProcessConsumers = async () => {
+  plutoLog.info('Shutdown phase: capture');
+  await stopOwnedAudioForShutdown();
+  plutoLog.info('Shutdown phase: reminders');
   commitmentRemindersStopping = true;
   commitmentReminderNavigation.close();
   await commitmentReminderScheduler?.stop();
   commitmentReminderScheduler = null;
+  plutoLog.info('Shutdown phase: local connection');
   await chatgptConnection?.close();
+  plutoLog.info('Shutdown phase: intelligence');
   for (const controller of activeMeetingTasks.values()) controller.abort();
   activeMeetingTasks.clear();
   for (const task of activeAnalysisGenerations.values())
@@ -1248,15 +1271,20 @@ const shutdownMainProcessConsumers = async () => {
   stopVoiceCandidateBackfill = undefined;
   voiceWorkQueue?.close();
   voiceWorkQueue = null;
-  await idleDreamingCoordinator?.close();
+  plutoLog.info('Shutdown phase: dreaming');
+  const dreamingClose = idleDreamingCoordinator?.close();
+  plutoLog.info('Shutdown phase: model cleanup');
   idleDreamingCoordinator = null;
   scheduleDreamingRun = null;
   dreamingEntityQueue = null;
   stopIdentityReconciliation?.();
   calendarService.stop();
-  await releaseIdleOllamaModel(0).catch(() => {
-    plutoLog.warn('Could not release the local model during shutdown.');
-  });
+  await Promise.all([
+    dreamingClose,
+    releaseIdleOllamaModel(0).catch(() => {
+      plutoLog.warn('Could not release the local model during shutdown.');
+    }),
+  ]);
   plutoLog.info('Shutting down...');
   parakeetFinalClient?.close();
   parakeetFinalClient = null;
@@ -1271,14 +1299,32 @@ const shutdownMainProcessConsumers = async () => {
 app.on(
   'before-quit',
   createBeforeQuitHandler({
+    canQuit: () => !isCaptureActive(),
     shutdownConsumers: shutdownMainProcessConsumers,
     closeDatabase: closeApplicationDatabase,
     quit: () => app.quit(),
+    forceQuit: () => app.exit(0),
     onError: (error) => plutoLog.error('Shutdown failed:', error),
   }),
 );
 
 app.whenReady().then(async () => {
+  const chatGPTAuth = new ChatGPTAuth({
+    ...createChatGPTStorage(createElectronSecureSettingsBackend()),
+    getHostId: () => {
+      const value = db.getSetting('chatgpt_host_id');
+      return typeof value === 'string' ? value : null;
+    },
+    saveHostId: (value) => {
+      db.setSetting('chatgpt_host_id', value);
+    },
+    openBrowser: (url) => shell.openExternal(url),
+  });
+  initializeChatGPTAuth(chatGPTAuth, new ChatGPTUsage(db));
+  registerChatGPTHandlers(ipcMain, chatGPTAuth, db, (url) =>
+    shell.openExternal(url),
+  );
+  app.on('before-quit', () => chatGPTAuth.cancelSignIn());
   registerBugReportHandlers(db.getSetting);
   const requestedEncryptionRollout = process.env[ENCRYPTION_ROLLOUT_ENV];
   const encryptionRollout = resolveEncryptionRolloutPolicy({
@@ -1583,6 +1629,17 @@ app.whenReady().then(async () => {
       console.warn('[Pluto] Voice backfill scan failed', error),
   });
   backgroundKnowledgeRefresh = createBackgroundKnowledgeRefreshCoordinator({
+    ignoreForegroundActivity: () => db.getSetting('llm_provider') === 'chatgpt',
+    canRun: (workId) => {
+      if (
+        db.getSetting('llm_provider') !== 'chatgpt' ||
+        workId.startsWith('voice:')
+      )
+        return true;
+      return workId.startsWith('secondary:')
+        ? getChatGPTUsage().requestsAvailable()
+        : getChatGPTUsage().backgroundAvailable();
+    },
     getPolicy: () => ({
       systemIdleSeconds: powerMonitor.getSystemIdleTime(),
       onBattery: powerMonitor.isOnBatteryPower(),
@@ -1682,7 +1739,10 @@ app.whenReady().then(async () => {
       dreamingEntityQueue?.invalidate(candidate);
       scheduleDreamingRun?.(delayMs);
     },
-    hasPendingWork: () => dreamingEntityQueue?.hasPendingWork() === true,
+    hasPendingWork: () =>
+      dreamingEntityQueue?.hasPendingWork() === true &&
+      (db.getSetting('llm_provider') !== 'chatgpt' ||
+        getChatGPTUsage().backgroundAvailable()),
     generate: async (
       prompt,
       responseSchema,
@@ -1693,10 +1753,16 @@ app.whenReady().then(async () => {
       onStart,
       onProgress,
     ) => {
-      const provider = new UnifiedLLMProvider(
-        'ollama',
-        await getAllSettings(db),
-      );
+      const settings = await getAllSettings(db);
+      const selectedModel =
+        settings.llm_provider === 'chatgpt'
+          ? settings.chatgpt_model
+          : DREAMING_MODEL;
+      if (model !== selectedModel) throw new Error('dreaming_provider_changed');
+      const provider =
+        settings.llm_provider === 'chatgpt'
+          ? await getProvider(settings)
+          : new UnifiedLLMProvider('ollama', settings);
       signal?.throwIfAborted();
       return generateDreamingWithProvider(
         provider,
@@ -1710,11 +1776,16 @@ app.whenReady().then(async () => {
         onProgress,
       );
     },
+    getModel: async () => {
+      const settings = await getAllSettings(db);
+      return settings.llm_provider === 'chatgpt'
+        ? settings.chatgpt_model
+        : undefined;
+    },
     unloadModel: async (signal) => {
-      const provider = new UnifiedLLMProvider(
-        'ollama',
-        await getAllSettings(db),
-      );
+      const settings = await getAllSettings(db);
+      if (settings.llm_provider === 'chatgpt') return;
+      const provider = new UnifiedLLMProvider('ollama', settings);
       await provider.unloadModel(DREAMING_MODEL, signal);
     },
   });
@@ -1802,6 +1873,8 @@ app.whenReady().then(async () => {
     try {
       const failedMeetingIds = db.listMeetingIdsWithFailedSecondary();
       for (const meetingId of failedMeetingIds) {
+        // Restart recovery must not turn old failures into new paid requests.
+        if (db.getSetting('llm_provider') === 'chatgpt') return;
         if (activeTranscriptionCount > 0) {
           scheduleSecondaryRecovery(5_000);
           return;
@@ -2417,6 +2490,21 @@ app.whenReady().then(async () => {
   let nativeAudioProcess: ChildProcess | null = null;
   let nativeAudioOwner: WebContents | null = null;
   let nativeAudioReadiness: Promise<boolean> | null = null;
+  let nativeAudioMeetingId: string | null = null;
+  let nativeAudioStopping = false;
+  let nativeAudioStopPending: Promise<boolean> | null = null;
+  const audioProbes = new Set<ChildProcess>();
+  let probeEpoch = 0;
+  let automaticProbesPaused = false;
+  let lastDetectedSource: string | undefined;
+  let audioShuttingDown = false;
+  const stopAudioProbes = async () => {
+    probeEpoch += 1;
+    const results = await Promise.all(
+      [...audioProbes].map((probe) => stopNativeAudioProcess(probe)),
+    );
+    return results.every(Boolean);
+  };
   const captureSessionLease = createCaptureSessionLeaseRegistry();
   isCaptureActive = () => captureSessionLease.current() !== null;
   const watchedCaptureOwners = new Set<number>();
@@ -2491,23 +2579,61 @@ app.whenReady().then(async () => {
       ? captureDiagnosticSession.report
       : null;
 
-  const stopNativeAudioCapture = () => {
-    const processToStop = nativeAudioProcess;
-    nativeAudioProcess = null;
-    nativeAudioOwner = null;
-    nativeAudioReadiness = null;
-    processToStop?.kill('SIGINT');
+  const stopNativeAudioCapture = (): Promise<boolean> => {
+    if (nativeAudioStopPending) return nativeAudioStopPending;
+    const child = nativeAudioProcess;
+    if (!child) return Promise.resolve(true);
+    nativeAudioStopping = true;
+    const report = captureDiagnosticSession?.report;
+    const pending = stopNativeAudioProcess(child, (event) => {
+      report?.event(event);
+      audioCapLog.info(event);
+    })
+      .then((stopped) => {
+        if (stopped && nativeAudioProcess === child) {
+          nativeAudioProcess = null;
+          nativeAudioOwner = null;
+          nativeAudioMeetingId = null;
+          nativeAudioReadiness = null;
+        }
+        return stopped;
+      })
+      .finally(() => {
+        if (nativeAudioStopPending === pending) {
+          nativeAudioStopPending = null;
+          nativeAudioStopping = nativeAudioProcess === child;
+        }
+      });
+    nativeAudioStopPending = pending;
+    return pending;
+  };
+  stopOwnedAudioForShutdown = async () => {
+    audioShuttingDown = true;
+    automaticProbesPaused = true;
+    const active = captureSessionLease.current();
+    if (active)
+      captureSessionLease.beginCaptureStop(active.meetingId, active.ownerId);
+    await Promise.all([stopNativeAudioCapture(), stopAudioProbes()]);
   };
 
   const watchCaptureOwner = (owner: WebContents) => {
     if (watchedCaptureOwners.has(owner.id)) return;
     watchedCaptureOwners.add(owner.id);
-    owner.once('destroyed', () => {
+    const releaseOwner = () => {
       watchedCaptureOwners.delete(owner.id);
       const ownsNativeAudio = nativeAudioOwner?.id === owner.id;
       const ownsParakeetEou = parakeetEouOwner?.id === owner.id;
-      const released = captureSessionLease.releaseOwner(owner.id);
-      if (ownsNativeAudio) stopNativeAudioCapture();
+      const released = captureSessionLease.activeForOwner(owner.id);
+      if (released)
+        captureSessionLease.beginCaptureStop(released.meetingId, owner.id);
+      automaticProbesPaused = true;
+      void Promise.all([
+        ownsNativeAudio ? stopNativeAudioCapture() : Promise.resolve(true),
+        stopAudioProbes(),
+      ]).then(([stopped]) => {
+        if (stopped && released)
+          captureSessionLease.release(released.meetingId, owner.id);
+      });
       if (ownsParakeetEou) {
         void parakeetEouCoordinator?.fail('parakeet_owner_destroyed');
         parakeetEouOwner = null;
@@ -2524,9 +2650,11 @@ app.whenReady().then(async () => {
         });
         incrementalNotesCoordinator.cancel(released.meetingId);
         knowledgeSynthesisPause.release('capture');
-        captureLog.warn('Released: owner_destroyed');
+        captureLog.warn('Capture owner lost; stopping resources');
       }
-    });
+    };
+    owner.once('destroyed', releaseOwner);
+    owner.once('render-process-gone', releaseOwner);
   };
 
   ipcMain.handle(
@@ -2854,6 +2982,10 @@ app.whenReady().then(async () => {
         calendarOccurrenceKey,
       } = {},
     ) => {
+      if (updateChecker?.isApplying)
+        throw new Error(
+          'An update is in progress. Wait for Pluto to restart before recording.',
+        );
       if (
         captureSessionLease.current() &&
         captureSessionLease.current()?.meetingId !== meetingId
@@ -2952,8 +3084,15 @@ app.whenReady().then(async () => {
         normalizedMeetingId,
         event.sender.id,
       );
-      if (nativeAudioOwner?.id === event.sender.id) {
-        stopNativeAudioCapture();
+      captureSessionLease.beginCaptureStop(
+        normalizedMeetingId,
+        event.sender.id,
+      );
+      if (
+        nativeAudioOwner?.id === event.sender.id &&
+        !(await stopNativeAudioCapture())
+      ) {
+        throw new Error('native_audio_stop_failed');
       }
       if (
         captureDiagnosticSession?.ownerId === event.sender.id &&
@@ -3175,6 +3314,32 @@ app.whenReady().then(async () => {
     },
   );
 
+  ipcMain.handle(
+    'AUDIO_CAPTURE_RELEASE_AFTER_FAILURE',
+    async (event, { meetingId } = {}) => {
+      const active = captureSessionLease.activeForOwner(event.sender.id);
+      if (active?.meetingId !== meetingId || nativeAudioProcess) return false;
+      await stopParakeetLiveRecording(meetingId);
+      if (
+        !captureSessionLease.releaseAfterCaptureStop(meetingId, event.sender.id)
+      )
+        return false;
+      // Preserve the journal unchanged for recovery; this releases runtime ownership only.
+      liveMeetingContextIndex.flush(meetingId);
+      liveMeetingContextIndex.clear(meetingId, { retainCheckpoint: true });
+      incrementalNotesCoordinator.cancel(meetingId);
+      knowledgeSynthesisPause.release('capture');
+      if (
+        captureDiagnosticSession &&
+        captureDiagnosticSession.meetingId === meetingId
+      ) {
+        void captureDiagnosticSession.report.stop();
+        captureDiagnosticSession = null;
+      }
+      return true;
+    },
+  );
+
   ipcMain.handle('AUDIO_CAPTURE_JOURNAL_STOP', async (event, request = {}) => {
     const normalizedMeetingId = String(request.meetingId || '');
     captureSessionLease.requireRecordingOwner(
@@ -3260,6 +3425,13 @@ app.whenReady().then(async () => {
     permissionRequest?: boolean;
   } = {}) => {
     if (
+      audioShuttingDown ||
+      nativeAudioStopping ||
+      (!permissionRequest && automaticProbesPaused)
+    )
+      return false;
+    const epoch = probeEpoch;
+    if (
       canReuseRunningCaptureForProbe(Boolean(nativeAudioProcess), targetPids)
     ) {
       const runningProcess = nativeAudioProcess;
@@ -3295,12 +3467,13 @@ app.whenReady().then(async () => {
     }
 
     return await new Promise<boolean>((resolve) => {
+      if (epoch !== probeEpoch || audioShuttingDown) return resolve(false);
       const probe = spawn(execPath, probeArgs);
+      audioProbes.add(probe);
       let stderr = '';
       const timeout = setTimeout(
         () => {
-          probe.kill('SIGKILL');
-          resolve(false);
+          void stopNativeAudioProcess(probe).then(() => resolve(false));
         },
         permissionRequest
           ? 120_000
@@ -3312,7 +3485,9 @@ app.whenReady().then(async () => {
       });
 
       probe.on('close', (code) => {
+        audioProbes.delete(probe);
         clearTimeout(timeout);
+        if (epoch !== probeEpoch) return resolve(false);
         if (code === 0) return resolve(true);
         if (code === 2) {
           if (!allowSilent) return resolve(false);
@@ -3333,6 +3508,56 @@ app.whenReady().then(async () => {
       });
     });
   };
+
+  let calendarCheckSession: DepartureSession | null = null;
+  const departureService = registerDepartureService({
+    executable: getAudioCapExecPath,
+    getSetting: db.getSetting,
+    setSetting: db.setSetting,
+    getCalendarEvent: (meetingId) => {
+      const linked =
+        db.meetingPrepStore.forMeeting(meetingId)?.event ??
+        db.calendarStore.getPendingRecordingEvent(meetingId) ??
+        db.calendarStore.getMeetingContext(meetingId)?.event;
+      if (!linked) return null;
+      const current = db.calendarStore.getCurrentEvent(linked.occurrenceKey);
+      return current?.calendarIdentifier === linked.calendarIdentifier
+        ? current
+        : null;
+    },
+    onCalendarCheck: (session, active) => {
+      if (active) {
+        calendarCheckSession = {
+          meetingId: session.meetingId,
+          generation: session.generation,
+        };
+        activeCallAlertController.showCalendarEndCheck(
+          db.getSetting('theme') || 'system',
+          win && !win.isDestroyed() ? win.getBounds() : undefined,
+        );
+        return true;
+      }
+      calendarCheckSession = null;
+      activeCallAlertController.closeCalendarEndCheck();
+      return true;
+    },
+    isCalendarCheckVisible: () =>
+      activeCallAlertController.isCalendarEndCheckVisible(),
+    requireRecordingOwner: (meetingId, ownerId) =>
+      captureSessionLease.requireRecordingOwner(meetingId, ownerId),
+    requireCaptureStartOwner: (meetingId, ownerId) =>
+      captureSessionLease.requireCaptureStartOwner(meetingId, ownerId),
+    log: (event) => {
+      try {
+        db.logAutoEndEvent(event);
+      } catch {
+        /* Best effort. */
+      }
+    },
+  });
+  app.once('before-quit', departureService.stop);
+  powerMonitor.on('suspend', departureService.invalidate);
+  powerMonitor.on('resume', departureService.invalidate);
 
   const detectActiveCall = createActiveCallDetector({
     runAudioProbe,
@@ -3356,7 +3581,22 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle('DETECT_ACTIVE_CALL', async (_event, sourceApp: unknown) => {
-    return await detectActiveCall(sourceApp);
+    const result = await detectActiveCall(
+      automaticProbesPaused ? lastDetectedSource : sourceApp,
+    );
+    if (result.sourceApp) lastDetectedSource = result.sourceApp;
+    // A terminal stop dismisses this call. Rearm only after passive closure
+    // evidence or a new user-started recording, never by probing it repeatedly.
+    if (
+      automaticProbesPaused &&
+      !audioShuttingDown &&
+      (result.reason === 'no-call-app-running' ||
+        result.reason === 'browser-call-tab-closed')
+    ) {
+      automaticProbesPaused = false;
+      lastDetectedSource = undefined;
+    }
+    return result;
   });
 
   ipcMain.handle(
@@ -3437,6 +3677,65 @@ app.whenReady().then(async () => {
     return true;
   });
 
+  ipcMain.handle(
+    'SHOW_MEETING_ENDED_ALERT',
+    (event, payload?: { reason?: string; appName?: string }) => {
+      if (!win || win.isDestroyed() || event.sender.id !== win.webContents.id)
+        return false;
+      const reason = payload?.reason;
+      const detail =
+        reason === 'tab_closed'
+          ? 'Meet tab closed'
+          : reason === 'calendar_quiet_timeout' ||
+              reason === 'calendar_user_confirmed'
+            ? 'Calendar ended; no call audio'
+            : reason === 'ui_departure'
+              ? 'Call departure confirmed'
+              : reason === 'app_terminated'
+                ? `${String(payload?.appName || 'Call app').slice(0, 60)} closed`
+                : 'Recording saved';
+      activeCallAlertController.showMeetingEnded(
+        detail,
+        reason === 'calendar_quiet_timeout' ||
+          reason === 'calendar_user_confirmed'
+          ? 30_000
+          : 8_000,
+        db.getSetting('theme') || 'system',
+        win.getBounds(),
+      );
+      return true;
+    },
+  );
+  ipcMain.on(
+    'MEETING_ENDED_ALERT_ACTION',
+    (event, payload?: { action?: string }) => {
+      if (!activeCallAlertController.owns(event.sender.id, 'ended')) return;
+      if (payload?.action === 'reopen' && win && !win.isDestroyed()) {
+        if (!win.isVisible()) win.show();
+        win.focus();
+        win.webContents.send('MEETING_ENDED_REOPEN');
+      }
+      activeCallAlertController.close();
+    },
+  );
+  ipcMain.on(
+    'CALENDAR_END_CHECK_ACTION',
+    (event, payload?: { action?: string }) => {
+      if (
+        !activeCallAlertController.owns(
+          event.sender.id,
+          'calendar-end-check',
+        ) ||
+        !calendarCheckSession
+      )
+        return;
+      if (payload?.action === 'keep')
+        departureService.keepCalendarCheck(calendarCheckSession);
+      else if (payload?.action === 'end')
+        departureService.endCalendarCheck(calendarCheckSession);
+    },
+  );
+
   ipcMain.on(
     'CALENDAR_PROMPT_ALERT_ACTION',
     (
@@ -3479,16 +3778,20 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.handle('NATIVE_AUDIO_START', async (event) => {
-    if (!captureSessionLease.recordingForOwner(event.sender.id)) {
-      captureLog.warn('Native audio rejected: owner_missing');
-      throw new Error('capture_session_not_owned');
-    }
+  ipcMain.handle('NATIVE_AUDIO_START', async (event, { meetingId } = {}) => {
+    captureSessionLease.requireCaptureStartOwner(
+      String(meetingId || ''),
+      event.sender.id,
+    );
+    if (audioShuttingDown || nativeAudioStopping) return false;
+    automaticProbesPaused = false;
     if (nativeAudioProcess) {
       const existingProcess = nativeAudioProcess;
       return (
         nativeAudioOwner?.id === event.sender.id &&
+        nativeAudioMeetingId === meetingId &&
         (await nativeAudioReadiness) === true &&
+        !nativeAudioStopping &&
         nativeAudioProcess === existingProcess
       );
     }
@@ -3513,6 +3816,7 @@ app.whenReady().then(async () => {
       diagnostics?.nativeStarted();
       nativeAudioProcess = spawnedProcess;
       nativeAudioOwner = captureOwner;
+      nativeAudioMeetingId = meetingId;
       const pcmReady = waitForNativeAudioPcm(spawnedProcess);
       nativeAudioReadiness = pcmReady;
 
@@ -3536,13 +3840,15 @@ app.whenReady().then(async () => {
       });
 
       const captureFailed = () => {
-        if (nativeAudioProcess !== spawnedProcess) return;
+        if (nativeAudioProcess !== spawnedProcess || nativeAudioStopping)
+          return;
         diagnostics?.event('native_failed');
         if (!captureOwner.isDestroyed()) {
           captureOwner.send('NATIVE_AUDIO_FAILURE');
         }
         nativeAudioProcess = null;
         nativeAudioOwner = null;
+        nativeAudioMeetingId = null;
         nativeAudioReadiness = null;
       };
       spawnedProcess.on('error', captureFailed);
@@ -3555,13 +3861,12 @@ app.whenReady().then(async () => {
       if (!nativeStarted) {
         audioCapLog.error('AudioCap failed to produce PCM');
         if (nativeAudioProcess === spawnedProcess) {
-          captureFailed();
-          spawnedProcess.kill('SIGINT');
+          await stopNativeAudioCapture();
         }
         return false;
       }
 
-      return nativeAudioProcess === spawnedProcess;
+      return !nativeAudioStopping && nativeAudioProcess === spawnedProcess;
     } catch (e) {
       audioCapLog.error('Failed to spawn audiocap:', e);
       nativeAudioProcess = null;
@@ -3571,19 +3876,57 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle('NATIVE_AUDIO_STOP', async (event) => {
-    if (
-      nativeAudioProcess &&
-      nativeAudioOwner &&
-      nativeAudioOwner.id !== event.sender.id
-    ) {
-      captureLog.warn('Native audio stop rejected: owner_mismatch');
-      return false;
-    }
-    if (nativeAudioProcess) audioCapLog.info('Stopping AudioCap...');
-    stopNativeAudioCapture();
-    return true;
-  });
+  ipcMain.handle(
+    'NATIVE_AUDIO_STOP',
+    async (event, { meetingId, intent } = {}) => {
+      const active = captureSessionLease.activeForOwner(event.sender.id);
+      if (!meetingId) return false;
+      // Startup may fail before acquiring a lease, or a previous stop may
+      // already have released it. Never touch a different live session.
+      if (!captureSessionLease.current() && !nativeAudioProcess) {
+        if (intent === 'recovery') return true;
+        automaticProbesPaused = true;
+        return stopAudioProbes();
+      }
+      if (
+        !meetingId ||
+        (active?.meetingId !== meetingId && nativeAudioMeetingId !== meetingId)
+      )
+        return false;
+      if (nativeAudioOwner && nativeAudioOwner.id !== event.sender.id)
+        return false;
+      if (intent !== 'recovery') {
+        if (active)
+          captureSessionLease.beginCaptureStop(meetingId, event.sender.id);
+        automaticProbesPaused = true;
+      }
+      const [stopped, probesStopped] = await Promise.all([
+        stopNativeAudioCapture(),
+        intent === 'recovery' ? Promise.resolve(true) : stopAudioProbes(),
+      ]);
+      return stopped && probesStopped;
+    },
+  );
+
+  ipcMain.handle(
+    'CAPTURE_STOP_DIAGNOSTIC',
+    (event, { meetingId, code } = {}) => {
+      if (
+        captureDiagnosticSession?.ownerId !== event.sender.id ||
+        captureDiagnosticSession.meetingId !== meetingId
+      )
+        return;
+      if (
+        code === 'capture_stop_requested' ||
+        code === 'capture_released' ||
+        code === 'capture_release_failed' ||
+        code === 'recorder_stop_timeout'
+      ) {
+        captureDiagnosticSession.report.event(code);
+        captureLog.info(code);
+      }
+    },
+  );
 
   ipcMain.handle(
     'AUDIO_SAVE_AND_CONVERT',
@@ -4502,6 +4845,17 @@ app.whenReady().then(async () => {
   ipcMain.handle('DELETE_MEETING', async (_event, id) => {
     try {
       const meetingId = String(id);
+      const activeCapture = captureSessionLease.current();
+      if (activeCapture?.meetingId === meetingId) {
+        captureSessionLease.beginCaptureStop(meetingId, activeCapture.ownerId);
+        automaticProbesPaused = true;
+        const stopped = await Promise.all([
+          stopNativeAudioCapture(),
+          stopAudioProbes(),
+        ]);
+        if (!stopped.every(Boolean))
+          throw new Error('native_audio_stop_failed');
+      }
       const meeting = db.getMeeting(meetingId) as
         | db.PersistedMeeting
         | undefined;
@@ -5614,8 +5968,14 @@ app.whenReady().then(async () => {
           recordBugReportEvent({
             operation: 'project_updates',
             attemptId: diagnosticAttemptId,
-            requiredProvider: 'ollama',
-            requiredModel: DREAMING_MODEL,
+            requiredProvider:
+              db.getSetting('llm_provider') === 'chatgpt'
+                ? 'chatgpt'
+                : 'ollama',
+            requiredModel:
+              db.getSetting('llm_provider') === 'chatgpt'
+                ? String(db.getSetting('chatgpt_model') || '')
+                : DREAMING_MODEL,
             stage: 'prepare_updates',
             entityId: options.entityId,
             outcome:
@@ -5642,8 +6002,14 @@ app.whenReady().then(async () => {
           recordBugReportEvent({
             operation: 'project_updates',
             attemptId: diagnosticAttemptId,
-            requiredProvider: 'ollama',
-            requiredModel: DREAMING_MODEL,
+            requiredProvider:
+              db.getSetting('llm_provider') === 'chatgpt'
+                ? 'chatgpt'
+                : 'ollama',
+            requiredModel:
+              db.getSetting('llm_provider') === 'chatgpt'
+                ? String(db.getSetting('chatgpt_model') || '')
+                : DREAMING_MODEL,
             stage: 'prepare_updates',
             entityId: options.entityId,
             outcome: 'failed',
@@ -6140,7 +6506,7 @@ app.whenReady().then(async () => {
     );
     return next;
   });
-  const parseCloudProvider = (value: unknown): CloudProviderId => {
+  const parseCloudProvider = (value: unknown): ApiKeyProviderId => {
     if (
       value === 'openai' ||
       value === 'openrouter' ||
@@ -6840,7 +7206,9 @@ app.whenReady().then(async () => {
           typeof input === 'string' ? undefined : input.modeOverride,
           { isLocal: isLocalProvider },
         );
-        let recordProgress: ((phase?: 'started' | 'token') => void) | undefined;
+        let recordProgress:
+          | ((phase?: 'queued' | 'started' | 'token') => void)
+          | undefined;
         const meetingHeaders = db.getAskPlutoMeetingHeaders();
         const priorTurns: AskPlutoConversationTurn[] =
           typeof input === 'string' || !Array.isArray(input.priorTurns)
@@ -7001,15 +7369,17 @@ app.whenReady().then(async () => {
         let providerName: string = settings.llm_provider || 'ollama';
         let configuredModel =
           settings.llm_model ||
-          (settings.llm_provider === 'gemini'
-            ? settings.gemini_model
-            : settings.llm_provider === 'openai'
-              ? settings.openai_model
-              : settings.llm_provider === 'openrouter'
-                ? settings.openrouter_model
-                : settings.llm_provider === 'claude'
-                  ? settings.claude_model
-                  : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
+          (settings.llm_provider === 'chatgpt'
+            ? settings.chatgpt_model
+            : settings.llm_provider === 'gemini'
+              ? settings.gemini_model
+              : settings.llm_provider === 'openai'
+                ? settings.openai_model
+                : settings.llm_provider === 'openrouter'
+                  ? settings.openrouter_model
+                  : settings.llm_provider === 'claude'
+                    ? settings.claude_model
+                    : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
           'default';
         let lastValidatedPresentation: SafeAnswerPresentation | undefined;
         let conversationAnchor: string | undefined;
@@ -7173,16 +7543,20 @@ app.whenReady().then(async () => {
             providerRequestedAt = Date.now();
             let streamedAnswer = '';
             try {
+              if (settings.llm_provider === 'chatgpt')
+                recordProgress?.('queued');
               const returnedAnswer = await provider.answerAskPluto(prompt, {
                 signal: controller.signal,
                 mode: 'fast',
                 live: true,
                 onStart: () => {
+                  recordProgress?.('started');
                   providerStartedAt ??= Date.now();
                   sendStatus('writing');
                 },
                 onToken: (delta) => {
                   if (!delta || controller.signal.aborted) return;
+                  recordProgress?.('token');
                   rawFirstTokenAt ??= Date.now();
                   firstTokenAt ??= rawFirstTokenAt;
                   streamedAnswer += delta;
@@ -7268,7 +7642,6 @@ app.whenReady().then(async () => {
             };
           }
           const persistedMeetings = db.getAskPlutoMeetings();
-          sendStatus('scope_resolved');
           sendStatus('retrieving');
           const omissionReview =
             conversationResolution.relation === 'omission_follow_up'
@@ -7338,11 +7711,69 @@ app.whenReady().then(async () => {
             conversationResolution.relation === 'expansion'
               ? `${selfReference.retrievalQuery}\ngo deeper`
               : selfReference.retrievalQuery;
+          const resolveScope = needsSemanticMeetingScope({
+            provider: settings.llm_provider,
+            ...conversationResolution,
+            previousScope: previousAssistantTurn?.resolvedScope,
+            previousTurnMode: previousAssistantTurn?.turnMode,
+          });
+          if (settings.llm_provider === 'chatgpt' && resolveScope)
+            recordProgress?.('queued');
+          const semanticScope = resolveScope
+            ? await resolveSemanticMeetingScope({
+                query: queryText,
+                ...(conversationResolution.relation !== 'new_topic'
+                  ? {
+                      previousQuestion: conversationResolution.priorQuestion,
+                      previousScope: previousAssistantTurn?.resolvedScope,
+                    }
+                  : {}),
+                meetings: meetingHeaders,
+                currentMeetingId: currentMeeting.meetingId,
+                provider: await getProvider(settings),
+                signal: controller.signal,
+                onStart: () => {
+                  recordProgress?.('started');
+                  providerStartedAt ??= Date.now();
+                },
+                onProgress: () => recordProgress?.('token'),
+              })
+            : undefined;
+          if (
+            semanticScope &&
+            (semanticScope.kind === 'ambiguous' ||
+              semanticScope.kind === 'not_found' ||
+              semanticScope.kind === 'unavailable')
+          ) {
+            turnMode = 'clarify';
+            return {
+              status: 'answered' as const,
+              answer:
+                semanticScope.kind === 'not_found'
+                  ? "I couldn't find a meeting matching that reference. Check its title or recording date, or open the meeting and ask there."
+                  : semanticScope.kind === 'ambiguous'
+                    ? 'Which meeting do you mean? Include its recording date and time, or open the meeting and ask there.'
+                    : "I couldn't safely resolve the meeting scope. Open the meeting and ask there.",
+              citations: [],
+              turnMode: 'clarify' as const,
+              retrievalPolicy: 'fresh' as const,
+              outcome: 'no_evidence' as const,
+              resolvedScope: {
+                kind: 'meeting_ids' as const,
+                meetingIds: [],
+                resolvedAt: new Date().toISOString(),
+                source: 'explicit' as const,
+              },
+            };
+          }
+          sendStatus('scope_resolved');
           const parsed = await parseQuery(selfReference.retrievalQuery, {
             signal: controller.signal,
             useModelClassification:
+              settings.llm_provider !== 'chatgpt' &&
               conversationResolution.relation === 'new_topic' &&
               !isExplicitInformationRequest(queryText),
+            ...(semanticScope ? { classification: semanticScope } : {}),
           });
           const assigneeRecall =
             buildAssigneeActionRecall(effectiveQueryText, persistedMeetings) ??
@@ -7490,10 +7921,28 @@ app.whenReady().then(async () => {
               !effectiveProjectRecall &&
               !effectivePersonWorkRecall,
           );
-          const explicitMeetingScope = resolveExplicitMeetingScope(
-            effectiveQueryText,
-            persistedMeetings,
-          );
+          const explicitMeetingScope = semanticScope
+            ? semanticScope.kind === 'single' ||
+              semanticScope.kind === 'multiple'
+              ? {
+                  kind: 'named' as const,
+                  label:
+                    semanticScope.kind === 'single'
+                      ? 'the selected meeting'
+                      : 'the selected meetings',
+                  meetings: semanticScope.meetingIds
+                    .map((id) => db.getAskPlutoMeeting(id))
+                    .filter((meeting): meeting is db.PersistedMeeting =>
+                      Boolean(meeting),
+                    ),
+                }
+              : null
+            : settings.llm_provider === 'chatgpt'
+              ? null
+              : resolveExplicitMeetingScope(
+                  effectiveQueryText,
+                  persistedMeetings,
+                );
           const requestedMode =
             typeof input !== 'string' &&
             (input.modeOverride === 'fast' || input.modeOverride === 'deep')
@@ -7531,8 +7980,11 @@ app.whenReady().then(async () => {
             };
           }
 
-          const currentMeetingRequested =
-            queryReferencesCurrentMeeting(effectiveQueryText);
+          const currentMeetingRequested = semanticScope
+            ? semanticScope.kind === 'current'
+            : settings.llm_provider === 'chatgpt'
+              ? previousAssistantTurn?.resolvedScope?.kind === 'current'
+              : queryReferencesCurrentMeeting(effectiveQueryText);
           const switchesNamedProject =
             projectRecall?.project.matchKind === 'explicit_label' &&
             projectRecall.project.canonicalId !==
@@ -7742,7 +8194,8 @@ app.whenReady().then(async () => {
                 }
               : undefined;
           const usePreparedAssigneeRecall = Boolean(
-            !explicitResolvedScope &&
+            settings.llm_provider !== 'chatgpt' &&
+              !explicitResolvedScope &&
               !temporalResolvedScope &&
               !currentMeetingRequested &&
               !isPlanning &&
@@ -7770,10 +8223,19 @@ app.whenReady().then(async () => {
               retrievalSummary: temporalRetrievalSummary,
             };
           }
-          if (explicitMeetingScope && explicitlyScopedMeetings.length === 0) {
+          if (
+            explicitMeetingScope &&
+            (explicitlyScopedMeetings.length === 0 ||
+              (semanticScope &&
+                explicitlyScopedMeetings.length !==
+                  semanticScope.meetingIds.length))
+          ) {
             return {
               status: 'answered' as const,
-              answer: "I couldn't find any recent meetings.",
+              answer:
+                explicitMeetingScope.kind === 'recent'
+                  ? "I couldn't find any recent meetings."
+                  : `I couldn't load all of ${explicitMeetingScope.label}. Open the meeting and ask there.`,
               citations: [],
               currentMeeting: currentMeetingStatus,
               outcome: 'no_evidence' as const,
@@ -8147,19 +8609,28 @@ app.whenReady().then(async () => {
                   resolvedAt: new Date().toISOString(),
                   source: 'explicit',
                 }
-              : inheritedScope || {
-                  kind:
-                    overviewContextUsed ||
-                    context.length === 0 ||
-                    context.some((result) => result.source_type === 'artifact')
-                      ? 'global'
-                      : 'meeting_ids',
-                  meetingIds: contextMeetings.map(
-                    (result) => result.meeting_id,
-                  ),
-                  resolvedAt: new Date().toISOString(),
-                  source: 'explicit',
-                });
+              : semanticScope?.kind === 'global'
+                ? {
+                    kind: 'global',
+                    meetingIds: [],
+                    resolvedAt: new Date().toISOString(),
+                    source: 'explicit',
+                  }
+                : inheritedScope || {
+                    kind:
+                      overviewContextUsed ||
+                      context.length === 0 ||
+                      context.some(
+                        (result) => result.source_type === 'artifact',
+                      )
+                        ? 'global'
+                        : 'meeting_ids',
+                    meetingIds: contextMeetings.map(
+                      (result) => result.meeting_id,
+                    ),
+                    resolvedAt: new Date().toISOString(),
+                    source: 'explicit',
+                  });
           const baseRetrievalSummary: AskPlutoRetrievalSummary =
             explicitRetrievalSummary ||
               temporalRetrievalSummary || {
@@ -8340,15 +8811,16 @@ app.whenReady().then(async () => {
                   onAnswerPresentation,
                   confirmedSelfName,
                 );
-          const extractiveAnswer = useWorkspaceRecall
-            ? null
-            : usePreparedAssigneeRecall && assigneeRecall
-              ? assigneeRecall.answer
+          const extractiveAnswer =
+            settings.llm_provider === 'chatgpt' || useWorkspaceRecall
+              ? null
               : conversationResolution.relation === 'omission_follow_up' ||
                   conversationResolution.relation === 'expansion' ||
                   selfReference.refersToSelf
                 ? null
-                : buildExtractiveTemporalSummary(effectiveQueryText, context);
+                : usePreparedAssigneeRecall && assigneeRecall
+                  ? assigneeRecall.answer
+                  : buildExtractiveTemporalSummary(effectiveQueryText, context);
           let answerRaw: string;
           if (
             extractiveAnswer &&
@@ -8427,6 +8899,7 @@ app.whenReady().then(async () => {
               `[Pluto] Generating answer via provider: ${provider.name} ...`,
             );
             providerRequestedAt = Date.now();
+            if (settings.llm_provider === 'chatgpt') recordProgress?.('queued');
             answerRaw = await provider.answerAskPluto(prompt, {
               signal: controller.signal,
               mode: reasoningMode,
@@ -9036,13 +9509,15 @@ app.whenReady().then(async () => {
             settings.llm_model ||
             (settings.llm_provider === 'ollama'
               ? settings.ollama_model
-              : settings.llm_provider === 'gemini'
-                ? settings.gemini_model
-                : settings.llm_provider === 'openai'
-                  ? settings.openai_model
-                  : settings.llm_provider === 'openrouter'
-                    ? settings.openrouter_model
-                    : settings.claude_model) ||
+              : settings.llm_provider === 'chatgpt'
+                ? settings.chatgpt_model
+                : settings.llm_provider === 'gemini'
+                  ? settings.gemini_model
+                  : settings.llm_provider === 'openai'
+                    ? settings.openai_model
+                    : settings.llm_provider === 'openrouter'
+                      ? settings.openrouter_model
+                      : settings.claude_model) ||
             'default',
           promptChars: prompt.length,
           elapsedMs: Date.now() - startTime,

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { DEPARTURE_IPC } from '../../../electron/activeCall/departureTypes';
 import type { CalendarIntegrationSnapshot } from '../../../electron/calendar/types';
 import type {
   CloudProviderId,
@@ -42,6 +43,7 @@ import {
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
+import { ChatGPTIntelligenceSettings } from './ChatGPTIntelligenceSettings';
 import { ChatGptConnectionSettings } from './ChatGptConnectionSettings';
 import { IdentitySettings } from './IdentitySettings';
 import { ReportProblemButton } from './ReportProblemButton';
@@ -76,6 +78,7 @@ interface SettingsTabProps {
 
 const providerOptions = [
   { id: 'ollama', name: 'Ollama', detail: 'Local', icon: Cpu },
+  { id: 'chatgpt', name: 'ChatGPT', detail: 'Your plan', icon: Sparkles },
   { id: 'openrouter', name: 'OpenRouter', detail: 'Multi-model', icon: Cloud },
 ] as const;
 
@@ -336,6 +339,10 @@ export const SettingsTab = ({
   >('idle');
   const [browserCallDetectionEnabled, setBrowserCallDetectionEnabled] =
     useState(false);
+  const [departureAccessibility, setDepartureAccessibility] = useState<{
+    enabled: boolean;
+    acceptedProviders: string[];
+  } | null>(null);
   const [automaticCommitmentReminders, setAutomaticCommitmentReminders] =
     useState(true);
   const [commitmentReminderPreviews, setCommitmentReminderPreviews] =
@@ -390,7 +397,19 @@ export const SettingsTab = ({
     void window.ipcRenderer
       .invoke('GET_SETTING', 'browser_call_detection_enabled')
       .then((value) => setBrowserCallDetectionEnabled(value === 'true'));
+    void window.ipcRenderer
+      .invoke(DEPARTURE_IPC.preferences)
+      .then(setDepartureAccessibility)
+      .catch(() => setDepartureAccessibility(null));
   }, []);
+  const updateDepartureAccessibility = (
+    action: 'enable' | 'disable' | 'open',
+  ) => {
+    void window.ipcRenderer
+      .invoke(DEPARTURE_IPC.preferences, action)
+      .then(setDepartureAccessibility)
+      .catch(() => setDepartureAccessibility(null));
+  };
   const [audioRetention, setAudioRetention] =
     useState<AudioRetentionSnapshot | null>(null);
   const [audioRetentionError, setAudioRetentionError] = useState(false);
@@ -512,6 +531,7 @@ export const SettingsTab = ({
   const activateProvider = (provider: ProviderId) => {
     setLlmProvider(provider);
     persistSetting('llm_provider', provider);
+    persistSetting('intelligence_setup_complete', 'true');
   };
 
   const requestProviderActivation = (provider: ProviderId) => {
@@ -1044,7 +1064,7 @@ export const SettingsTab = ({
 
             <SettingsRow
               label="Auto-end recording"
-              helper="Stop automatically when call closure is detected. Quiet breaks and the scheduled end time do not stop recording."
+              helper="Stop on confirmed call departure. For a linked calendar meeting, two minutes after its end with both call audio paths quiet starts a 20-second cancellable warning. Ad-hoc calls and quiet breaks before the calendar end keep recording."
               actionControl
             >
               <Toggle
@@ -1059,7 +1079,7 @@ export const SettingsTab = ({
 
             <SettingsRow
               label="Detect calls in browser tabs"
-              helper="Use browser tabs to recognize meetings and detect when they end. Enabling this asks macOS for permission to control your browser."
+              helper="Use browser tabs to help identify calls. Exact-tab automatic stopping is paused until call identity passes packaged acceptance; macOS may ask for browser Automation permission."
               actionControl
             >
               <Toggle
@@ -1073,6 +1093,30 @@ export const SettingsTab = ({
                   );
                 }}
               />
+            </SettingsRow>
+
+            <SettingsRow
+              label="Inspect call departure with Accessibility"
+              helper="Optional for detecting a post-call screen while the meeting app or tab remains open. UI adapters remain disabled until packaged acceptance."
+              actionControl
+            >
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs underline"
+                  onClick={() => updateDepartureAccessibility('open')}
+                >
+                  Open macOS Settings
+                </button>
+                <Toggle
+                  checked={departureAccessibility?.enabled === true}
+                  onChange={() =>
+                    updateDepartureAccessibility(
+                      departureAccessibility?.enabled ? 'disable' : 'enable',
+                    )
+                  }
+                />
+              </div>
             </SettingsRow>
 
             <SettingsRow
@@ -1196,10 +1240,10 @@ export const SettingsTab = ({
           <Section title="Analysis">
             <SettingsRow
               label="AI Provider"
-              helper="Used for meeting summaries and knowledge extraction."
-              actionControl={false}
+              helper="Used for notes, Ask Pluto, meeting preparation, and connected knowledge."
+              actionControl
             >
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {providerOptions.map((provider) => {
                   const active = llmProvider === provider.id;
                   const Icon = provider.icon;
@@ -1207,8 +1251,9 @@ export const SettingsTab = ({
                     <button
                       key={provider.id}
                       type="button"
+                      aria-pressed={active}
                       onClick={() => requestProviderActivation(provider.id)}
-                      className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-all text-left ${
+                      className={`flex min-w-[108px] items-center gap-2 rounded-lg border px-3 py-2 transition-all text-left ${
                         active
                           ? 'border-pro-accent bg-pro-accent/5 text-pro-text-main shadow-sm ring-1 ring-pro-accent/20'
                           : 'border-pro-border/60 bg-pro-bg text-pro-text-muted hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main'
@@ -1263,6 +1308,13 @@ export const SettingsTab = ({
                   />
                 </SettingsRow>
               </>
+            ) : llmProvider === 'chatgpt' ? (
+              <div className="p-5">
+                <h4 className="mb-3 text-[14px] font-medium text-pro-text-main">
+                  ChatGPT account
+                </h4>
+                <ChatGPTIntelligenceSettings />
+              </div>
             ) : llmProvider === 'openrouter' ? (
               <>
                 <SettingsRow
@@ -1441,9 +1493,10 @@ export const SettingsTab = ({
             <SettingsRow
               label="Pluto Version"
               helper={
-                updateStatus.hasUpdate
+                updateStatus.update?.message ||
+                (updateStatus.hasUpdate
                   ? `Update ${updateStatus.latestVersion} is available. Current version: v${updateStatus.currentVersion || '0.1.0'}.`
-                  : `Pluto is up to date (v${updateStatus.currentVersion || '0.1.0'}).`
+                  : `Pluto is up to date (v${updateStatus.currentVersion || '0.1.0'}).`)
               }
               actionControl
             >
@@ -1551,13 +1604,18 @@ export const SettingsTab = ({
                   id="cloud-consent-title"
                   className="text-lg font-semibold text-pro-text-main"
                 >
-                  Allow cloud inference with {pendingCloudProvider}?
+                  Allow cloud inference with{' '}
+                  {pendingCloudProvider === 'chatgpt'
+                    ? 'ChatGPT'
+                    : pendingCloudProvider}
+                  ?
                 </h2>
                 <p className="mt-3 text-sm leading-6 text-pro-text-muted">
                   Selected transcript excerpts, notes, questions, and relevant
-                  local context may leave this Mac. Audio never leaves. Requests
-                  are stateless, and Pluto remains the only durable memory
-                  store.
+                  local context may leave this Mac, including for background
+                  People and Project updates. Recording and transcription stay
+                  local. Audio never leaves. Requests are stateless, and Pluto
+                  remains the only durable memory store.
                 </p>
                 <div className="mt-6 flex justify-end gap-2">
                   <button

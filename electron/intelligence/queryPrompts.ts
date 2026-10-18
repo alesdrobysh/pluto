@@ -206,12 +206,20 @@ export const getAskPlutoPrompt = (
                 .join(', ')
                 .slice(0, largeScope ? 80 : 200) || 'None';
             const decisions =
-              (projectScopedSection ? undefined : c.mid?.decisions)
+              (projectScopedSection || c.evidence_kind === 'note'
+                ? undefined
+                : c.mid?.decisions
+              )
                 ?.map((d) => d.description)
                 .join('; ')
                 .slice(0, structuredFieldBudget) || 'None';
             const actions =
-              (projectScopedSection ? undefined : c.mid?.action_items)
+              (projectScopedSection ||
+              c.evidence_kind === 'note' ||
+              c.evidence_text.includes('[Owner:')
+                ? undefined
+                : c.mid?.action_items
+              )
                 ?.map((a) => a.description)
                 .join('; ')
                 .slice(0, structuredFieldBudget) || 'None';
@@ -414,8 +422,8 @@ ACTIVE CONVERSATION CONTEXT:
   let prompt = `You are Pluto, a local-first memory assistant. Current UTC date: ${new Date().toISOString().slice(0, 10)}.
 ${identitySection}${disputeSection}${projectSection}${activeConversationSection}${personRecencySection}${otherPersonSection}
 RULES:
-1. Answer factual questions using ONLY the synthesized meeting notes, people profiles, and project profiles in Context. Never invent facts or use raw transcript dialogue. You may synthesize and rephrase this healthy context naturally.
-2. Start with the answer immediately. ${requiresInlineCitations ? 'Add the inline source references required for validation; Pluto removes them before display.' : 'Provenance is attached by Pluto, so do not mention retrieval, grounding, sources, or context labels in the answer.'} Never begin with “Based on the meeting evidence provided” or similar evidence-policy narration.
+1. Answer factual questions using ONLY the synthesized meeting notes, people profiles, and project profiles in Context. Never invent facts or use raw transcript dialogue. You may synthesize and rephrase this healthy context naturally. Keep scope choices, access status, prerequisites, estimates, and confirmed deadlines distinct. Give a reason or causal link only when the notes explicitly connect those facts; nearby blockers do not establish why a choice was made.
+2. Start with the answer immediately. ${requiresInlineCitations ? 'Add the inline source references required for validation; Pluto removes them before display.' : 'Provenance is attached by Pluto in a separate source control. A request to cite the meeting is satisfied by that control: do not append a source sentence or source list to the answer. Do not mention retrieval, grounding, sources, or context labels in the answer.'} Never begin with “Based on the meeting evidence provided” or similar evidence-policy narration.
 3. ${
     requiresInlineCitations
       ? 'Do not add headings. Cite every factual sentence with the smallest set of directly supporting [Source N] references.'
@@ -425,7 +433,7 @@ RULES:
           ? 'Use short paragraphs, with bullets or brief bold labels only if they make the priorities easier to follow. Do not fill a fixed template or include source/context markers.'
           : 'Do not add headings unless the user asks for a detailed breakdown. Do not include source or context markers in the answer.'
   }
-4. Use names rather than guessing gender or pronouns. Preserve source boundaries: do not transfer a fact between people, projects, or initiatives merely because both appear in Context or conversation. Attribute speech, decisions, requests, expectations, and ownership only when the same synthesized passage explicitly names the person. Participation or second-person wording does not prove ownership. For inferred expectations, say “My interpretation is…” rather than “they expect”.
+4. Use names rather than guessing gender or pronouns. Express recorded ownership naturally (for example, “Riley: Send the checklist by Monday”), without copying [Owner: ...] or [Due: ...] evidence labels into the answer. Preserve every recorded owner and deadline: Me means the user (say “you”), while Remote Speaker N is an unidentified but distinct recorded owner (say “Remote Speaker N, name unconfirmed”). Do not replace these with an unnamed speaker or infer a real name from nearby discussion. Preserve source boundaries: do not transfer a fact between people, projects, or initiatives merely because both appear in Context or conversation. Attribute speech, decisions, requests, expectations, and ownership only when the same synthesized passage explicitly names the person. Participation or second-person wording does not prove ownership. For inferred expectations, say “My interpretation is…” rather than “they expect”.
 5. Treat source dates as the age of the information, not proof that an old status is still current. Relative deadlines such as “next Tuesday” are relative to the source's occurrence date, not today; if that target is already past, call it an earlier target or omit it. For priorities and recommendations, separate Pluto's judgment from recorded facts and prefer fresher matching updates.
 6. User corrections constrain what the user says is wrong. Never cite a user correction as meeting evidence. When the user asks for advice, distinguish your judgment from recorded facts in natural language; do not imply the source discussed your recommendation.
 
@@ -479,7 +487,7 @@ CITATION RULES:
 
 RESPONSE CONTRACT:
 ${formatGuidance}
-Address each part of the question using only supported names, dates, numbers, decisions, owners and next steps. State which requested part cannot be confirmed by this search, without claiming the underlying source lacks it. Name your interpretation of ambiguous terms; do not replace a missing answer with adjacent project history.
+Address each part of the question using only supported names, dates, numbers, decisions, owners and next steps. State which requested part cannot be confirmed by this search, without claiming the underlying source lacks it. A recorded speaker label establishes the recorded owner even when their real name is unconfirmed; do not describe that ownership as unknown merely because no real name is available. Name your interpretation of ambiguous terms; do not replace a missing answer with adjacent project history.
 To evaluate someone’s performance, first establish what result and criterion the notes record. If either is missing, answer with that limit and the concrete work actually recorded; do not substitute participation, delivery or discussion for evidence of quality, initiative or ability. Where both are recorded, give the bounded result. Connect related details in natural, self-contained prose.
 ${responseLimit}\n\nUser Query: ${query}${personQuestionFraming}`;
   return prompt;

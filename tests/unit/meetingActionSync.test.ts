@@ -618,3 +618,148 @@ it('rolls back completion if source edits cannot be safely read', () => {
   expect(getEntity('action-corrupt-completion')?.status).toBe('active');
   expect(getMeeting(meetingId)?.user_edits_json).toBe('{broken');
 });
+
+describe('corrected saved evidence for pending dashboard suggestions', () => {
+  const evidence =
+    'I will arrange time with Rowan depending on how the plan feels.';
+  const staleText = 'Schedule time with Rowan today or tomorrow';
+  const correctedText =
+    'Arrange time with Rowan depending on how the plan feels';
+  const seed = (
+    suffix: string,
+    metadata: Record<string, unknown> = {},
+    due?: string,
+  ) => {
+    const meetingId = `corrected-dashboard-${suffix}`;
+    saveMeeting({
+      id: meetingId,
+      title: 'Fictional planning meeting',
+      started_at: '2026-10-15T12:00:00Z',
+      analysis_json: JSON.stringify({
+        all_action_items: [
+          {
+            text: correctedText,
+            assignee: 'Me',
+            evidence,
+            ...(due ? { due } : {}),
+          },
+        ],
+      }),
+    });
+    const entity = upsertEntity({
+      id: `corrected-action-${suffix}`,
+      type: 'action_item',
+      name: staleText,
+      status: 'active',
+      due_date: '2026-10-16',
+      dedupe_by_name: false,
+      metadata: {
+        origin: 'extraction',
+        commitment_state: 'possible',
+        source_meeting_id: meetingId,
+        source_path: 'all_action_items:0',
+        source_index: 0,
+        full_description: staleText,
+        original_description: staleText,
+        assignee_name: 'Remote Speaker 2',
+        source_due_date: 'tomorrow',
+        source_evidence: evidence,
+        ...metadata,
+      },
+    });
+    return { meetingId, entity };
+  };
+
+  it('repairs saved text, owner and unsupported deadline at startup without generation', () => {
+    const { entity, meetingId } = seed('startup');
+    const before = getMeeting(meetingId);
+    syncAllMeetingActionEntitiesFromUserEdits(db);
+    const updated = getEntity(entity.id)!;
+    expect(updated.name).toBe(correctedText);
+    expect(updated.due_date).toBeNull();
+    expect(parseActionMetadata(updated.metadata)).toMatchObject({
+      full_description: correctedText,
+      original_description: correctedText,
+      assignee_name: 'Me',
+      source_evidence: evidence,
+      commitment_state: 'possible',
+    });
+    expect(getMeeting(meetingId)).toEqual(before);
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(0);
+  });
+
+  it('keeps a corrected suggestion anchored when the user later completes it', () => {
+    const { entity, meetingId } = seed('corrected-completion');
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    updateEntityStatus(entity.id, 'completed');
+    const edits = JSON.parse(getMeeting(meetingId)!.user_edits_json || '{}');
+    expect(edits['completion:all_action_items:0']?.edited).toBe('true');
+    expect(getEntity(entity.id)?.status).toBe('completed');
+    expect(
+      parseActionMetadata(getEntity(entity.id)?.metadata ?? null)
+        .original_description,
+    ).toBe(correctedText);
+  });
+
+  it('does not move a completion edit through an evidence-only wording match', () => {
+    const { entity, meetingId } = seed('completion-blocks-rebinding');
+    db.prepare('UPDATE meetings SET user_edits_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        'completion:all_action_items:0': { original: 'false', edited: 'true' },
+      }),
+      meetingId,
+    );
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(entity.id)?.name).toBe(staleText);
+    expect(getEntity(entity.id)?.status).toBe('active');
+  });
+
+  it('uses the existing deadline rules when a corrected due date is recorded', () => {
+    const { entity, meetingId } = seed('due', {}, 'monday');
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(entity.id)?.due_date).toBe('2026-10-19');
+  });
+
+  it.each([
+    ['confirmed', { commitment_state: 'confirmed' }],
+    ['rejected', { commitment_state: 'rejected' }],
+    ['edited', { user_edited: true }],
+    ['different-evidence', { source_evidence: 'An unrelated promise.' }],
+  ])('preserves %s records', (suffix, metadata) => {
+    const { entity, meetingId } = seed(suffix, metadata);
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(entity.id)?.name).toBe(staleText);
+    expect(getEntity(entity.id)?.due_date).toBe('2026-10-16');
+  });
+
+  it('preserves a user-corrected owner while refreshing pending source wording', () => {
+    const { entity, meetingId } = seed('owner', {
+      owner_source: 'user',
+      assignee_name: 'Rowan',
+    });
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(
+      parseActionMetadata(getEntity(entity.id)?.metadata ?? null).assignee_name,
+    ).toBe('Rowan');
+  });
+
+  it('keeps an explicit note edit while correcting the pending deadline and owner', () => {
+    const { entity, meetingId } = seed('note-edit');
+    db.prepare('UPDATE meetings SET user_edits_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        'all_action_items:0': {
+          original: correctedText,
+          edited: 'Arrange the planning session with Rowan',
+        },
+      }),
+      meetingId,
+    );
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(entity.id)?.name).toBe(
+      'Arrange the planning session with Rowan',
+    );
+    expect(getEntity(entity.id)?.due_date).toBeNull();
+  });
+});

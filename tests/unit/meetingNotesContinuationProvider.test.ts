@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { runWithLocalInferenceCoordinator } from '../../electron/llm/inferenceCoordinator';
 import type { CompletedWriter } from '../../electron/llm/meetingNotesContinuation';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import * as transport from '../../electron/llm/ollamaHttpTransport';
@@ -303,4 +304,34 @@ it('releases the owned model on shutdown without waiting for the idle interval',
   await provider.generateTitle('Outline discussion');
   await releaseIdleOllamaModel(0);
   expect(bodies.filter((body) => body.keep_alive === 0)).toHaveLength(1);
+});
+
+it('bounds shutdown cleanup while it is still waiting behind local inference', async () => {
+  await electronProvider().generateTitle('Outline discussion');
+  let finish!: () => void;
+  let entered = false;
+  const blocker = runWithLocalInferenceCoordinator({
+    key: Symbol('busy-local-work'),
+    task: 'entities',
+    workClass: 'meeting_secondary',
+    run: async () => {
+      entered = true;
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    },
+  });
+  await vi.waitFor(() => expect(entered).toBe(true));
+  const deadline = new AbortController();
+  const timeout = vi
+    .spyOn(AbortSignal, 'timeout')
+    .mockReturnValue(deadline.signal);
+  const cleanup = releaseIdleOllamaModel(0);
+  const rejected = expect(cleanup).rejects.toThrow('Cleanup deadline');
+  expect(timeout).toHaveBeenCalledWith(5_000);
+  deadline.abort(new DOMException('Cleanup deadline', 'TimeoutError'));
+  await rejected;
+  finish();
+  await blocker;
+  expect(bodies.filter((body) => body.keep_alive === 0)).toHaveLength(0);
 });

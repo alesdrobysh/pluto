@@ -41,7 +41,7 @@ and follow-ups that matter.
   correct them when needed, so you can follow who said what.
 - **Record without a bot.** Capture your microphone and Mac’s audio directly,
   then review transcripts, notes, and next steps.
-- **Choose where AI runs.** Use local models through Ollama or an optional cloud provider.
+- **Choose where AI runs.** Use Ollama locally or sign in with ChatGPT to use your plan for intelligence.
 - **Bring notes into ChatGPT.** Enable the optional connection on the same Mac.
   [See what’s shared →](#privacy)
 
@@ -73,7 +73,16 @@ curl -fsSL https://raw.githubusercontent.com/metagrover/pluto/master/scripts/ins
 Wait for Pluto to install and open. Follow setup to download its speech models
 and allow microphone and system audio access. Calendar access is optional.
 
-### 2. Set up Ollama
+### 2. Choose your intelligence provider
+
+During setup, choose **Ollama** or **ChatGPT**. Pluto remembers your choice;
+recording and transcription stay on your Mac with either provider.
+
+**ChatGPT:** choose **Continue with ChatGPT**, review the text-sharing and
+plan-usage disclosure, and complete browser sign-in. Usage protection is enabled
+by default. [Connection and usage details →](docs/chatgpt-intelligence.md)
+
+**Ollama:** follow the local model setup below.
 
 [Download Ollama for Mac](https://ollama.com/download/mac), move it into
 **Applications**, and open it. Follow its prompt to enable the `ollama` Terminal
@@ -84,12 +93,12 @@ ollama pull gemma4:12b && ollama pull phi4-mini:3.8b
 ```
 
 Wait for both downloads to finish. Pluto’s speech models handle transcription;
-Ollama’s models handle notes and chat. New Pluto setups use Ollama and these
-models by default—no settings to enter.
+Ollama’s models handle notes and chat when you choose Ollama—no model settings
+to enter. Existing users keep their provider after updating.
 
 ### 3. Try your first recording
 
-Keep Ollama running and open Pluto. Let everyone know you’re recording, then
+If using Ollama, keep it running. Open Pluto, let everyone know you’re recording, then
 click **New meeting** and start a short recording. Stop and wait for Pluto to
 finish generating notes, then open the meeting to review them and ask questions.
 
@@ -172,6 +181,7 @@ sharing. Keep private meeting content and credentials out of public issues.
 
 See the [developer guide](docs/dev.md) to run Pluto from source and the
 [architecture overview](docs/architecture.md) to explore the codebase.
+The [documentation index](docs/README.md) links to the current guides.
 Bug reports and focused pull requests are welcome. Browse the
 [releases](https://github.com/metagrover/pluto/releases) for downloads and changes.
 
