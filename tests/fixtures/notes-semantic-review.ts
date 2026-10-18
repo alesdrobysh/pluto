@@ -1236,6 +1236,88 @@ export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
       forbidden: [],
     },
   },
+  {
+    id: 'affirmative-alternative-selected',
+    lines: [
+      {
+        speaker: 'Tarin',
+        text: 'The release packaging options are a single installer or separate helper downloads.',
+      },
+      {
+        speaker: 'Veya',
+        text: 'We choose the single installer. Separate helper downloads are rejected for this release.',
+      },
+      {
+        speaker: 'Tarin',
+        text: 'That choice is confirmed. There is no implementation assignment in this discussion.',
+      },
+    ],
+    claim: {
+      kind: 'point',
+      text: 'Both packaging options remain undecided.',
+      owner: null,
+      due: null,
+    },
+    expected: {
+      maxActionItems: 0,
+      maxDecisionItems: 1,
+      kinds: ['decision'],
+      owner: null,
+      due: null,
+      required: [
+        'single installer',
+        'separate helper downloads',
+        'this release',
+      ],
+      forbidden: ['remain undecided'],
+      evidence: [
+        { lineIndex: 1, quote: 'We choose the single installer' },
+        {
+          lineIndex: 1,
+          quote: 'Separate helper downloads are rejected for this release',
+        },
+      ],
+    },
+  },
+  {
+    id: 'affirmative-retain-and-defer',
+    lines: [
+      {
+        speaker: 'Yannis',
+        text: 'Should we replace the alerting policy or keep it during the review?',
+      },
+      {
+        speaker: 'Della',
+        text: 'We have decided to retain the current alerting policy until the review ends. We are deferring the replacement.',
+      },
+      {
+        speaker: 'Yannis',
+        text: 'Agreed. Nobody is assigned replacement work.',
+      },
+    ],
+    claim: {
+      kind: 'decision',
+      text: 'Replace the alerting policy immediately.',
+      owner: null,
+      due: null,
+    },
+    expected: {
+      maxActionItems: 0,
+      maxDecisionItems: 1,
+      kinds: ['decision'],
+      owner: null,
+      due: null,
+      required: ['current alerting policy', 'review', 'replacement'],
+      forbidden: ['immediately', 'permanently cancelled'],
+      evidence: [
+        {
+          lineIndex: 1,
+          quote: 'retain the current alerting policy until the review ends',
+        },
+        { lineIndex: 1, quote: 'We are deferring the replacement' },
+      ],
+    },
+  },
 ];
 
 // Pair uncertain intentions with definite promises; do not infer acceptance from ambiguous speech.

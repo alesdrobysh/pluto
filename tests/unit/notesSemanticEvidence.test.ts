@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import {
+  acceptEditedNotes,
+  projectAuditedNotes,
+} from '../../electron/llm/meetingNotesAudit';
+import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type { NotesItem } from '../../electron/llm/meetingNotesTypes';
 import { notesSemanticReviewCases } from '../fixtures/notes-semantic-review';
@@ -153,7 +158,7 @@ describe('fictional semantic evidence requirements', () => {
     const cases = notesSemanticReviewCases.filter(
       (row) => row.expected.evidence,
     );
-    expect(cases).toHaveLength(7);
+    expect(cases).toHaveLength(9);
     for (const gold of cases) {
       const source = createNotesSource(JSON.stringify(gold.lines));
       const item: NotesItem = {
@@ -224,7 +229,7 @@ describe('semantic collection oracle', () => {
       ).toThrow('invalid_gold_action_limit');
   });
   it('declares source-audited action bounds and source-absent forbidden wording for all gold cases', () => {
-    expect(notesSemanticReviewCases).toHaveLength(50);
+    expect(notesSemanticReviewCases).toHaveLength(52);
     for (const gold of notesSemanticReviewCases) {
       expect(Number.isInteger(gold.expected.maxActionItems)).toBe(true);
       expect(gold.expected.maxActionItems).toBeGreaterThanOrEqual(0);
@@ -390,7 +395,7 @@ describe('source-audited decision bounds', () => {
   });
 
   it('declares a decision limit for every source case, including both derived definite promises', () => {
-    expect(notesSemanticReviewCases).toHaveLength(50);
+    expect(notesSemanticReviewCases).toHaveLength(52);
     for (const gold of notesSemanticReviewCases) {
       expect(Number.isInteger(gold.expected.maxDecisionItems)).toBe(true);
       expect(gold.expected.maxDecisionItems).toBeGreaterThanOrEqual(0);
@@ -399,6 +404,128 @@ describe('source-audited decision bounds', () => {
       notesSemanticReviewCases
         .filter((row) => row.expected.maxDecisionItems > 0)
         .map((row) => [row.id, row.expected.maxDecisionItems]),
-    ).toEqual([['revised-deadline', 1]]);
+    ).toEqual([
+      ['revised-deadline', 1],
+      ['affirmative-alternative-selected', 1],
+      ['affirmative-retain-and-defer', 1],
+    ]);
   });
+});
+
+const positiveDecisionCases = [
+  {
+    id: 'affirmative-alternative-selected',
+    text: 'Choose the single installer for this release and reject separate helper downloads.',
+  },
+  {
+    id: 'affirmative-retain-and-defer',
+    text: 'Retain the current alerting policy until the review ends and defer replacement.',
+  },
+];
+
+describe('affirmative decision recall fixtures', () => {
+  it.each(positiveDecisionCases)(
+    'preserves the corrected decision and source evidence through review and projection: $id',
+    async ({ id, text }) => {
+      const gold = notesSemanticReviewCases.find((row) => row.id === id)!;
+      expect(gold.expected.kinds).toEqual(['decision']);
+      expect(gold.expected.maxActionItems).toBe(0);
+      expect(gold.expected.maxDecisionItems).toBe(1);
+      const notesSource = createNotesSource(JSON.stringify(gold.lines));
+      const sources = notesSource.segments.map((segment) => ({
+        segment: segment.index,
+        start: 0,
+        end: segment.text.length,
+      }));
+      const draft = {
+        title: null,
+        meetingType: 'general' as const,
+        overview: null,
+        sections: [
+          {
+            id: 'section',
+            title: { id: 'heading', text: 'Review', sources },
+            items: [{ id: 'claim-0', ...gold.claim, sources }],
+          },
+        ],
+      };
+      const replay = async (kind: 'settled_choice' | 'point' | null) => {
+        let callbacks = 0;
+        const reviewed = await reviewSourceBoundNotes(
+          acceptEditedNotes({
+            source: notesSource,
+            draft,
+            acceptancePolicy: 'conservative',
+          }),
+          async ({ prompt }) => {
+            callbacks++;
+            const data = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
+            return JSON.stringify({
+              reviews:
+                kind === null
+                  ? {}
+                  : {
+                      I0: {
+                        kind,
+                        text,
+                        owner: null,
+                        due: null,
+                        sources: data.source.map((row: string[]) => row[0]),
+                      },
+                    },
+              additions: [],
+              overview: null,
+            });
+          },
+        );
+        expect(callbacks).toBe(1);
+        return reviewed;
+      };
+      const reviewed = await replay('settled_choice');
+      const decision = reviewed.draft.sections
+        .flatMap((section) => section.items)
+        .find((entry) => entry.id === 'claim-0')!;
+      expect(decision).toMatchObject({
+        kind: 'decision',
+        text,
+        owner: null,
+        due: null,
+      });
+      expect(
+        scoreNotesSemanticEvidence(
+          notesSource,
+          decision,
+          'claim-0',
+          gold.expected.evidence!,
+        ),
+      ).toEqual([]);
+      expect(scoreNotesSemanticCollection([decision], gold.expected)).toEqual(
+        [],
+      );
+      const projected = projectAuditedNotes(reviewed);
+      expect(projected.all_decisions).toHaveLength(1);
+      expect(projected.all_decisions[0]?.text).toBe(text);
+      expect(projected.all_action_items).toEqual([]);
+      expect(
+        projected.generation_metadata?.source_provenance?.blocks[
+          'all_decisions:0'
+        ],
+      ).toEqual({ id: 'claim-0', sources });
+
+      // Upper decision bounds alone do not require recall: the source case's
+      // primary kind must be a decision, and projection must expose it.
+      const suppressed = projectAuditedNotes(await replay('point'));
+      expect(suppressed.all_decisions).toEqual([]);
+      const omitted = await replay(null);
+      expect(omitted.issues).toContain('semantic_notes_review_unavailable');
+      expect(
+        scoreNotesSemanticEvidence(
+          notesSource,
+          undefined,
+          'claim-0',
+          gold.expected.evidence!,
+        ),
+      ).toEqual(['original_claim_missing']);
+    },
+  );
 });
