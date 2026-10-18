@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -191,4 +191,69 @@ esac
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('signed CI validation fails closed without credentials and cannot publish', () => {
+  const workflow = readFileSync(
+    resolve('.github/workflows/release.yml'),
+    'utf8',
+  );
+  const step = workflow
+    .split(
+      '      - name: Require signing credentials for signed validation\n',
+    )[1]
+    .split('      - name: ')[0];
+  const script = step
+    .split('        run: |\n')[1]
+    .split('\n')
+    .map((line) => line.slice(10))
+    .join('\n');
+  const keys = [
+    'CSC_LINK',
+    'CSC_KEY_PASSWORD',
+    'APPLE_ID',
+    'APPLE_APP_SPECIFIC_PASSWORD',
+    'APPLE_TEAM_ID',
+  ];
+  const empty = Object.fromEntries(keys.map((key) => [key, '']));
+  const absent = spawnSync('bash', ['-c', script], {
+    env: empty,
+    encoding: 'utf8',
+  });
+  assert.equal(absent.status, 1);
+  assert.ok(
+    absent.stderr.includes('Missing required signing credential: CSC_LINK'),
+  );
+  const provided = Object.fromEntries(
+    keys.map((key) => [key, 'fictional-secret']),
+  );
+  const accepted = spawnSync('bash', ['-c', script], {
+    env: provided,
+    encoding: 'utf8',
+  });
+  assert.equal(accepted.status, 0);
+  assert.equal(accepted.stdout + accepted.stderr, '');
+  for (const key of keys) {
+    const missingOne = spawnSync('bash', ['-c', script], {
+      env: { ...provided, [key]: '' },
+      encoding: 'utf8',
+    });
+    assert.equal(missingOne.status, 1);
+    assert.ok(missingOne.stderr.includes(key));
+    assert.ok(!missingOne.stderr.includes('fictional-secret'));
+  }
+  assert.ok(
+    workflow.includes(
+      '--publish never --config.forceCodeSigning=true --config.mac.hardenedRuntime=true --config.mac.notarize=true',
+    ),
+  );
+  assert.ok(
+    workflow.includes('spctl --assess --type execute --verbose=2 "$APP"'),
+  );
+  assert.ok(workflow.includes('xcrun stapler validate "$APP"'));
+  assert.ok(
+    workflow.includes(
+      "if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')",
+    ),
+  );
 });

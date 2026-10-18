@@ -42,7 +42,13 @@ that SHA, repeats packaging checks, and publishes the installer and
 Requires Node, pnpm, Git, and an authenticated GitHub CLI with repository Contents
 write, Pull requests write, and Actions read/write access. Builds run on GitHub.
 Never bypass required checks, force-push a release tag, or manually tag unverified
-code. The current pipeline uses ad-hoc signing, not Developer ID or notarization.
+code. The default pipeline uses ad-hoc signing. A nonpublishing workflow dispatch with
+`signed_validation=true` instead requires Developer ID signing and notarization,
+then verifies Gatekeeper acceptance and the stapled ticket. It fails if signing
+credentials are absent; it never falls back to an ad-hoc success. Configure
+`MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` as repository secrets before
+using this mode. A successful ad-hoc build does not satisfy signed validation.
 Packaged recording, permissions, and real upgrades still require manual acceptance;
 model preparation and automated tests do not establish those outcomes.
 

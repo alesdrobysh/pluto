@@ -4,9 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       expected_sha:
-        description: Exact master commit to verify before tagging
+        description: Exact commit to verify without publishing
         required: true
         type: string
+      signed_validation:
+        description: Require Developer ID signing and Apple notarization (never publishes)
+        required: false
+        default: false
+        type: boolean
   pull_request:
     types: [opened, reopened, synchronize, labeled, unlabeled]
   push:
@@ -49,6 +54,19 @@ jobs:
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Require signing credentials for signed validation
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_validation
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for KEY in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            test -n "${!KEY}" || { echo "Missing required signing credential: $KEY" >&2; exit 1; }
+          done
 
       - name: Verify release toolchain and version
         run: |
@@ -94,15 +112,31 @@ jobs:
 
       - name: Build and Package DMG
         env:
-          # In unsigned mode, electron-builder packages an ad-hoc / unsigned DMG
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          # PR installer checks need the same ad-hoc signature as tagged builds.
           CSC_FOR_PULL_REQUEST: true
+          SIGNED_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && inputs.signed_validation }}
+          CSC_LINK: ${{ github.event_name == 'workflow_dispatch' && inputs.signed_validation && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.signed_validation && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.signed_validation && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.signed_validation && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.signed_validation && secrets.APPLE_TEAM_ID || '' }}
         run: |
           pnpm run prebuild
           pnpm exec tsc
           pnpm exec vite build
-          pnpm exec electron-builder --mac --publish never
+          if [[ "$SIGNED_VALIDATION" == true ]]; then
+            pnpm exec electron-builder --mac --publish never --config.forceCodeSigning=true --config.mac.hardenedRuntime=true --config.mac.notarize=true
+          else
+            pnpm exec electron-builder --mac --publish never
+          fi
+
+      - name: Verify Developer ID signature and notarization ticket
+        if: github.event_name == 'workflow_dispatch' && inputs.signed_validation
+        run: |
+          APP="release/${PACKAGE_VERSION}/mac-arm64/Pluto.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          spctl --assess --type execute --verbose=2 "$APP"
+          xcrun stapler validate "$APP"
 
       - name: Verify package and generate checksums
         run: |
