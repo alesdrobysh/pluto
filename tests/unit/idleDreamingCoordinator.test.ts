@@ -142,6 +142,24 @@ describe('IdleDreamingCoordinator', () => {
     });
   });
 
+  it('records and generates with the selected ChatGPT model instead of the local model', async () => {
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getModel: async () => 'account-model',
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+    });
+    await expect(coordinator.attemptIdleRun()).resolves.toMatchObject({
+      status: 'no_change',
+    });
+    expect(proposalStore.startRun).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'account-model' }),
+    );
+    expect(generateMock.mock.calls[0][3]).toBe('account-model');
+  });
+
   it('returns validated proposals without mutating canonical data', async () => {
     generateMock.mockResolvedValue(
       JSON.stringify({
@@ -904,6 +922,21 @@ describe('IdleDreamingCoordinator', () => {
     vi.useRealTimers();
   });
 
+  it('does not unload a model it never requested', async () => {
+    const unloadModel = vi.fn();
+    const coordinator = createIdleDreamingCoordinator({
+      getPolicy: () => policy,
+      getNextDirtyEntityId: () => null,
+      packageNotes: packageNotesMock,
+      generate: generateMock,
+      proposalStore,
+      unloadModel,
+    });
+    await coordinator.close();
+    expect(unloadModel).not.toHaveBeenCalled();
+    expect(generateMock).not.toHaveBeenCalled();
+  });
+
   it('awaits model unload when closed while idle', async () => {
     let finishUnload!: () => void;
     const unloadModel = vi.fn(
@@ -914,13 +947,16 @@ describe('IdleDreamingCoordinator', () => {
     );
     const coordinator = createIdleDreamingCoordinator({
       getPolicy: () => policy,
-      getNextDirtyEntityId: () => null,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      hasPendingWork: () => true,
       packageNotes: packageNotesMock,
       generate: generateMock,
       proposalStore,
       unloadModel,
     });
 
+    await coordinator.attemptIdleRun();
+    expect(unloadModel).not.toHaveBeenCalled();
     let closed = false;
     const closing = coordinator.close().then(() => {
       closed = true;
@@ -956,19 +992,23 @@ describe('IdleDreamingCoordinator', () => {
     });
     await coordinator.attemptIdleRun();
     expect(unloadModel).toHaveBeenCalledOnce();
+    await coordinator.close();
+    expect(unloadModel).toHaveBeenCalledOnce();
   });
 
   it('bounds an ignored shutdown unload', async () => {
     vi.useFakeTimers();
     const coordinator = createIdleDreamingCoordinator({
       getPolicy: () => policy,
-      getNextDirtyEntityId: () => null,
+      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+      hasPendingWork: () => true,
       packageNotes: packageNotesMock,
       generate: generateMock,
       proposalStore,
       unloadModel: () => new Promise(() => {}),
       cleanupDeadlineMs: 50,
     });
+    await coordinator.attemptIdleRun();
     const closing = coordinator.close();
     await vi.advanceTimersByTimeAsync(50);
     await expect(closing).resolves.toBeUndefined();

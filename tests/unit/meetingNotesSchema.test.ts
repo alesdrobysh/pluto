@@ -179,6 +179,32 @@ describe('local notes wire schemas', () => {
     ).toThrow('notes_writer_invalid');
   });
 
+  it('accepts the explicit cloud citation budget while retaining exact source validation', () => {
+    const value = {
+      title: { text: 'Outline', sources: ['R0'] },
+      sections: [
+        {
+          title: 'Outline',
+          items: [{ ...item, sources: Array(7).fill('R0') }],
+        },
+      ],
+    };
+    const schema = buildNotesResponseSchema('compact_draft', ['R0'], 36);
+    expect(validator.validate(schema, value)).toBe(true);
+    expect(() =>
+      parseCompactNotesDraft(wire.decode(JSON.stringify(value)), 36, 'chatgpt'),
+    ).not.toThrow();
+    value.sections[0].items[0].sources = Array(37).fill('R0');
+    expect(validator.validate(schema, value)).toBe(false);
+    expect(() =>
+      parseCompactNotesDraft(wire.decode(JSON.stringify(value)), 36, 'chatgpt'),
+    ).toThrow();
+    value.sections[0].items[0].sources = ['fabricated-reference'];
+    expect(() =>
+      parseCompactNotesDraft(wire.decode(JSON.stringify(value)), 36, 'chatgpt'),
+    ).toThrow();
+  });
+
   it('requires an explicit compact title and accepts null when unsupported', () => {
     const sections = [
       {

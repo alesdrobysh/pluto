@@ -1292,9 +1292,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                               },
                             }}
                           >
-                            {msg.isLoading
-                              ? msg.content.replace(/\[Source\s+\d+\]/gi, '')
-                              : msg.content}
+                            {msg.content}
                           </ReactMarkdown>
                           {msg.isLoading ? (
                             <span
@@ -1333,7 +1331,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                               : msg.evidenceState === 'provisional'
                                 ? 'Provisional live answer'
                                 : msg.trustStatus === 'inferred'
-                                  ? 'Based on saved notes · Check sources'
+                                  ? 'Based on saved notes'
                                   : msg.trustStatus === 'needs_review'
                                     ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} ${msg.unsupportedClaimCount === 1 ? 'detail could' : 'details could'} not be verified` : ''}`
                                     : ''}
@@ -1389,7 +1387,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                         <div className="px-1 text-[11px] text-pro-text-muted/75">
                           {[
                             msg.retrievalTrace.sections.length > 0
-                              ? `${msg.retrievalTrace.sections.length} synthesized note ${msg.retrievalTrace.sections.length === 1 ? 'section' : 'sections'}`
+                              ? `${msg.retrievalTrace.sections.length} saved note ${msg.retrievalTrace.sections.length === 1 ? 'section' : 'sections'}`
                               : (msg.retrievalTrace.meetings?.length || 0) > 0
                                 ? `${msg.retrievalTrace.meetings?.length} synthesized ${msg.retrievalTrace.meetings?.length === 1 ? 'note' : 'notes'}`
                                 : '',
@@ -1423,13 +1421,6 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                         <details className="group/source w-full pl-1">
                           <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-[12px] font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 [&::-webkit-details-marker]:hidden">
                             <span>
-                              {msg.citations.length}{' '}
-                              {msg.citations.length === 1
-                                ? 'reference'
-                                : 'references'}
-                            </span>
-                            <span className="text-pro-text-muted/50">·</span>
-                            <span className="font-normal">
                               {citationGroups.length}{' '}
                               {citationGroups.length === 1
                                 ? 'source'
@@ -1451,6 +1442,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                               const evidence = [
                                 ...new Set(
                                   group.citations
+                                    .filter(
+                                      (citation) => citation.evidence_valid,
+                                    )
                                     .map((citation) => citation.evidence_span)
                                     .filter((span): span is string =>
                                       Boolean(span),

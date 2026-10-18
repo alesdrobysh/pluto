@@ -127,3 +127,80 @@ export const resolveSourceSpan = (
   if (!text.trim()) throw new MeetingNotesError('invalid_source_span');
   return text;
 };
+
+// Group exact contiguous excerpts from one identified recording speaker; gaps remain separate.
+/** Review complete cited turns and intervening speech, including omitted negation. */
+export const completeCitedSourceWindow = (
+  source: NotesSource,
+  spans: SourceSpan[],
+): SourceSpan[] => {
+  if (!spans.length) return [];
+  const first = Math.min(...spans.map((span) => span.segment));
+  const last = Math.max(...spans.map((span) => span.segment));
+  return source.segments
+    .filter(
+      (segment) =>
+        segment.index >= first &&
+        segment.index <= last &&
+        segment.text.trim().length > 0,
+    )
+    .map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+};
+
+export const groupCitedSourcePassages = (
+  source: NotesSource,
+  spans: SourceSpan[],
+) => {
+  const passages: Array<{
+    speaker: string | null;
+    text: string;
+    spans: SourceSpan[];
+  }> = [];
+  const ordered = [
+    ...new Map(
+      spans.map(
+        (span) => [`${span.segment}:${span.start}:${span.end}`, span] as const,
+      ),
+    ).values(),
+  ].sort(
+    (left, right) => left.segment - right.segment || left.start - right.start,
+  );
+  for (const span of ordered) {
+    const segment = source.segments.find(
+      (entry) => entry.index === span.segment,
+    )!;
+    const text = resolveSourceSpan(source, span);
+    const prior = passages.at(-1);
+    const previous = prior?.spans.at(-1);
+    const previousSegment =
+      previous &&
+      source.segments.find((entry) => entry.index === previous.segment)!;
+    const adjacent =
+      previous &&
+      (previous.segment === span.segment
+        ? previous.end === span.start
+        : previous.segment + 1 === span.segment &&
+          previous.end === previousSegment!.text.length &&
+          span.start === 0);
+    const sameSegment = previous?.segment === span.segment;
+    const identifiedSpeaker =
+      segment.speaker &&
+      !['them', 'unknown', 'speaker'].includes(
+        segment.speaker.toLocaleLowerCase(),
+      );
+    if (
+      prior &&
+      adjacent &&
+      prior.speaker === segment.speaker &&
+      (sameSegment || identifiedSpeaker)
+    ) {
+      prior.text += `${sameSegment ? '' : ' '}${text}`;
+      prior.spans.push(span);
+    } else passages.push({ speaker: segment.speaker, text, spans: [span] });
+  }
+  return passages;
+};

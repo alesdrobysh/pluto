@@ -49,6 +49,7 @@ import { AskPluto, type AskPlutoMessage } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { IdentityProfileInvitation } from './components/features/IdentityProfileInvitation';
+import { IntelligenceUpgradeNotice } from './components/features/IntelligenceUpgradeNotice';
 import { MeetingView } from './components/features/MeetingView';
 import { PreMeetingBriefSheet } from './components/features/PreMeetingBriefSheet';
 import { RecordingFinalizingView } from './components/features/RecordingFinalizingView';
@@ -356,6 +357,16 @@ function App() {
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [llmProvider, setLlmProvider] = useState<ProviderId>('ollama');
+  const completeSetup = useCallback(() => {
+    void window.ipcRenderer
+      .invoke('GET_SETTING', 'llm_provider')
+      .then((provider) => {
+        if (provider) setLlmProvider(provider as ProviderId);
+      })
+      .catch(() => {})
+      .finally(() => setSetupNeeded(false));
+  }, []);
+
   const [ollamaModel, setOllamaModel] = useState('');
   const [theme, setTheme] = useState<AppTheme>('system');
   const [editingTitle, setEditingTitle] = useState(false);
@@ -2207,7 +2218,7 @@ function App() {
   if (setupNeeded)
     return (
       <>
-        <SetupWizard onComplete={() => setSetupNeeded(false)} />
+        <SetupWizard onComplete={completeSetup} />
         {reportProblemDialog}
       </>
     );
@@ -2391,7 +2402,7 @@ function App() {
             <div className="pointer-events-none absolute right-5 top-3 z-[60] rounded-full border border-pro-border/60 bg-pro-surface/90 px-2.5 py-1 text-[11px] font-medium text-pro-text-muted">
               {llmProvider === 'ollama'
                 ? 'Local · Ollama'
-                : `Cloud · ${llmProvider === 'openrouter' ? 'OpenRouter' : llmProvider}`}
+                : `Cloud · ${llmProvider === 'chatgpt' ? 'ChatGPT' : llmProvider === 'openrouter' ? 'OpenRouter' : llmProvider}`}
             </div>
           ) : (
             <button
@@ -2529,6 +2540,15 @@ function App() {
               />
             ) : activeTab === 'hub' ? (
               <>
+                <IntelligenceUpgradeNotice
+                  provider={llmProvider}
+                  onOpenSettings={() => {
+                    setSettingsInitialTab('intelligence');
+                    setSettingsNavigationToken((token) => token + 1);
+                    setSelectedMeetingId(null);
+                    setActiveTab('settings');
+                  }}
+                />
                 <IdentityProfileInvitation
                   onOpenSettings={() => {
                     setActiveTab('settings');

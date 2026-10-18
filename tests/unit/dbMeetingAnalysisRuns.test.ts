@@ -1315,3 +1315,51 @@ describe('meeting analysis run publication', () => {
     });
   });
 });
+
+it('refreshes pending dashboard suggestions atomically when corrected notes publish', () => {
+  const meetingId = 'publish-corrected-dashboard';
+  const revisions = fixture(meetingId);
+  const evidence = 'I will arrange time with Rowan depending on the plan.';
+  const oldText = 'Schedule time with Rowan tomorrow';
+  upsertEntity({
+    id: 'publish-corrected-action',
+    type: 'action_item',
+    name: oldText,
+    due_date: '2026-10-16',
+    dedupe_by_name: false,
+    metadata: {
+      origin: 'extraction',
+      commitment_state: 'possible',
+      source_meeting_id: meetingId,
+      source_path: 'all_action_items:0',
+      source_index: 0,
+      source_evidence: evidence,
+      full_description: oldText,
+      original_description: oldText,
+      assignee_name: 'Remote Speaker 2',
+      source_due_date: 'tomorrow',
+    },
+  });
+  start(meetingId, 'corrected-run', 'corrected-input', revisions);
+  const next = analysis('Planning follow-up');
+  next.all_action_items = [
+    {
+      text: 'Arrange time with Rowan depending on the plan',
+      assignee: 'Me',
+      evidence,
+    },
+  ];
+  expect(
+    publish(meetingId, 'corrected-run', 'corrected-input', revisions, next),
+  ).toBe(true);
+  const row = database
+    .prepare('SELECT name, due_date, metadata FROM entities WHERE id = ?')
+    .get('publish-corrected-action') as {
+    name: string;
+    due_date: string | null;
+    metadata: string;
+  };
+  expect(row.name).toBe(next.all_action_items[0].text);
+  expect(row.due_date).toBeNull();
+  expect(JSON.parse(row.metadata).assignee_name).toBe('Me');
+});

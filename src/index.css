@@ -3881,3 +3881,9 @@
   outline: 2px solid hsl(var(--pro-accent));
   outline-offset: 2px;
 }
+
+.meeting-note-assignment {
+  @apply mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-sm leading-5;
+  color: var(--notes-muted);
+  overflow-wrap: anywhere;
+}

@@ -131,6 +131,12 @@ export interface RetrievalResult {
   source_id?: string;
   mid: MidFrontmatter | null;
   evidence_text: string;
+  note_actions?: Array<{
+    text: string;
+    assignee?: string;
+    due?: string;
+    completed?: boolean;
+  }>;
   score: number;
   score_breakdown: ScoreBreakdown;
   evidence_kind?: CitationChain['evidence_kind'];

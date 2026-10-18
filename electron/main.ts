@@ -132,6 +132,10 @@ import {
   getProjectFacetKeywords,
   restrictEvidenceToMeetingIds,
 } from './intelligence/askPlutoProjectScopes';
+import {
+  needsSemanticMeetingScope,
+  resolveSemanticMeetingScope,
+} from './intelligence/askPlutoSemanticScope';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import {
@@ -622,6 +626,11 @@ import {
   createBackgroundKnowledgeRefreshCoordinator,
 } from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
+import { ChatGPTAuth } from './chatgpt/auth';
+import { registerChatGPTHandlers } from './chatgpt/ipc';
+import { getChatGPTUsage, initializeChatGPTAuth } from './chatgpt/runtime';
+import { createChatGPTStorage } from './chatgpt/storage';
+import { ChatGPTUsage } from './chatgpt/usage';
 import { resolveDatabaseStorageMode } from './database/storageSetup';
 import * as db from './db';
 import {
@@ -809,7 +818,7 @@ import {
   getProvider,
   invalidateProviderCache,
 } from './llm/factory';
-import type { CloudProviderId } from './llm/inferenceTypes';
+import type { ApiKeyProviderId } from './llm/inferenceTypes';
 import { createNotesSource } from './llm/meetingNotesSource';
 import {
   MEETING_NOTES_DEFAULT_TEMPLATE_SETTING,
@@ -841,6 +850,7 @@ import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
 } from './recordingReadiness';
+import { createElectronSecureSettingsBackend } from './secureSettings';
 import { isSecretSettingKey } from './secureSettings';
 import { createSpeakerEnrollmentAudio } from './speakerEnrollmentAudio';
 import { buildSpeakerEnrollmentCandidate } from './speakerEnrollmentCandidate';
@@ -1236,12 +1246,16 @@ let stopVoiceCandidateBackfill: (() => void) | undefined;
 let chatgptConnection: ReturnType<typeof createPlutoMcpConnection> | undefined;
 let stopOwnedAudioForShutdown: () => Promise<unknown> = async () => {};
 const shutdownMainProcessConsumers = async () => {
+  plutoLog.info('Shutdown phase: capture');
   await stopOwnedAudioForShutdown();
+  plutoLog.info('Shutdown phase: reminders');
   commitmentRemindersStopping = true;
   commitmentReminderNavigation.close();
   await commitmentReminderScheduler?.stop();
   commitmentReminderScheduler = null;
+  plutoLog.info('Shutdown phase: local connection');
   await chatgptConnection?.close();
+  plutoLog.info('Shutdown phase: intelligence');
   for (const controller of activeMeetingTasks.values()) controller.abort();
   activeMeetingTasks.clear();
   for (const task of activeAnalysisGenerations.values())
@@ -1256,15 +1270,20 @@ const shutdownMainProcessConsumers = async () => {
   stopVoiceCandidateBackfill = undefined;
   voiceWorkQueue?.close();
   voiceWorkQueue = null;
-  await idleDreamingCoordinator?.close();
+  plutoLog.info('Shutdown phase: dreaming');
+  const dreamingClose = idleDreamingCoordinator?.close();
+  plutoLog.info('Shutdown phase: model cleanup');
   idleDreamingCoordinator = null;
   scheduleDreamingRun = null;
   dreamingEntityQueue = null;
   stopIdentityReconciliation?.();
   calendarService.stop();
-  await releaseIdleOllamaModel(0).catch(() => {
-    plutoLog.warn('Could not release the local model during shutdown.');
-  });
+  await Promise.all([
+    dreamingClose,
+    releaseIdleOllamaModel(0).catch(() => {
+      plutoLog.warn('Could not release the local model during shutdown.');
+    }),
+  ]);
   plutoLog.info('Shutting down...');
   parakeetFinalClient?.close();
   parakeetFinalClient = null;
@@ -1289,6 +1308,22 @@ app.on(
 );
 
 app.whenReady().then(async () => {
+  const chatGPTAuth = new ChatGPTAuth({
+    ...createChatGPTStorage(createElectronSecureSettingsBackend()),
+    getHostId: () => {
+      const value = db.getSetting('chatgpt_host_id');
+      return typeof value === 'string' ? value : null;
+    },
+    saveHostId: (value) => {
+      db.setSetting('chatgpt_host_id', value);
+    },
+    openBrowser: (url) => shell.openExternal(url),
+  });
+  initializeChatGPTAuth(chatGPTAuth, new ChatGPTUsage(db));
+  registerChatGPTHandlers(ipcMain, chatGPTAuth, db, (url) =>
+    shell.openExternal(url),
+  );
+  app.on('before-quit', () => chatGPTAuth.cancelSignIn());
   registerBugReportHandlers(db.getSetting);
   const requestedEncryptionRollout = process.env[ENCRYPTION_ROLLOUT_ENV];
   const encryptionRollout = resolveEncryptionRolloutPolicy({
@@ -1593,6 +1628,17 @@ app.whenReady().then(async () => {
       console.warn('[Pluto] Voice backfill scan failed', error),
   });
   backgroundKnowledgeRefresh = createBackgroundKnowledgeRefreshCoordinator({
+    ignoreForegroundActivity: () => db.getSetting('llm_provider') === 'chatgpt',
+    canRun: (workId) => {
+      if (
+        db.getSetting('llm_provider') !== 'chatgpt' ||
+        workId.startsWith('voice:')
+      )
+        return true;
+      return workId.startsWith('secondary:')
+        ? getChatGPTUsage().requestsAvailable()
+        : getChatGPTUsage().backgroundAvailable();
+    },
     getPolicy: () => ({
       systemIdleSeconds: powerMonitor.getSystemIdleTime(),
       onBattery: powerMonitor.isOnBatteryPower(),
@@ -1692,7 +1738,10 @@ app.whenReady().then(async () => {
       dreamingEntityQueue?.invalidate(candidate);
       scheduleDreamingRun?.(delayMs);
     },
-    hasPendingWork: () => dreamingEntityQueue?.hasPendingWork() === true,
+    hasPendingWork: () =>
+      dreamingEntityQueue?.hasPendingWork() === true &&
+      (db.getSetting('llm_provider') !== 'chatgpt' ||
+        getChatGPTUsage().backgroundAvailable()),
     generate: async (
       prompt,
       responseSchema,
@@ -1703,10 +1752,16 @@ app.whenReady().then(async () => {
       onStart,
       onProgress,
     ) => {
-      const provider = new UnifiedLLMProvider(
-        'ollama',
-        await getAllSettings(db),
-      );
+      const settings = await getAllSettings(db);
+      const selectedModel =
+        settings.llm_provider === 'chatgpt'
+          ? settings.chatgpt_model
+          : DREAMING_MODEL;
+      if (model !== selectedModel) throw new Error('dreaming_provider_changed');
+      const provider =
+        settings.llm_provider === 'chatgpt'
+          ? await getProvider(settings)
+          : new UnifiedLLMProvider('ollama', settings);
       signal?.throwIfAborted();
       return generateDreamingWithProvider(
         provider,
@@ -1720,11 +1775,16 @@ app.whenReady().then(async () => {
         onProgress,
       );
     },
+    getModel: async () => {
+      const settings = await getAllSettings(db);
+      return settings.llm_provider === 'chatgpt'
+        ? settings.chatgpt_model
+        : undefined;
+    },
     unloadModel: async (signal) => {
-      const provider = new UnifiedLLMProvider(
-        'ollama',
-        await getAllSettings(db),
-      );
+      const settings = await getAllSettings(db);
+      if (settings.llm_provider === 'chatgpt') return;
+      const provider = new UnifiedLLMProvider('ollama', settings);
       await provider.unloadModel(DREAMING_MODEL, signal);
     },
   });
@@ -1812,6 +1872,8 @@ app.whenReady().then(async () => {
     try {
       const failedMeetingIds = db.listMeetingIdsWithFailedSecondary();
       for (const meetingId of failedMeetingIds) {
+        // Restart recovery must not turn old failures into new paid requests.
+        if (db.getSetting('llm_provider') === 'chatgpt') return;
         if (activeTranscriptionCount > 0) {
           scheduleSecondaryRecovery(5_000);
           return;
@@ -5905,8 +5967,14 @@ app.whenReady().then(async () => {
           recordBugReportEvent({
             operation: 'project_updates',
             attemptId: diagnosticAttemptId,
-            requiredProvider: 'ollama',
-            requiredModel: DREAMING_MODEL,
+            requiredProvider:
+              db.getSetting('llm_provider') === 'chatgpt'
+                ? 'chatgpt'
+                : 'ollama',
+            requiredModel:
+              db.getSetting('llm_provider') === 'chatgpt'
+                ? String(db.getSetting('chatgpt_model') || '')
+                : DREAMING_MODEL,
             stage: 'prepare_updates',
             entityId: options.entityId,
             outcome:
@@ -5933,8 +6001,14 @@ app.whenReady().then(async () => {
           recordBugReportEvent({
             operation: 'project_updates',
             attemptId: diagnosticAttemptId,
-            requiredProvider: 'ollama',
-            requiredModel: DREAMING_MODEL,
+            requiredProvider:
+              db.getSetting('llm_provider') === 'chatgpt'
+                ? 'chatgpt'
+                : 'ollama',
+            requiredModel:
+              db.getSetting('llm_provider') === 'chatgpt'
+                ? String(db.getSetting('chatgpt_model') || '')
+                : DREAMING_MODEL,
             stage: 'prepare_updates',
             entityId: options.entityId,
             outcome: 'failed',
@@ -6431,7 +6505,7 @@ app.whenReady().then(async () => {
     );
     return next;
   });
-  const parseCloudProvider = (value: unknown): CloudProviderId => {
+  const parseCloudProvider = (value: unknown): ApiKeyProviderId => {
     if (
       value === 'openai' ||
       value === 'openrouter' ||
@@ -7113,7 +7187,9 @@ app.whenReady().then(async () => {
           typeof input === 'string' ? undefined : input.modeOverride,
           { isLocal: isLocalProvider },
         );
-        let recordProgress: ((phase?: 'started' | 'token') => void) | undefined;
+        let recordProgress:
+          | ((phase?: 'queued' | 'started' | 'token') => void)
+          | undefined;
         const meetingHeaders = db.getAskPlutoMeetingHeaders();
         const priorTurns: AskPlutoConversationTurn[] =
           typeof input === 'string' || !Array.isArray(input.priorTurns)
@@ -7274,15 +7350,17 @@ app.whenReady().then(async () => {
         let providerName: string = settings.llm_provider || 'ollama';
         let configuredModel =
           settings.llm_model ||
-          (settings.llm_provider === 'gemini'
-            ? settings.gemini_model
-            : settings.llm_provider === 'openai'
-              ? settings.openai_model
-              : settings.llm_provider === 'openrouter'
-                ? settings.openrouter_model
-                : settings.llm_provider === 'claude'
-                  ? settings.claude_model
-                  : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
+          (settings.llm_provider === 'chatgpt'
+            ? settings.chatgpt_model
+            : settings.llm_provider === 'gemini'
+              ? settings.gemini_model
+              : settings.llm_provider === 'openai'
+                ? settings.openai_model
+                : settings.llm_provider === 'openrouter'
+                  ? settings.openrouter_model
+                  : settings.llm_provider === 'claude'
+                    ? settings.claude_model
+                    : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
           'default';
         let lastValidatedPresentation: SafeAnswerPresentation | undefined;
         let conversationAnchor: string | undefined;
@@ -7446,16 +7524,20 @@ app.whenReady().then(async () => {
             providerRequestedAt = Date.now();
             let streamedAnswer = '';
             try {
+              if (settings.llm_provider === 'chatgpt')
+                recordProgress?.('queued');
               const returnedAnswer = await provider.answerAskPluto(prompt, {
                 signal: controller.signal,
                 mode: 'fast',
                 live: true,
                 onStart: () => {
+                  recordProgress?.('started');
                   providerStartedAt ??= Date.now();
                   sendStatus('writing');
                 },
                 onToken: (delta) => {
                   if (!delta || controller.signal.aborted) return;
+                  recordProgress?.('token');
                   rawFirstTokenAt ??= Date.now();
                   firstTokenAt ??= rawFirstTokenAt;
                   streamedAnswer += delta;
@@ -7541,7 +7623,6 @@ app.whenReady().then(async () => {
             };
           }
           const persistedMeetings = db.getAskPlutoMeetings();
-          sendStatus('scope_resolved');
           sendStatus('retrieving');
           const omissionReview =
             conversationResolution.relation === 'omission_follow_up'
@@ -7611,11 +7692,69 @@ app.whenReady().then(async () => {
             conversationResolution.relation === 'expansion'
               ? `${selfReference.retrievalQuery}\ngo deeper`
               : selfReference.retrievalQuery;
+          const resolveScope = needsSemanticMeetingScope({
+            provider: settings.llm_provider,
+            ...conversationResolution,
+            previousScope: previousAssistantTurn?.resolvedScope,
+            previousTurnMode: previousAssistantTurn?.turnMode,
+          });
+          if (settings.llm_provider === 'chatgpt' && resolveScope)
+            recordProgress?.('queued');
+          const semanticScope = resolveScope
+            ? await resolveSemanticMeetingScope({
+                query: queryText,
+                ...(conversationResolution.relation !== 'new_topic'
+                  ? {
+                      previousQuestion: conversationResolution.priorQuestion,
+                      previousScope: previousAssistantTurn?.resolvedScope,
+                    }
+                  : {}),
+                meetings: meetingHeaders,
+                currentMeetingId: currentMeeting.meetingId,
+                provider: await getProvider(settings),
+                signal: controller.signal,
+                onStart: () => {
+                  recordProgress?.('started');
+                  providerStartedAt ??= Date.now();
+                },
+                onProgress: () => recordProgress?.('token'),
+              })
+            : undefined;
+          if (
+            semanticScope &&
+            (semanticScope.kind === 'ambiguous' ||
+              semanticScope.kind === 'not_found' ||
+              semanticScope.kind === 'unavailable')
+          ) {
+            turnMode = 'clarify';
+            return {
+              status: 'answered' as const,
+              answer:
+                semanticScope.kind === 'not_found'
+                  ? "I couldn't find a meeting matching that reference. Check its title or recording date, or open the meeting and ask there."
+                  : semanticScope.kind === 'ambiguous'
+                    ? 'Which meeting do you mean? Include its recording date and time, or open the meeting and ask there.'
+                    : "I couldn't safely resolve the meeting scope. Open the meeting and ask there.",
+              citations: [],
+              turnMode: 'clarify' as const,
+              retrievalPolicy: 'fresh' as const,
+              outcome: 'no_evidence' as const,
+              resolvedScope: {
+                kind: 'meeting_ids' as const,
+                meetingIds: [],
+                resolvedAt: new Date().toISOString(),
+                source: 'explicit' as const,
+              },
+            };
+          }
+          sendStatus('scope_resolved');
           const parsed = await parseQuery(selfReference.retrievalQuery, {
             signal: controller.signal,
             useModelClassification:
+              settings.llm_provider !== 'chatgpt' &&
               conversationResolution.relation === 'new_topic' &&
               !isExplicitInformationRequest(queryText),
+            ...(semanticScope ? { classification: semanticScope } : {}),
           });
           const assigneeRecall = buildAssigneeActionRecall(
             effectiveQueryText,
@@ -7757,10 +7896,28 @@ app.whenReady().then(async () => {
               !effectiveProjectRecall &&
               !effectivePersonWorkRecall,
           );
-          const explicitMeetingScope = resolveExplicitMeetingScope(
-            effectiveQueryText,
-            persistedMeetings,
-          );
+          const explicitMeetingScope = semanticScope
+            ? semanticScope.kind === 'single' ||
+              semanticScope.kind === 'multiple'
+              ? {
+                  kind: 'named' as const,
+                  label:
+                    semanticScope.kind === 'single'
+                      ? 'the selected meeting'
+                      : 'the selected meetings',
+                  meetings: semanticScope.meetingIds
+                    .map((id) => db.getAskPlutoMeeting(id))
+                    .filter((meeting): meeting is db.PersistedMeeting =>
+                      Boolean(meeting),
+                    ),
+                }
+              : null
+            : settings.llm_provider === 'chatgpt'
+              ? null
+              : resolveExplicitMeetingScope(
+                  effectiveQueryText,
+                  persistedMeetings,
+                );
           const requestedMode =
             typeof input !== 'string' &&
             (input.modeOverride === 'fast' || input.modeOverride === 'deep')
@@ -7798,8 +7955,11 @@ app.whenReady().then(async () => {
             };
           }
 
-          const currentMeetingRequested =
-            queryReferencesCurrentMeeting(effectiveQueryText);
+          const currentMeetingRequested = semanticScope
+            ? semanticScope.kind === 'current'
+            : settings.llm_provider === 'chatgpt'
+              ? previousAssistantTurn?.resolvedScope?.kind === 'current'
+              : queryReferencesCurrentMeeting(effectiveQueryText);
           const switchesNamedProject =
             projectRecall?.project.matchKind === 'explicit_label' &&
             projectRecall.project.canonicalId !==
@@ -8009,7 +8169,8 @@ app.whenReady().then(async () => {
                 }
               : undefined;
           const usePreparedAssigneeRecall = Boolean(
-            !explicitResolvedScope &&
+            settings.llm_provider !== 'chatgpt' &&
+              !explicitResolvedScope &&
               !temporalResolvedScope &&
               !currentMeetingRequested &&
               !isPlanning &&
@@ -8044,10 +8205,19 @@ app.whenReady().then(async () => {
               retrievalSummary: temporalRetrievalSummary,
             };
           }
-          if (explicitMeetingScope && explicitlyScopedMeetings.length === 0) {
+          if (
+            explicitMeetingScope &&
+            (explicitlyScopedMeetings.length === 0 ||
+              (semanticScope &&
+                explicitlyScopedMeetings.length !==
+                  semanticScope.meetingIds.length))
+          ) {
             return {
               status: 'answered' as const,
-              answer: "I couldn't find any recent meetings.",
+              answer:
+                explicitMeetingScope.kind === 'recent'
+                  ? "I couldn't find any recent meetings."
+                  : `I couldn't load all of ${explicitMeetingScope.label}. Open the meeting and ask there.`,
               citations: [],
               currentMeeting: currentMeetingStatus,
               outcome: 'no_evidence' as const,
@@ -8421,19 +8591,28 @@ app.whenReady().then(async () => {
                   resolvedAt: new Date().toISOString(),
                   source: 'explicit',
                 }
-              : inheritedScope || {
-                  kind:
-                    overviewContextUsed ||
-                    context.length === 0 ||
-                    context.some((result) => result.source_type === 'artifact')
-                      ? 'global'
-                      : 'meeting_ids',
-                  meetingIds: contextMeetings.map(
-                    (result) => result.meeting_id,
-                  ),
-                  resolvedAt: new Date().toISOString(),
-                  source: 'explicit',
-                });
+              : semanticScope?.kind === 'global'
+                ? {
+                    kind: 'global',
+                    meetingIds: [],
+                    resolvedAt: new Date().toISOString(),
+                    source: 'explicit',
+                  }
+                : inheritedScope || {
+                    kind:
+                      overviewContextUsed ||
+                      context.length === 0 ||
+                      context.some(
+                        (result) => result.source_type === 'artifact',
+                      )
+                        ? 'global'
+                        : 'meeting_ids',
+                    meetingIds: contextMeetings.map(
+                      (result) => result.meeting_id,
+                    ),
+                    resolvedAt: new Date().toISOString(),
+                    source: 'explicit',
+                  });
           const baseRetrievalSummary: AskPlutoRetrievalSummary =
             explicitRetrievalSummary ||
               temporalRetrievalSummary || {
@@ -8614,15 +8793,16 @@ app.whenReady().then(async () => {
                   onAnswerPresentation,
                   confirmedSelfName,
                 );
-          const extractiveAnswer = useWorkspaceRecall
-            ? null
-            : conversationResolution.relation === 'omission_follow_up' ||
-                conversationResolution.relation === 'expansion' ||
-                selfReference.refersToSelf
+          const extractiveAnswer =
+            settings.llm_provider === 'chatgpt' || useWorkspaceRecall
               ? null
-              : usePreparedAssigneeRecall && assigneeRecall
-                ? assigneeRecall.answer
-                : buildExtractiveTemporalSummary(effectiveQueryText, context);
+              : conversationResolution.relation === 'omission_follow_up' ||
+                  conversationResolution.relation === 'expansion' ||
+                  selfReference.refersToSelf
+                ? null
+                : usePreparedAssigneeRecall && assigneeRecall
+                  ? assigneeRecall.answer
+                  : buildExtractiveTemporalSummary(effectiveQueryText, context);
           let answerRaw: string;
           if (
             extractiveAnswer &&
@@ -8701,6 +8881,7 @@ app.whenReady().then(async () => {
               `[Pluto] Generating answer via provider: ${provider.name} ...`,
             );
             providerRequestedAt = Date.now();
+            if (settings.llm_provider === 'chatgpt') recordProgress?.('queued');
             answerRaw = await provider.answerAskPluto(prompt, {
               signal: controller.signal,
               mode: reasoningMode,
@@ -9310,13 +9491,15 @@ app.whenReady().then(async () => {
             settings.llm_model ||
             (settings.llm_provider === 'ollama'
               ? settings.ollama_model
-              : settings.llm_provider === 'gemini'
-                ? settings.gemini_model
-                : settings.llm_provider === 'openai'
-                  ? settings.openai_model
-                  : settings.llm_provider === 'openrouter'
-                    ? settings.openrouter_model
-                    : settings.claude_model) ||
+              : settings.llm_provider === 'chatgpt'
+                ? settings.chatgpt_model
+                : settings.llm_provider === 'gemini'
+                  ? settings.gemini_model
+                  : settings.llm_provider === 'openai'
+                    ? settings.openai_model
+                    : settings.llm_provider === 'openrouter'
+                      ? settings.openrouter_model
+                      : settings.claude_model) ||
             'default',
           promptChars: prompt.length,
           elapsedMs: Date.now() - startTime,

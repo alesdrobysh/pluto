@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readDownstreamProcessingLease } from '../src/services/downstreamProcessingLease';
+import { parseAnalysisDocumentV3Json } from '../src/utils/analysisDocument';
 import { buildMeetingNotesSpeakerReferences } from '../src/utils/meetingNotesSpeakerReferences';
 import { meetingTitleNeedsGeneration } from '../src/utils/meetingTitle';
 import { buildAnalysisTranscriptFromJson } from '../src/utils/transcript';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
+import { notesContextTokens } from './llm/meetingNotesBudget';
 import {
   type MeetingNotesRunMetric,
   createMeetingNotesRunMetrics,
@@ -219,6 +221,7 @@ type NotesProvider = {
 
 type SettingsRecord = {
   llm_provider?: unknown;
+  chatgpt_model?: unknown;
   ollama_model?: unknown;
   llm_model?: unknown;
   openai_model?: unknown;
@@ -253,7 +256,6 @@ type ActiveRun = {
   promise: Promise<PublishedMeetingNotes>;
 };
 
-const NOTES_CONTEXT_TOKENS = 16_384;
 export const MEETING_NOTES_ABSOLUTE_DEADLINE_MS = 12 * 60_000;
 export const MEETING_NOTES_PUBLICATION_RESERVE_MS = 15_000;
 export const MEETING_NOTES_OPTIONAL_REVIEW_MIN_START_MS = 5 * 60_000;
@@ -278,7 +280,9 @@ export const createMeetingNotesOptionalReviewBudget = (
 
 export const shouldUseMeetingNotesOptionalReviewBudget = (
   providerName: string,
-): boolean => providerName.toLowerCase().startsWith('ollama');
+): boolean =>
+  providerName.toLowerCase().startsWith('ollama') ||
+  providerName.toLowerCase() === 'chatgpt';
 
 const hashFingerprint = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
@@ -357,6 +361,7 @@ const isEligibleMeetingSource = (meeting: MeetingRecord): boolean =>
 
 const configuredModel = (settings: SettingsRecord): string | null => {
   const provider = settings.llm_provider;
+  if (provider === 'chatgpt') return stringSetting(settings.chatgpt_model);
   if (provider === 'openai') return stringSetting(settings.openai_model);
   if (provider === 'openrouter')
     return stringSetting(settings.openrouter_model);
@@ -373,6 +378,13 @@ const stringSetting = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 
 const errorCode = (error: unknown): string => {
+  if (
+    error instanceof Error &&
+    /^chatgpt_(daily_limit|background_paused|background_limit|usage_storage_error)$/.test(
+      error.message,
+    )
+  )
+    return error.message;
   if (
     (error instanceof DOMException && error.name === 'AbortError') ||
     (error instanceof Error && error.name === 'AbortError')
@@ -618,6 +630,8 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
   }): Promise<'generated' | 'reused' | 'discarded'> => {
     input.signal.throwIfAborted();
     const settings = await dependencies.getSettings();
+    // Cloud inference pays once for the finalized source, not changing partial leaves.
+    if (settings.llm_provider === 'chatgpt') return 'discarded';
     const template = resolveTemplateFromSettings(settings, input.template);
     const provider = await dependencies.getProvider(settings);
     if (!provider.precomputeStructuredAnalysisLeaf) return 'discarded';
@@ -638,7 +652,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       model: configuredModel(settings),
       thinking: settings.ollama_structured_thinking ?? null,
       seed: settings.ollama_seed ?? null,
-      contextTokens: NOTES_CONTEXT_TOKENS,
+      contextTokens: notesContextTokens(settings.llm_provider),
       promptVersion: NOTES_PROMPT_VERSION,
     });
     return provider.precomputeStructuredAnalysisLeaf(
@@ -652,7 +666,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         trustedUserTerms: [],
         entityHints: terms,
         templateSnapshot: template,
-        contextTokens: NOTES_CONTEXT_TOKENS,
+        contextTokens: notesContextTokens(settings.llm_provider),
         compactWriterContract: true,
         stageCache,
         cacheKey,
@@ -787,7 +801,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       model: configuredModel(settings),
       thinking: settings.ollama_structured_thinking ?? null,
       seed: settings.ollama_seed ?? null,
-      contextTokens: NOTES_CONTEXT_TOKENS,
+      contextTokens: notesContextTokens(settings.llm_provider),
       promptVersion: NOTES_PROMPT_VERSION,
     };
     const fingerprint = hashFingerprint({
@@ -797,15 +811,57 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     });
     const stageCacheKey = createMeetingNotesStageCacheKey(generationIdentity);
 
+    const persisted = dependencies.db.getMeetingAnalysisRun(meetingId);
+    const publishedSourceUnchanged = Boolean(
+      persisted?.source_revision === revisions.sourceRevision &&
+        persisted.eligibility_revision === revisions.eligibilityRevision &&
+        persisted.user_notes_hash === revisions.userNotesHash &&
+        meeting.analysis_json,
+    );
+    const publishedAnalysis =
+      settings.llm_provider === 'chatgpt' && publishedSourceUnchanged
+        ? parseAnalysisDocumentV3Json(meeting.analysis_json)
+        : null;
+    const metadata = (() => {
+      if (!publishedSourceUnchanged || !meeting.analysis_json) return undefined;
+      try {
+        return (JSON.parse(meeting.analysis_json) as AnalysisDocumentV3)
+          .generation_metadata;
+      } catch {
+        return undefined;
+      }
+    })();
+    const publishedInputUnchanged = Boolean(
+      metadata &&
+        metadata.provider === (settings.llm_provider ?? 'ollama') &&
+        metadata.model === configuredModel(settings) &&
+        metadata.prompt_version === NOTES_PROMPT_VERSION &&
+        metadata.notes_template?.id === template.id &&
+        metadata.notes_template.revision === template.revision &&
+        (metadata.generation_options?.structured_thinking ?? false) ===
+          (settings.ollama_structured_thinking ?? false) &&
+        (metadata.generation_options?.seed ?? null) ===
+          (settings.ollama_seed ?? null),
+    );
+    // Cloud configuration changes apply to future writing, not paid historical rewrites.
+    const publishedNotesReusable =
+      publishedInputUnchanged ||
+      (settings.llm_provider === 'chatgpt' && Boolean(publishedAnalysis));
     const active = activeByMeeting.get(meetingId);
     if (active?.fingerprint === fingerprint) {
       return subscribe(active, input.requestId);
     }
-    if (active) {
+    if (
+      active &&
+      !(
+        input.reason === 'automatic' &&
+        persisted?.notes_status === 'published' &&
+        publishedNotesReusable
+      )
+    ) {
       supersedeMeetingNotes(meetingId);
     }
 
-    const persisted = dependencies.db.getMeetingAnalysisRun(meetingId);
     if (
       input.reason === 'automatic' &&
       persisted?.notes_status === 'failed' &&
@@ -815,13 +871,15 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     ) {
       throw new Error('meeting_notes_automatic_attempts_exhausted');
     }
+    // Extracted vocabulary hints must not turn published notes into new paid work.
     if (
       input.reason === 'automatic' &&
       persisted?.notes_status === 'published' &&
-      persisted.input_revision === fingerprint
+      (persisted.input_revision === fingerprint || publishedNotesReusable)
     ) {
       if (
         persisted.secondary_status !== 'complete' &&
+        (persisted.input_revision === fingerprint || publishedInputUnchanged) &&
         !secondaryByMeeting.has(meetingId) &&
         meeting.analysis_json
       ) {
@@ -832,7 +890,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         const identity = {
           meetingId,
           runId: persisted.run_id,
-          inputRevision: fingerprint,
+          inputRevision: persisted.input_revision,
           sourceRevision: persisted.source_revision ?? revisions.sourceRevision,
           eligibilityRevision:
             persisted.eligibility_revision ?? revisions.eligibilityRevision,
@@ -1005,7 +1063,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
                       admittedNotesInput.projection.trustedUserTerms,
                     entityHints: terms,
                     templateSnapshot: template,
-                    contextTokens: NOTES_CONTEXT_TOKENS,
+                    contextTokens: notesContextTokens(settings.llm_provider),
                     compactWriterContract: true,
                     hierarchyAuditStrategy: 'deterministic_only',
                     ...optionalReviewBudgetOptions,
@@ -1072,6 +1130,15 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           })();
           if (controller.signal.aborted) throw controller.signal.reason;
           if (analysis.generation_metadata) {
+            analysis.generation_metadata.generation_options = {
+              ...analysis.generation_metadata.generation_options,
+              ...(typeof settings.ollama_structured_thinking === 'boolean'
+                ? { structured_thinking: settings.ollama_structured_thinking }
+                : {}),
+              ...(typeof settings.ollama_seed === 'number'
+                ? { seed: settings.ollama_seed }
+                : {}),
+            };
             analysis.generation_metadata.speaker_references =
               buildMeetingNotesSpeakerReferences({
                 analysis,

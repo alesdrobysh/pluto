@@ -17,6 +17,7 @@ export type MeetingType =
 export type AnalysisProvider =
   | 'ollama'
   | 'gemini'
+  | 'chatgpt'
   | 'openai'
   | 'openrouter'
   | 'claude';

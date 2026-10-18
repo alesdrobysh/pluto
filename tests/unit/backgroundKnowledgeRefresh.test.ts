@@ -4,6 +4,70 @@ import { createBackgroundKnowledgeRefreshCoordinator } from '../../electron/back
 describe('background knowledge refresh', () => {
   afterEach(() => vi.useRealTimers());
 
+  it('retains paused cloud work while allowing local voice work to proceed', async () => {
+    vi.useFakeTimers();
+    let cloudEnabled = false;
+    const run = vi.fn().mockResolvedValue(undefined);
+    const coordinator = createBackgroundKnowledgeRefreshCoordinator({
+      quietMs: 0,
+      retryMs: 1000,
+      getPolicy: () => ({
+        systemIdleSeconds: 1000,
+        onBattery: false,
+        thermalState: 'nominal',
+        paused: false,
+      }),
+      canRun: (id) => id.startsWith('voice:') || cloudEnabled,
+      run,
+    });
+    coordinator.enqueue('doc:project');
+    coordinator.enqueue('voice:meeting');
+    await vi.advanceTimersByTimeAsync(2);
+    expect(run.mock.calls.map(([id]) => id)).toEqual(['voice:meeting']);
+    expect(coordinator.snapshot().pendingMeetingIds).toEqual(['doc:project']);
+    cloudEnabled = true;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(run.mock.calls.map(([id]) => id)).toEqual([
+      'voice:meeting',
+      'doc:project',
+    ]);
+    coordinator.close();
+  });
+
+  it('keeps an admitted cloud request running through keyboard activity instead of paying to restart it', async () => {
+    vi.useFakeTimers();
+    let idleSeconds = 1000;
+    let signal!: AbortSignal;
+    let finish!: () => void;
+    const coordinator = createBackgroundKnowledgeRefreshCoordinator({
+      quietMs: 1000,
+      monitorMs: 100,
+      ignoreForegroundActivity: () => true,
+      getPolicy: () => ({
+        systemIdleSeconds: idleSeconds,
+        onBattery: false,
+        thermalState: 'nominal',
+        paused: false,
+      }),
+      run: async (_id, current) => {
+        signal = current;
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    coordinator.enqueue('doc:project');
+    await vi.advanceTimersByTimeAsync(1000);
+    idleSeconds = 0;
+    coordinator.notifyForegroundActivity();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(signal.aborted).toBe(false);
+    finish();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(coordinator.snapshot().pendingMeetingIds).toEqual([]);
+    coordinator.close();
+  });
+
   it('waits for fifteen quiet and system-idle minutes before running', async () => {
     vi.useFakeTimers();
     const run = vi.fn().mockResolvedValue(undefined);

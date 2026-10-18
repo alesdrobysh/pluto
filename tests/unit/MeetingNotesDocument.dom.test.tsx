@@ -712,6 +712,8 @@ describe('MeetingNotesDocument', () => {
             {
               id: 'action-0',
               path: 'all_action_items:0',
+              assignee: 'Riley',
+              due: 'Monday',
               text: 'Publish the guide.',
               originalText: 'Publish the guide.',
               authorship: 'ai',
@@ -734,6 +736,10 @@ describe('MeetingNotesDocument', () => {
       ),
     );
 
+    const assignment = container.querySelector('.meeting-note-assignment');
+    expect(assignment?.textContent).toContain('Owner: Riley');
+    expect(assignment?.textContent).toContain('Due Monday');
+    expect(assignment?.closest('.meeting-note-block__meta')).toBeNull();
     const checkbox = container.querySelector<HTMLInputElement>(
       'input[type="checkbox"]',
     );

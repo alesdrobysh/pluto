@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
 
 import {
   buildMeetingNotesEvidenceDocument,
@@ -134,7 +135,7 @@ describe('buildMeetingNotesEvidenceDocument', () => {
       meetingId: 'meeting-1',
       title: 'Launch review',
       hasUsableNotes: true,
-      participantsText: 'Sam',
+      participantsText: '',
     });
     expect(document.notesText).toContain('Launch moved to Friday.');
     expect(document.notesText).toContain('Remember the customer follow-up.');
@@ -183,7 +184,7 @@ describe('buildMeetingNotesEvidenceDocument', () => {
           provider: 'ollama',
           model: 'gemma4:12b',
           generation_path: 'single_pass',
-          prompt_version: 'notes-v33',
+          prompt_version: 'notes-v35',
           generated_at: '2026-09-13T00:00:00.000Z',
           error_categories: ['notes_quality_warning'],
           prose_review: {
@@ -244,4 +245,133 @@ describe('buildMeetingNotesEvidenceDocument', () => {
     expect(document.notesText).toContain('A valid topic summary.');
     expect(document.notesText).not.toContain('[object Object]');
   });
+});
+
+it('carries canonical action owner labels into summaries, retrieval sections and context without guessing identities', () => {
+  const analysis: AnalysisDocumentV3 = {
+    analysis_schema_version: 3,
+    overview: '',
+    topics: [],
+    all_decisions: [],
+    all_action_items: [
+      { text: 'Schedule time with Riley.', assignee: 'Me' },
+      { text: 'Tell Casey about allocation.', assignee: 'Remote Speaker 2' },
+    ],
+    meeting_type: 'general',
+    quality: {
+      format_pass: true,
+      retry_count: 0,
+      fallback_used: false,
+      issues: [],
+    },
+  };
+  analysis.overview = 'Review planning.';
+  analysis.topics = [
+    {
+      title: 'Follow-ups',
+      summary: 'Two promises.',
+      key_points: [],
+      decisions: [],
+      open_questions: [],
+      action_items: analysis.all_action_items,
+    },
+  ];
+  const doc = buildMeetingNotesEvidenceDocument({
+    id: 'fictional',
+    analysis_json: JSON.stringify(analysis),
+  });
+  for (const text of [
+    doc.notesText,
+    doc.actionItemsText,
+    doc.sections.map((section) => section.content).join(' '),
+  ]) {
+    expect(text).toContain('[Owner: Me] Schedule time with Riley.');
+    expect(text).toContain(
+      '[Owner: Remote Speaker 2] Tell Casey about allocation.',
+    );
+    expect(text).not.toContain('unnamed');
+  }
+  const named = buildMeetingNotesEvidenceDocument(
+    { id: 'fictional', analysis_json: JSON.stringify(analysis) },
+    { 'Remote Speaker 2': 'Morgan' },
+  );
+  expect(named.actionItemsText).toContain('[Owner: Morgan]');
+  expect(analysis.all_action_items[1].assignee).toBe('Remote Speaker 2');
+});
+
+it('retains structured deadlines in every saved-note evidence surface', () => {
+  const document = buildMeetingNotesEvidenceDocument({
+    id: 'fictional-monday',
+    title: 'Pilot test',
+    analysis_json: JSON.stringify({
+      analysis_schema_version: 3,
+      overview: 'Pilot readiness',
+      topics: [],
+      all_decisions: [],
+      all_action_items: [
+        { text: 'Send the checklist', assignee: 'Riley', due: 'Monday' },
+        { text: 'Update the runbook after the checklist', assignee: 'Avery' },
+        { text: 'Review staging results', due: ' after testing ' },
+      ],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    }),
+  });
+  for (const text of [
+    document.notesText,
+    document.actionItemsText,
+    ...document.sections
+      .map((s) => s.content)
+      .filter((s) => s.includes('Send the checklist')),
+  ]) {
+    expect(text).toContain('[Owner: Riley] [Due: Monday] Send the checklist');
+    expect(text).toContain(
+      '[Owner: Avery] Update the runbook after the checklist',
+    );
+  }
+  expect(document.actionItemsText).toContain(
+    '[Due: after testing] Review staging results',
+  );
+  expect(document.actionItemsText).not.toContain('2026-');
+});
+
+it('does not expand note identities from legacy metadata or reindex for unused legacy changes', () => {
+  const meeting = {
+    id: 'fictional-identities',
+    analysis_json: JSON.stringify({
+      analysis_schema_version: 3,
+      overview: 'Pilot readiness',
+      topics: [],
+      all_decisions: [],
+      all_action_items: [
+        { text: 'Send the checklist', assignee: 'Riley', due: 'Monday' },
+      ],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    }),
+  };
+  const canonical = buildMeetingNotesEvidenceDocument(meeting);
+  const legacy = buildMeetingNotesEvidenceDocument({
+    ...meeting,
+    mid_json: JSON.stringify({
+      participants: [{ name: 'Riley Quinn' }],
+      projects: [{ name: 'Superseded project' }],
+      topics: [{ name: 'Superseded topic' }],
+    }),
+  });
+  expect(legacy.sourceRevision).toBe(canonical.sourceRevision);
+  expect(legacy.actionItemsText).toContain('[Owner: Riley] [Due: Monday]');
+  expect(legacy.participantsText).toBe('');
+  expect(JSON.stringify(legacy)).not.toContain('Riley Quinn');
+  expect(JSON.stringify(legacy)).not.toContain('Superseded');
 });

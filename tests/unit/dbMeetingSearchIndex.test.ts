@@ -12,6 +12,7 @@ vi.mock('electron', () => ({
 }));
 
 import {
+  db,
   deleteMeeting,
   getMeetingContextSectionIntegrity,
   getMeetingFtsIntegrity,
@@ -20,6 +21,7 @@ import {
   identityStore,
   listMeetingIdsForPersonIdentity,
   refreshMeetingIdentityProjection,
+  repairMeetingContextSectionIndex,
   repairMeetingFtsIndex,
   saveMeeting,
   searchMeetingContextSectionsFts,
@@ -279,4 +281,43 @@ describe('meeting search index integrity', () => {
       'Pricing review',
     );
   });
+});
+
+it('refreshes a healthy but outdated notes index when evidence formatting changes', () => {
+  const id = 'structured-monday-repair';
+  saveMeeting({
+    id,
+    title: 'Deadline repair',
+    analysis_json: JSON.stringify({
+      analysis_schema_version: 3,
+      overview: 'Pilot readiness',
+      topics: [],
+      all_decisions: [],
+      all_action_items: [
+        { text: 'Send the checklist', assignee: 'Riley', due: 'Monday' },
+      ],
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    }),
+  });
+  db.prepare(
+    'UPDATE meeting_notes_fts SET notes_text = ?, action_items_text = ? WHERE meeting_id = ?',
+  ).run('Send the checklist', 'Send the checklist', id);
+  db.prepare(
+    'UPDATE meeting_context_sections SET source_revision = ? WHERE meeting_id = ?',
+  ).run('old-evidence-format', id);
+  const repaired = repairMeetingContextSectionIndex();
+  expect(repaired.rebuilt).toBe(true);
+  const indexed = db
+    .prepare(
+      'SELECT action_items_text FROM meeting_notes_fts WHERE meeting_id = ?',
+    )
+    .get(id) as { action_items_text: string };
+  expect(indexed.action_items_text).toContain('[Owner: Riley] [Due: Monday]');
+  expect(repairMeetingContextSectionIndex().rebuilt).toBe(false);
 });

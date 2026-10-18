@@ -26,6 +26,7 @@ const id: Schema = {
 export const buildNotesResponseSchema = (
   contract: NotesResponseContract,
   sourceLabels: readonly string[],
+  maxSourceSpans = 3,
 ): Schema => {
   const sources: Schema = {
     type: 'array',
@@ -52,7 +53,7 @@ export const buildNotesResponseSchema = (
       ...(turnLabels.length
         ? { items: { type: 'string', enum: turnLabels } }
         : {}),
-      maxItems: 3,
+      maxItems: maxSourceSpans,
     };
     const compactTitle = object(
       {

@@ -3,6 +3,8 @@ import {
   OLLAMA_GENERAL_MODEL,
   OLLAMA_QUICK_CHAT_MODEL,
 } from '../../src/utils/ollamaModels';
+import { ChatGPTError } from '../chatgpt/auth';
+import { getChatGPTAuth } from '../chatgpt/runtime';
 import { askPlutoTimeoutMs } from '../intelligence/askPlutoDeadline';
 import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
 import { isSerializedTaskPreemption } from '../serializedTaskGate';
@@ -17,7 +19,9 @@ import {
   type LocalInferenceTask,
   runWithLocalInferenceCoordinator,
 } from './inferenceCoordinator';
+import type { InferenceRequest } from './inferenceTypes';
 import type { LLMWorkClass } from './llmWorkClass';
+import { notesContextTokens, notesSourceSpanLimit } from './meetingNotesBudget';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
 import {
   type CompletedWriter,
@@ -34,6 +38,7 @@ import type {
   NotesStageOutcome,
 } from './meetingNotesRunMetrics';
 import { buildNotesResponseSchema } from './meetingNotesSchema';
+import { reviewSourceBoundNotes } from './meetingNotesSemanticReview';
 import { createNotesSourceFromText } from './meetingNotesSource';
 import { createNotesStreamPreview } from './meetingNotesStreamPreview';
 import type { ResolvedMeetingNotesTemplate } from './meetingNotesTemplates';
@@ -61,6 +66,7 @@ import type {
   LLMSettings,
   ProviderType,
 } from './provider';
+import { ChatGPTInferenceError, executeChatGPT } from './transports/chatGPT';
 import {
   InferenceTransportError,
   executeOpenAICompatible,
@@ -409,6 +415,7 @@ export async function releaseIdleOllamaModel(
     key: Symbol('idleModelCleanup'),
     task: 'dreamingCleanup',
     workClass: 'background',
+    signal: AbortSignal.timeout(5_000),
     run: async (signal) => {
       if (
         epoch !== ollamaActivityEpoch ||
@@ -548,7 +555,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     private settings: LLMSettings,
   ) {
     this.name = this.getProviderName(providerType);
-    this.requiresApiKey = providerType !== 'ollama';
+    this.requiresApiKey =
+      providerType !== 'ollama' && providerType !== 'chatgpt';
   }
 
   async isAvailable(): Promise<boolean> {
@@ -564,6 +572,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       }
       case 'gemini':
         return !!this.settings.gemini_api_key;
+      case 'chatgpt':
+        return getChatGPTAuth().status().planEnabled;
       case 'openai':
         return !!this.settings.openai_api_key;
       case 'openrouter':
@@ -627,6 +637,10 @@ export class UnifiedLLMProvider implements LLMProvider {
     } = {},
   ): Promise<AnalysisDocumentV3> {
     if (options.signal?.aborted) throw new MeetingNotesError('notes_cancelled');
+    const hierarchyAuditStrategy =
+      this.providerType === 'chatgpt'
+        ? 'deterministic_only'
+        : options.hierarchyAuditStrategy;
     const model =
       this.providerType === 'ollama'
         ? await this.resolveOllamaModel('notesWriter')
@@ -639,7 +653,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       options.reuseWriterContext !== false
         ? {}
         : undefined;
-    return generateMeetingNotes({
+    const analysis = await generateMeetingNotes({
       source,
       context: {
         userNotes: userNotes ?? '',
@@ -649,10 +663,51 @@ export class UnifiedLLMProvider implements LLMProvider {
       },
       stageCache: options.stageCache,
       cacheKey: options.cacheKey,
-      hierarchyAuditStrategy: options.hierarchyAuditStrategy,
+      hierarchyAuditStrategy,
+      ...(['ollama', 'chatgpt'].includes(this.providerType) &&
+      hierarchyAuditStrategy === 'deterministic_only'
+        ? {
+            reviewSourceBoundNotes: (
+              notes: import('./meetingNotesAudit').AuditedNotes,
+            ) =>
+              reviewSourceBoundNotes(
+                notes,
+                async ({ prompt, responseSchema }) => {
+                  if (
+                    options.optionalReviewDeadlineAtMs !== undefined &&
+                    Date.now() + 90_000 >= options.optionalReviewDeadlineAtMs
+                  )
+                    throw new Error('semantic_review_publication_reserve');
+                  options.onStage?.('notesAudit');
+                  return this.generateText({
+                    prompt,
+                    responseSchema,
+                    task: 'notesAudit',
+                    jsonMode: true,
+                    notesModel: model,
+                    notesStageObserver: options.onStageEvent,
+                    notesBudget: {
+                      contextTokens:
+                        this.providerType === 'chatgpt' ? 32768 : 8192,
+                      outputTokens: 1536,
+                    },
+                    workClass: options.workClass,
+                    signal: options.signal
+                      ? AbortSignal.any([
+                          options.signal,
+                          AbortSignal.timeout(90_000),
+                        ])
+                      : AbortSignal.timeout(90_000),
+                  });
+                },
+                options.signal,
+                this.providerType === 'chatgpt' ? 48_000 : 12_000,
+              ),
+          }
+        : {}),
       reviewProtocol:
         options.compactWriterContract &&
-        options.hierarchyAuditStrategy !== 'deterministic_only'
+        hierarchyAuditStrategy !== 'deterministic_only'
           ? 'editor'
           : undefined,
       compactWriterContract: options.compactWriterContract,
@@ -695,11 +750,14 @@ export class UnifiedLLMProvider implements LLMProvider {
                 }),
               }
             : {}),
-          ...(['ollama', 'openai', 'openrouter'].includes(this.providerType)
+          ...(['ollama', 'openai', 'openrouter', 'chatgpt'].includes(
+            this.providerType,
+          )
             ? {
                 notesResponseSchema: buildNotesResponseSchema(
                   request.responseContract,
                   wire.sourceLabels,
+                  notesSourceSpanLimit(this.providerType),
                 ),
               }
             : {}),
@@ -717,9 +775,11 @@ export class UnifiedLLMProvider implements LLMProvider {
       },
       provider: this.providerType,
       model,
-      contextTokens: options.contextTokens ?? 16_384,
+      contextTokens:
+        options.contextTokens ?? notesContextTokens(this.providerType),
       ...(options.signal ? { signal: options.signal } : {}),
     });
+    return analysis;
   }
 
   async precomputeStructuredAnalysisLeaf(
@@ -772,11 +832,14 @@ export class UnifiedLLMProvider implements LLMProvider {
           task: request.task,
           jsonMode: true,
           signal: request.signal,
-          ...(['ollama', 'openai', 'openrouter'].includes(this.providerType)
+          ...(['ollama', 'openai', 'openrouter', 'chatgpt'].includes(
+            this.providerType,
+          )
             ? {
                 notesResponseSchema: buildNotesResponseSchema(
                   request.responseContract,
                   wire.sourceLabels,
+                  notesSourceSpanLimit(this.providerType),
                 ),
               }
             : {}),
@@ -792,7 +855,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       },
       provider: this.providerType,
       model,
-      contextTokens: options.contextTokens ?? 16_384,
+      contextTokens:
+        options.contextTokens ?? notesContextTokens(this.providerType),
       ...(options.signal ? { signal: options.signal } : {}),
     });
   }
@@ -805,6 +869,11 @@ export class UnifiedLLMProvider implements LLMProvider {
           this.settings.llm_model ||
           NOTES_OLLAMA_MODEL
         );
+      case 'chatgpt': {
+        const model = this.settings.chatgpt_model?.trim();
+        if (!model) throw new ChatGPTError('chatgpt_model_required');
+        return model;
+      }
       case 'openai':
         return this.settings.openai_model || 'gpt-4o-mini';
       case 'openrouter':
@@ -1000,7 +1069,11 @@ export class UnifiedLLMProvider implements LLMProvider {
       onProgress?: () => void;
     } = {},
   ): Promise<string> {
-    if (options.purpose === 'dreaming' && this.providerType !== 'ollama') {
+    if (
+      options.purpose === 'dreaming' &&
+      this.providerType !== 'ollama' &&
+      this.providerType !== 'chatgpt'
+    ) {
       throw new Error('dreaming_local_provider_required');
     }
     if (
@@ -1075,13 +1148,27 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   async classifyQueryIntent(
     prompt: string,
-    options: { signal?: AbortSignal; workClass?: LLMWorkClass } = {},
+    options: {
+      signal?: AbortSignal;
+      workClass?: LLMWorkClass;
+      purpose?: 'meetingScope';
+      responseSchema?: Record<string, unknown>;
+      onStart?: () => void;
+      onProgress?: () => void;
+    } = {},
   ): Promise<string> {
     return this.generateText({
       prompt,
-      task: 'queryClassification',
+      task:
+        options.purpose === 'meetingScope'
+          ? 'askPlutoScope'
+          : 'queryClassification',
       jsonMode: true,
+      responseSchema: options.responseSchema,
       signal: options.signal,
+      workClass: options.workClass,
+      onStart: options.onStart,
+      onProgress: options.onProgress,
     });
   }
 
@@ -1127,6 +1214,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         return 'Ollama (Local)';
       case 'gemini':
         return 'Google Gemini';
+      case 'chatgpt':
+        return 'ChatGPT';
       case 'openai':
         return 'OpenAI';
       case 'openrouter':
@@ -1201,6 +1290,10 @@ export class UnifiedLLMProvider implements LLMProvider {
       options.signal?.throwIfAborted();
       let result: string;
       switch (this.providerType) {
+        case 'chatgpt':
+          observeNotesStarted();
+          result = await this.generateWithOpenAICompatible(options);
+          break;
         case 'openai':
         case 'openrouter':
           observeNotesStarted();
@@ -1314,16 +1407,22 @@ export class UnifiedLLMProvider implements LLMProvider {
     notesModel,
     notesResponseSchema,
     onNotesMetrics,
+    onToken,
+    onProgress,
+    onStart,
+    workClass,
   }: TextGenerationOptions): Promise<string> {
-    const provider = this.providerType as 'openai' | 'openrouter';
+    const provider = this.providerType as 'openai' | 'openrouter' | 'chatgpt';
     const apiKey =
       provider === 'openrouter'
         ? this.settings.openrouter_api_key
         : this.settings.openai_api_key;
-    if (!apiKey) throw new Error(`${provider} API key not configured`);
+    if (provider !== 'chatgpt' && !apiKey)
+      throw new Error(`${provider} API key not configured`);
     try {
-      const result = await executeOpenAICompatible(provider, apiKey, {
+      const request: InferenceRequest = {
         task,
+        workClass,
         model:
           notesModel ||
           (provider === 'openrouter'
@@ -1343,16 +1442,28 @@ export class UnifiedLLMProvider implements LLMProvider {
         // constraints outside the strict OpenAI schema subset. The local
         // parser, grounding checks, and one-repair pass remain authoritative.
         responseSchemaStrict: notesBudget ? false : undefined,
-        maxOutputTokens: notesBudget?.outputTokens,
+        maxOutputTokens:
+          notesBudget?.outputTokens ??
+          (task === 'askPlutoScope' ? 512 : undefined),
         // A rejected 429 request is safe to retry once. Do not silently switch
         // providers or models, and leave interactive chat retries to the user.
         rateLimitRetries: notesBudget ? 1 : 0,
         signal,
         egress: {
-          classification: 'selected_meeting_context',
+          classification: 'selected_meeting_context' as const,
           userInitiated: task !== 'dreaming',
         },
-      });
+      };
+      const result =
+        provider === 'chatgpt'
+          ? await executeChatGPT(
+              {
+                ...request,
+                model: notesModel || this.getConfiguredAnalysisModel(),
+              },
+              { onToken, onProgress, onStart },
+            )
+          : await executeOpenAICompatible(provider, apiKey!, request);
       onNotesMetrics?.(result.usage);
       if (notesBudget && result.finishReason === 'length')
         throw new MeetingNotesError('notes_output_truncated');
@@ -1363,11 +1474,16 @@ export class UnifiedLLMProvider implements LLMProvider {
         throw new Error('commitment_response_incomplete');
       return result.text;
     } catch (error) {
-      if (notesBudget && error instanceof InferenceTransportError) {
+      if (
+        notesBudget &&
+        (error instanceof InferenceTransportError ||
+          error instanceof ChatGPTInferenceError)
+      ) {
         throw new MeetingNotesError(
           error.reportsInputOverflow
             ? 'notes_input_overflow'
-            : error.code === 'provider_rate_limited'
+            : error.code === 'provider_rate_limited' ||
+                error.code === 'subscription_sharing_usage_limit_exceeded'
               ? 'notes_provider_rate_limited'
               : 'notes_provider_error',
           undefined,
@@ -1553,6 +1669,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
     if (
       task === 'queryClassification' ||
+      task === 'askPlutoScope' ||
       task === 'projectScopeReview' ||
       task === 'commitmentReconciliation' ||
       task === 'title' ||
@@ -2001,7 +2118,11 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
-    if (task === 'askPlutoLive' || task === 'queryClassification') {
+    if (
+      task === 'askPlutoLive' ||
+      task === 'queryClassification' ||
+      task === 'askPlutoScope'
+    ) {
       return (
         (this.settings.ollama_fast_model || '').trim() ||
         OLLAMA_QUICK_CHAT_MODEL
@@ -2155,7 +2276,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'askPluto' || task === 'askPlutoDeep') {
       return 'You are an intelligent meeting assistant.';
     }
-    if (task === 'queryClassification') {
+    if (task === 'queryClassification' || task === 'askPlutoScope') {
       return 'You are an exact expert intent classifier. Reply with valid JSON only.';
     }
     return 'You are an intelligent meeting assistant.';
@@ -2182,7 +2303,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'knowledgeDoc') return 0.2;
     if (task === 'title') return 0.5;
     if (task === 'askPluto' || task === 'askPlutoDeep') return 0.2;
-    if (task === 'queryClassification') return 0.1;
+    if (task === 'queryClassification' || task === 'askPlutoScope') return 0.1;
     return 0.3;
   }
 
@@ -2205,6 +2326,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'askPluto') return 1024;
     if (task === 'askPlutoDeep') return 2048;
     if (task === 'askPlutoLive') return 768;
+    if (task === 'askPlutoScope') return 512;
     if (task === 'queryClassification') return 128;
     return 50;
   }
@@ -2277,25 +2399,27 @@ export function calculateOllamaContextBudget(
 ): { num_ctx: number; num_predict: number } {
   const outputTokenBudget =
     outputTokens ??
-    (task === 'queryClassification'
-      ? 128
-      : task === 'title'
-        ? 64
-        : task === 'askPlutoLive'
-          ? 768
-          : task === 'askPluto'
+    (task === 'askPlutoScope'
+      ? 512
+      : task === 'queryClassification'
+        ? 128
+        : task === 'title'
+          ? 64
+          : task === 'askPlutoLive'
             ? 768
-            : task === 'askPlutoDeep'
-              ? 1024
-              : task === 'analysisEditorial'
-                ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
-                : task === 'terminologyReconciliation'
-                  ? 2048
-                  : task === 'knowledgeDoc' ||
-                      task === 'structuredAnalysis' ||
-                      task === 'summary'
-                    ? 4096
-                    : 2500);
+            : task === 'askPluto'
+              ? 768
+              : task === 'askPlutoDeep'
+                ? 1024
+                : task === 'analysisEditorial'
+                  ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
+                  : task === 'terminologyReconciliation'
+                    ? 2048
+                    : task === 'knowledgeDoc' ||
+                        task === 'structuredAnalysis' ||
+                        task === 'summary'
+                      ? 4096
+                      : 2500);
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =

@@ -100,7 +100,9 @@ describe('Ask Pluto request deadline', () => {
   it('does not shorten local startup allowance when the model starts before a slow first token', async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
-    let progress: ((phase?: 'started' | 'token') => void) | undefined;
+    let progress:
+      | ((phase?: 'queued' | 'started' | 'token') => void)
+      | undefined;
     const work = new Promise<string>((resolve) => {
       setTimeout(() => progress?.('started'), 2_000);
       setTimeout(() => progress?.('token'), 75_000);
@@ -224,4 +226,46 @@ describe('Ask Pluto request deadline', () => {
     await rejection;
     expect(controller.signal.aborted).toBe(true);
   });
+});
+
+it('gives a queued request bounded waiting time and starts its response allowance only at admission', async () => {
+  vi.useFakeTimers();
+  const controller = new AbortController();
+  let progress: ((phase?: 'queued' | 'started' | 'token') => void) | undefined;
+  const work = new Promise<string>((resolve) => {
+    setTimeout(() => progress?.('queued'), 1);
+    setTimeout(() => progress?.('started'), 70_000);
+    setTimeout(() => resolve('answer'), 95_000);
+  });
+  const response = runAskPlutoWithDeadline(work, controller, 30_000, {
+    onProgressSetup: (fn) => {
+      progress = fn;
+    },
+    queueTimeoutMs: 100_000,
+  });
+  await vi.advanceTimersByTimeAsync(69_000);
+  expect(controller.signal.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(26_000);
+  await expect(response).resolves.toBe('answer');
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('still expires queued requests and cancels them immediately when the user stops', async () => {
+  vi.useFakeTimers();
+  for (const stop of [false, true]) {
+    const controller = new AbortController();
+    const response = runAskPlutoWithDeadline(
+      new Promise(() => {}),
+      controller,
+      30_000,
+      { onProgressSetup: (fn) => fn('queued'), queueTimeoutMs: 60_000 },
+    );
+    const failure = expect(response).rejects.toMatchObject({
+      name: stop ? 'AbortError' : 'TimeoutError',
+    });
+    if (stop) controller.abort(new DOMException('Stopped', 'AbortError'));
+    else await vi.advanceTimersByTimeAsync(60_000);
+    await failure;
+    expect(vi.getTimerCount()).toBe(0);
+  }
 });

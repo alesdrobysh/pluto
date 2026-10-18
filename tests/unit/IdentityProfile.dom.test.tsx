@@ -33,16 +33,23 @@ describe('About you form and invitation', () => {
   let root: ReturnType<typeof createRoot>;
   let invoke: ReturnType<typeof vi.fn>;
   let savedStep: string;
+  let intelligenceComplete: boolean;
   let profileState: IdentityState;
   beforeEach(() => {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
     savedStep = '3';
+    intelligenceComplete = true;
     profileState = initial();
     invoke = vi.fn(async (channel: string, payload?: unknown) => {
-      if (channel === 'GET_SETTING')
-        return payload === 'setup_step' ? savedStep : null;
+      if (channel === 'GET_SETTING') {
+        if (payload === 'setup_step') return savedStep;
+        if (payload === 'intelligence_setup_complete')
+          return intelligenceComplete ? 'true' : null;
+        if (payload === 'llm_provider') return 'ollama';
+        return null;
+      }
       if (channel === 'GET_IDENTITY_STATE') return profileState;
       if (channel === 'SAVE_IDENTITY_PROFILE') {
         const data = payload as IdentityState['profile'];
@@ -423,6 +430,29 @@ describe('About you form and invitation', () => {
     await click('Dismiss About you invitation');
     expect(container.querySelector('[role="alert"]')).toBeTruthy();
     expect(container.textContent).toContain('About you');
+  });
+
+  it('lets an unfinished setup choose Ollama before the profile without requesting sign-in', async () => {
+    intelligenceComplete = false;
+    await act(async () => root.render(<SetupWizard onComplete={vi.fn()} />));
+    expect(container.textContent).toContain('How should Pluto think?');
+    await act(async () =>
+      container
+        .querySelector<HTMLInputElement>('input[value="ollama"]')!
+        .click(),
+    );
+    await click('Use Ollama');
+    expect(container.textContent).toContain('A little about you');
+    expect(invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'llm_provider',
+      value: 'ollama',
+    });
+    expect(invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'intelligence_setup_complete',
+      value: 'true',
+    });
+    expect(invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+    expect(invoke).not.toHaveBeenCalledWith('RECORDING_READINESS_PREPARE');
   });
 
   it('resumes the third onboarding step without rerunning recording preparation', async () => {

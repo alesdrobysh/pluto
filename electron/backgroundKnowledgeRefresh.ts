@@ -16,11 +16,12 @@ export interface BackgroundKnowledgeRefreshSnapshot {
 export const createBackgroundKnowledgeRefreshCoordinator = (options: {
   getPolicy: () => BackgroundKnowledgeRefreshPolicy;
   run: (meetingId: string, signal: AbortSignal) => Promise<void>;
+  canRun?: (meetingId: string) => boolean;
   quietMs?: number;
   retryMs?: number;
   monitorMs?: number;
   // Resource-admitted work can continue through ordinary keyboard/mouse use.
-  ignoreForegroundActivity?: boolean;
+  ignoreForegroundActivity?: boolean | (() => boolean);
   rotateOnRetry?: boolean;
   now?: () => number;
   onError?: (error: unknown, meetingId: string) => void;
@@ -54,11 +55,16 @@ export const createBackgroundKnowledgeRefreshCoordinator = (options: {
     if (typeof timer === 'object' && 'unref' in timer) timer.unref();
   };
 
-  const isEligible = () => {
+  const ignoreForeground = () =>
+    typeof options.ignoreForegroundActivity === 'function'
+      ? options.ignoreForegroundActivity()
+      : options.ignoreForegroundActivity;
+  const isEligible = (continuing = false) => {
     const policy = options.getPolicy();
     return (
-      now() - lastForegroundActivityAt >= quietMs &&
-      policy.systemIdleSeconds * 1_000 >= quietMs &&
+      ((continuing && ignoreForeground()) ||
+        (now() - lastForegroundActivityAt >= quietMs &&
+          policy.systemIdleSeconds * 1_000 >= quietMs)) &&
       !policy.onBattery &&
       (policy.thermalState === 'nominal' || policy.thermalState === 'fair') &&
       !policy.paused
@@ -78,11 +84,15 @@ export const createBackgroundKnowledgeRefreshCoordinator = (options: {
       return;
     }
 
-    const meetingId = pending.values().next().value as string;
+    const meetingId = [...pending].find((id) => options.canRun?.(id) !== false);
+    if (!meetingId) {
+      schedule(retryMs);
+      return;
+    }
     const controller = new AbortController();
     active = { meetingId, controller };
     monitorTimer = setInterval(() => {
-      if (!isEligible()) {
+      if (!isEligible(true)) {
         controller.abort(
           new DOMException('Background capacity changed', 'AbortError'),
         );
@@ -131,7 +141,7 @@ export const createBackgroundKnowledgeRefreshCoordinator = (options: {
     },
     notifyForegroundActivity() {
       if (closed) return;
-      if (options.ignoreForegroundActivity) return;
+      if (ignoreForeground()) return;
       lastForegroundActivityAt = now();
       active?.controller.abort(
         new DOMException('Foreground activity resumed', 'AbortError'),

@@ -20,6 +20,20 @@ const projectRoot = path.resolve(import.meta.dirname, '../..');
 const execFileAsync = promisify(execFile);
 
 describe('packaged runtime resources', () => {
+  it('copies the production main process explicitly instead of relying on development output', () => {
+    const raw = readFileSync(
+      path.join(projectRoot, 'electron-builder.json5'),
+      'utf8',
+    );
+    const config = JSON.parse(raw.slice(raw.indexOf('{')));
+    expect(config.files).toContainEqual({
+      from: 'dist-electron-package',
+      to: 'dist-electron',
+      filter: ['**/*'],
+    });
+    expect(config.files).not.toContain('dist-electron');
+  });
+
   it('cleans packaging output without removing a running development preload', async () => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'pluto-build-'));
     try {

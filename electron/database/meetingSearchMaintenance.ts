@@ -349,6 +349,7 @@ export const repairMeetingContextSectionIndex = (
     sqlite.prepare('DELETE FROM meeting_context_sections').run();
     for (const meeting of meetings) {
       refreshMeetingContextSections(sqlite, meeting);
+      refreshMeetingNotesFts(sqlite, meeting);
     }
   })();
   const repaired = getMeetingContextSectionIntegrity(sqlite);

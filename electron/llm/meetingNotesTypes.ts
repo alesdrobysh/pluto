@@ -2,7 +2,7 @@ import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import type { AnalysisProvider, MeetingType } from './analysisTypes';
 
 // Shared by generation metadata and persistent run/cache identity.
-export const NOTES_PROMPT_VERSION = 'notes-v33';
+export const NOTES_PROMPT_VERSION = 'notes-v37';
 export const NOTES_OLLAMA_MODEL = OLLAMA_GENERAL_MODEL;
 export const NOTES_EDITOR_PROMPT_VERSION = NOTES_PROMPT_VERSION;
 
@@ -127,6 +127,9 @@ export type GenerateMeetingNotesInput = {
   source: NotesSource;
   context: NotesContext;
   generate: GenerateNotesText;
+  reviewSourceBoundNotes?: (
+    notes: import('./meetingNotesAudit').AuditedNotes,
+  ) => Promise<import('./meetingNotesAudit').AuditedNotes>;
   provider: AnalysisProvider;
   model: string;
   contextTokens: number;

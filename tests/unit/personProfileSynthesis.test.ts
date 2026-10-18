@@ -4,10 +4,12 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 const fixture = vi.hoisted(() => ({
   directory: `/tmp/pluto-profile-synthesis-${process.pid}`,
   synthesize: vi.fn(),
+  providerName: 'Ollama',
 }));
 vi.mock('electron', () => ({ app: { getPath: () => fixture.directory } }));
 vi.mock('../../electron/llm/factory', () => ({
   getProvider: async () => ({
+    name: fixture.providerName,
     synthesizeKnowledgeDocument: fixture.synthesize,
   }),
   getAllSettings: () => ({}),
@@ -94,5 +96,43 @@ describe('comprehensive person profile publication', () => {
     expect(failed?.status).toBe('failed');
     expect(failed?.structured_json).toBe(saved?.structured_json);
     expect(db.getKnowledgeDocVersions(doc.id)).toHaveLength(versions);
+  });
+  it('synthesizes all cloud profile sources once and does not split a failed paid request', async () => {
+    fixture.providerName = 'ChatGPT';
+    fixture.synthesize.mockClear();
+    fixture.synthesize.mockImplementation(async (prompt: string) => {
+      const ids = [...prompt.matchAll(/- id: (meeting-\d)/g)].map(
+        (match) => match[1],
+      );
+      expect(new Set(ids).size).toBe(3);
+      return JSON.stringify({
+        profile: [
+          {
+            section: 'overview',
+            summary: 'Avery requested written recommendations.',
+            citations: ids.map((id) => ({
+              meeting_id: id,
+              quote: `Avery Chen requested a written recommendation for review ${id.at(-1)}.`,
+            })),
+          },
+        ],
+      });
+    });
+    const doc = db.getKnowledgeDocByScope('person_context', 'profile-person')!;
+    const saved = await refreshKnowledgeDocNow(doc.id, { userRequested: true });
+    expect(saved?.status).toBe('up_to_date');
+    expect(fixture.synthesize).toHaveBeenCalledTimes(1);
+    expect(readPersonProfile(saved?.structured_json)[0].citations).toHaveLength(
+      3,
+    );
+    fixture.synthesize
+      .mockClear()
+      .mockRejectedValue(new Error('context_length_exceeded'));
+    const failed = await refreshKnowledgeDocNow(doc.id, {
+      userRequested: true,
+    });
+    expect(fixture.synthesize).toHaveBeenCalledTimes(1);
+    expect(failed?.status).toBe('failed');
+    expect(failed?.structured_json).toBe(saved?.structured_json);
   });
 });

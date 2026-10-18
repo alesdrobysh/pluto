@@ -28,7 +28,8 @@ export type LocalInferenceTask =
   | 'askPluto'
   | 'askPlutoDeep'
   | 'askPlutoLive'
-  | 'queryClassification';
+  | 'queryClassification'
+  | 'askPlutoScope';
 
 const RESUMABLE_ANALYSIS_TASKS = new Set<LocalInferenceTask>([
   'notesWriter',

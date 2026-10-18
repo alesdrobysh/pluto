@@ -45,6 +45,12 @@ export interface MeetingNotesEvidenceDocument {
   notesText: string;
   decisionsText: string;
   actionItemsText: string;
+  actions?: Array<{
+    text: string;
+    assignee?: string;
+    due?: string;
+    completed?: boolean;
+  }>;
   topicsText: string;
   participantsText: string;
   sourceRevision: string;
@@ -110,7 +116,8 @@ export const buildMeetingNotesEvidenceDocument = (
   options: { prioritizeOpenQuestions?: boolean } = {},
 ): MeetingNotesEvidenceDocument => {
   const v3 = parseAnalysisDocumentV3Json(meeting.analysis_json);
-  const mid = parseMidEvidence(meeting.mid_json);
+  // Legacy model metadata must not expand identities in authoritative notes.
+  const mid: MidEvidence = v3 ? {} : parseMidEvidence(meeting.mid_json);
   const normalizedV3 = v3
     ? {
         ...v3,
@@ -197,11 +204,24 @@ export const buildMeetingNotesEvidenceDocument = (
         ]
       : noteSections;
 
+  const evidenceBlockText = (
+    block: NonNullable<typeof blocks>[number],
+  ): string =>
+    block.blockType === 'action'
+      ? [
+          block.assignee ? `[Owner: ${block.assignee}]` : '',
+          block.due?.trim() ? `[Due: ${block.due.trim()}]` : '',
+          block.completed ? '[Status: completed]' : '',
+          block.text,
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : block.text;
   const notesText = notesDocument
     ? uniqueText(
         orderedNoteSections.flatMap((section) =>
           section.blocks.flatMap((block) => [
-            ...(block.blockType === 'review' ? [] : [block.text]),
+            ...(block.blockType === 'review' ? [] : [evidenceBlockText(block)]),
             ...(block.blockType === 'review'
               ? []
               : (block.nativeContinuations || []).map(
@@ -216,7 +236,7 @@ export const buildMeetingNotesEvidenceDocument = (
       ? settledBlocks
           .filter((block) => block.blockType === 'decision')
           .flatMap((block) => [
-            block.text,
+            evidenceBlockText(block),
             ...(block.nativeContinuations || []).map(
               (continuation) => continuation.text,
             ),
@@ -228,7 +248,7 @@ export const buildMeetingNotesEvidenceDocument = (
       ? settledBlocks
           .filter((block) => block.blockType === 'action')
           .flatMap((block) => [
-            block.text,
+            evidenceBlockText(block),
             ...(block.nativeContinuations || []).map(
               (continuation) => continuation.text,
             ),
@@ -258,7 +278,7 @@ export const buildMeetingNotesEvidenceDocument = (
         );
         const content = uniqueText(
           acceptedBlocks.flatMap((block) => [
-            block.text,
+            evidenceBlockText(block),
             ...(block.nativeContinuations || []).map(
               (continuation) => continuation.text,
             ),
@@ -279,7 +299,9 @@ export const buildMeetingNotesEvidenceDocument = (
             sectionId: section.id,
             heading: section.title,
             kind: section.kind,
-            summary: acceptedBlocks[0]?.text.slice(0, 600) || section.title,
+            summary: acceptedBlocks[0]
+              ? evidenceBlockText(acceptedBlocks[0]).slice(0, 600)
+              : section.title,
             content,
             entitiesText,
             evidenceReferences: acceptedBlocks.slice(0, 24).map((block) => ({
@@ -338,12 +360,13 @@ export const buildMeetingNotesEvidenceDocument = (
   const sourceRevision = createHash('sha256')
     .update(
       JSON.stringify({
+        evidenceVersion: 'canonical-note-identities-v4',
         title: meeting.title || '',
         userNotes: meeting.user_notes || '',
         enhancedNotes: meeting.enhanced_notes || '',
         analysis: meeting.analysis_json || '',
         edits: meeting.user_edits_json || '',
-        mid: meeting.mid_json || '',
+        mid: v3 ? '' : meeting.mid_json || '',
       }),
     )
     .digest('hex');
@@ -365,6 +388,18 @@ export const buildMeetingNotesEvidenceDocument = (
     notesText,
     decisionsText,
     actionItemsText,
+    ...(notesDocument
+      ? {
+          actions: settledBlocks!
+            .filter((block) => block.blockType === 'action')
+            .map((block) => ({
+              text: block.text,
+              ...(block.assignee ? { assignee: block.assignee } : {}),
+              ...(block.due?.trim() ? { due: block.due.trim() } : {}),
+              ...(block.completed ? { completed: true } : {}),
+            })),
+        }
+      : {}),
     topicsText,
     participantsText,
     sourceRevision,

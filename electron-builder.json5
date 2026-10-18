@@ -10,7 +10,7 @@
   },
   "files": [
     "dist",
-    { "from": "dist-electron-package", "to": "dist-electron" },
+    { "from": "dist-electron-package", "to": "dist-electron", "filter": ["**/*"] },
     "resources"
   ],
   "extraResources": [

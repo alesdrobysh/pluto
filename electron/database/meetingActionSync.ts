@@ -4,6 +4,8 @@ import {
   canonicalizeActionText,
   parseActionMetadata,
 } from '../../src/utils/actionCommitment';
+import { parseDueDate } from '../actionDueDate';
+
 const truncateAtWordBoundary = (text: string, maxLength = 100): string => {
   if (text.length <= maxLength) return text;
   const truncated = text.substring(0, maxLength);
@@ -24,6 +26,7 @@ interface PersistedMeetingRow {
   id: string;
   user_edits_json: string | null;
   analysis_json: string | null;
+  started_at: string | null;
 }
 
 interface PersistedEntityRow {
@@ -31,6 +34,8 @@ interface PersistedEntityRow {
   type: string;
   name: string;
   status: string;
+  due_date: string | null;
+  assigned_to: string | null;
   metadata: string | null;
 }
 
@@ -57,7 +62,7 @@ export const syncActionCompletionToMeetingNotes = (
   if (typeof meetingId !== 'string' || typeof path !== 'string') return;
   const meeting = sqlite
     .prepare(
-      'SELECT id, user_edits_json, analysis_json FROM meetings WHERE id = ?',
+      'SELECT id, user_edits_json, analysis_json, started_at FROM meetings WHERE id = ?',
     )
     .get(meetingId) as PersistedMeetingRow | undefined;
   if (!meeting) return;
@@ -104,7 +109,7 @@ export const syncMeetingActionEntitiesFromUserEdits = (
 ): MeetingActionSyncResult => {
   const meeting = sqlite
     .prepare(
-      'SELECT id, user_edits_json, analysis_json FROM meetings WHERE id = ?',
+      'SELECT id, user_edits_json, analysis_json, started_at FROM meetings WHERE id = ?',
     )
     .get(meetingId) as PersistedMeetingRow | undefined;
 
@@ -133,6 +138,7 @@ export const syncMeetingActionEntitiesFromUserEdits = (
     text: string;
     assignee?: string | null;
     due?: string | null;
+    evidence?: string;
   }> = [];
   if (meeting.analysis_json) {
     try {
@@ -154,7 +160,7 @@ export const syncMeetingActionEntitiesFromUserEdits = (
   const existingEntities = sqlite
     .prepare(
       `
-      SELECT id, type, name, status, metadata FROM entities
+      SELECT id, type, name, status, due_date, assigned_to, metadata FROM entities
       WHERE type = 'action_item'
         AND (
           json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.source_meeting_id') = ?
@@ -242,7 +248,31 @@ export const syncMeetingActionEntitiesFromUserEdits = (
     claimedEntityIds.add(entity.id);
 
     const meta = parseActionMetadata(entity.metadata);
+    // Require both the source slot and unique evidence before refreshing a suggestion.
+    const evidenceMatches =
+      typeof meta.source_evidence === 'string' && meta.source_evidence.trim()
+        ? actionItems.filter(
+            (candidate) =>
+              typeof candidate.evidence === 'string' &&
+              candidate.evidence.trim() ===
+                (meta.source_evidence as string).trim(),
+          )
+        : [];
+    const correctedItem =
+      evidenceMatches.length === 1 &&
+      evidenceMatches[0] === item &&
+      typeof evidenceMatches[0].text === 'string' &&
+      evidenceMatches[0].text.trim() &&
+      meta.origin === 'extraction' &&
+      meta.commitment_state !== 'confirmed' &&
+      meta.commitment_state !== 'rejected' &&
+      !meta.reviewed_at &&
+      !meta.user_edited &&
+      entity.status !== 'completed'
+        ? evidenceMatches[0]
+        : undefined;
     const baseText =
+      correctedItem?.text ||
       (typeof meta.original_description === 'string' &&
         meta.original_description) ||
       item?.text ||
@@ -273,7 +303,20 @@ export const syncMeetingActionEntitiesFromUserEdits = (
     }
 
     const assignee =
-      typeof meta.assignee_name === 'string' ? meta.assignee_name : undefined;
+      correctedItem && meta.owner_source !== 'user'
+        ? (correctedItem.assignee ?? undefined)
+        : typeof meta.assignee_name === 'string'
+          ? meta.assignee_name
+          : undefined;
+    const dueDate = correctedItem
+      ? parseDueDate(correctedItem.due ?? '', meeting.started_at)
+      : entity.due_date;
+    const assignedTo =
+      correctedItem &&
+      meta.owner_source !== 'user' &&
+      assignee !== meta.assignee_name
+        ? null
+        : entity.assigned_to;
     const canonical = canonicalizeActionText(effectiveText, assignee);
     const newName = truncateAtWordBoundary(canonical || effectiveText, 100);
 
@@ -283,6 +326,11 @@ export const syncMeetingActionEntitiesFromUserEdits = (
       entity.status !== effectiveStatus ||
       meta.source_path !== v3Path ||
       meta.source_index !== index ||
+      (correctedItem &&
+        (meta.assignee_name !== assignee ||
+          meta.source_due_date !== correctedItem.due ||
+          entity.due_date !== dueDate ||
+          entity.assigned_to !== assignedTo)) ||
       Boolean(meta.user_edited) !== isUserEdited ||
       Boolean(meta.user_completed_edited) !== Boolean(completionEdit);
 
@@ -303,6 +351,13 @@ export const syncMeetingActionEntitiesFromUserEdits = (
             : baseText,
         source_path: v3Path,
         source_index: index,
+        ...(correctedItem
+          ? {
+              assignee_name: assignee,
+              source_due_date: correctedItem.due,
+              source_evidence: correctedItem.evidence,
+            }
+          : {}),
       };
 
       if (isUserEdited) {
@@ -325,7 +380,10 @@ export const syncMeetingActionEntitiesFromUserEdits = (
           `
         UPDATE entities SET
           name = ?,
+          normalized_name = ?,
           status = ?,
+          due_date = ?,
+          assigned_to = ?,
           metadata = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -333,7 +391,10 @@ export const syncMeetingActionEntitiesFromUserEdits = (
         )
         .run(
           newName,
+          newName.toLowerCase().trim(),
           effectiveStatus,
+          dueDate,
+          assignedTo,
           JSON.stringify(updatedMetadata),
           entity.id,
         );
@@ -532,7 +593,7 @@ export const syncMeetingActionEntitiesFromUserEdits = (
 };
 
 /**
- * Scan and synchronize all meetings that have user edits.
+ * Synchronize edited notes and pending extractions from their saved evidence.
  * Used during startup recovery and migration.
  */
 export const syncAllMeetingActionEntitiesFromUserEdits = (
@@ -542,9 +603,17 @@ export const syncAllMeetingActionEntitiesFromUserEdits = (
     .prepare(
       `
       SELECT id FROM meetings
-      WHERE user_edits_json IS NOT NULL
+      WHERE (user_edits_json IS NOT NULL
         AND user_edits_json != ''
-        AND user_edits_json != '{}'
+        AND user_edits_json != '{}')
+        OR (analysis_json IS NOT NULL AND id IN (
+          SELECT json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.source_meeting_id') FROM entities
+          WHERE type = 'action_item'
+            AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+              '$.origin') = 'extraction'
+            AND json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END,
+              '$.commitment_state') = 'possible'
+        ))
     `,
     )
     .all() as Array<{ id: string }>;
