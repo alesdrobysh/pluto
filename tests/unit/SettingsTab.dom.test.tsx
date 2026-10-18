@@ -410,6 +410,12 @@ describe('SettingsTab', () => {
     await act(async () => providerButton!.click());
     const dialog = document.body.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
+    expect(dialog!.textContent).toContain('a full meeting transcript');
+    expect(dialog!.textContent).toContain('background updates you enable');
+    expect(dialog!.textContent).toContain(
+      'Pluto stores your audio and meeting history locally.',
+    );
+    expect(dialog!.textContent).not.toContain('only durable memory store');
     expect(container.contains(dialog)).toBe(false);
     expect(dialog!.parentElement!.parentElement).toBe(document.body);
     expect(dialog!.parentElement!.classList.contains('fixed')).toBe(true);

@@ -1657,11 +1657,12 @@ export const SettingsTab = ({
                   ?
                 </h2>
                 <p className="mt-3 text-sm leading-6 text-pro-text-muted">
-                  Selected transcript excerpts, notes, questions, and relevant
-                  local context may leave this Mac, including for background
-                  People and Project updates. Recording and transcription stay
-                  local. Audio never leaves. Requests are stateless, and Pluto
-                  remains the only durable memory store.
+                  Transcript text, including a full meeting transcript when
+                  generating notes, may be sent to this provider along with
+                  notes, questions, and relevant context. This includes any
+                  background updates you enable. Recording and transcription
+                  stay on this Mac. Pluto stores your audio and meeting history
+                  locally.
                 </p>
                 <div className="mt-6 flex justify-end gap-2">
                   <button
