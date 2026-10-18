@@ -44,7 +44,6 @@ const fixture = (
   return { notes, source, sources };
 };
 const resolution = (values: Record<string, unknown> = {}) => ({
-  id: 'I0',
   kind: 'accepted_action',
   text: 'Tell Morgan about the pilot soon',
   owner: 'Remote Speaker 2',
@@ -54,8 +53,7 @@ const resolution = (values: Record<string, unknown> = {}) => ({
 });
 const response = (values: Record<string, unknown> = {}) =>
   JSON.stringify({
-    unchanged: { point: [], question: [] },
-    resolutions: [resolution(values)],
+    reviews: { I0: resolution(values) },
     additions: [],
     overview: null,
   });
@@ -68,6 +66,9 @@ describe('bounded source-bound semantic notes review', () => {
     const reviewed = await reviewSourceBoundNotes(notes, generate);
     const result = projectAuditedNotes(reviewed);
     expect(generate).toHaveBeenCalledOnce();
+    await expect(generate.mock.results[0]?.value).resolves.toEqual(
+      expect.any(String),
+    );
     expect(result.all_action_items).toHaveLength(1);
     expect(result.all_action_items[0]).toMatchObject({
       text: 'Tell Morgan about the pilot soon',
@@ -144,21 +145,26 @@ describe('bounded source-bound semantic notes review', () => {
     expect(block?.sources.map((span) => span.segment)).toEqual([0, 1, 2]);
   });
 
-  it('constrains unassigned results to null owner, due and discussion in the response schema', async () => {
+  it('requires every draft id and constrains narrative results to null owner and due', async () => {
     const { notes } = fixture();
-    await reviewSourceBoundNotes(notes, async ({ responseSchema }) => {
-      const schema = responseSchema as any;
-      const branches = schema.properties.resolutions.items.anyOf;
-      expect(branches).toHaveLength(2);
-      expect(branches[0].properties.kind.enum).toEqual([
-        'accepted_action',
-        'settled_choice',
-      ]);
-      expect(branches[1].properties.kind.enum).toEqual(['point', 'question']);
-      for (const key of ['owner', 'due', 'discussion'])
-        expect(branches[1].properties[key]).toEqual({ type: 'null' });
-      return response();
-    });
+    const generate = vi.fn(
+      async (_request: { responseSchema: Record<string, unknown> }) =>
+        response(),
+    );
+    await reviewSourceBoundNotes(notes, generate);
+    const schema = generate.mock.calls[0]![0].responseSchema as any;
+    expect(schema.properties.reviews.required).toEqual(['I0']);
+    expect(schema.properties.reviews.additionalProperties).toBe(false);
+    const branches = schema.properties.reviews.properties.I0.anyOf[1].anyOf;
+    expect(branches).toHaveLength(2);
+    expect(branches[0].properties.kind.enum).toEqual([
+      'accepted_action',
+      'settled_choice',
+    ]);
+    expect(branches[1].properties.kind.enum).toEqual(['point', 'question']);
+    for (const key of ['owner', 'due'])
+      expect(branches[1].properties[key]).toEqual({ type: 'null' });
+    expect(branches[1].properties).not.toHaveProperty('discussion');
   });
 
   it('does not treat the word me in another participant’s speech as the reserved Me identity', async () => {
@@ -288,8 +294,7 @@ describe('bounded source-bound semantic notes review', () => {
     notes.proseReviewItems = [];
     const generate = vi.fn(async () =>
       JSON.stringify({
-        unchanged: { point: ['I0'], question: [] },
-        resolutions: [],
+        reviews: { I0: 'point' },
         additions: [],
         overview: null,
       }),
@@ -297,6 +302,9 @@ describe('bounded source-bound semantic notes review', () => {
     const reviewed = await reviewSourceBoundNotes(notes, generate);
     expect(reviewed.draft).toEqual(notes.draft);
     expect(generate).toHaveBeenCalledOnce();
+    await expect(generate.mock.results[0]?.value).resolves.toEqual(
+      expect.any(String),
+    );
   });
 
   it('coalesces an exact corrected fact also returned as an addition without losing its canonical identity', async () => {
@@ -304,8 +312,7 @@ describe('bounded source-bound semantic notes review', () => {
     const text = 'The draft has not been sent.';
     const generate = vi.fn(async () =>
       JSON.stringify({
-        unchanged: { point: [], question: [] },
-        resolutions: [resolution({ kind: 'point', text, owner: null })],
+        reviews: { I0: resolution({ kind: 'point', text, owner: null }) },
         additions: [
           { kind: 'point', text, owner: null, due: null, sources: ['R0'] },
         ],
@@ -320,6 +327,9 @@ describe('bounded source-bound semantic notes review', () => {
       'semantic_notes_review_unavailable',
     );
     expect(generate).toHaveBeenCalledOnce();
+    await expect(generate.mock.results[0]?.value).resolves.toEqual(
+      expect.any(String),
+    );
   });
 
   it('preserves separate accepted work with the same wording and different source-supported owners', async () => {
@@ -330,8 +340,7 @@ describe('bounded source-bound semantic notes review', () => {
     );
     const reviewed = await reviewSourceBoundNotes(notes, async () =>
       JSON.stringify({
-        unchanged: { point: [], question: [] },
-        resolutions: [resolution({ text })],
+        reviews: { I0: resolution({ text }) },
         additions: [
           {
             kind: 'accepted_action',
@@ -363,6 +372,9 @@ describe('bounded source-bound semantic notes review', () => {
     });
     const reviewed = await reviewSourceBoundNotes(notes, generate);
     expect(generate).toHaveBeenCalledOnce();
+    await expect(generate.mock.results[0]?.value).rejects.toThrow(
+      'usage_limit',
+    );
     expect(reviewed.draft).toEqual(before);
     expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
   });
@@ -431,13 +443,12 @@ describe('bounded source-bound semantic notes review', () => {
     notes.issues?.push('deterministic_unsupported_commitment:other');
     const reviewed = await reviewSourceBoundNotes(notes, async () =>
       JSON.stringify({
-        unchanged: { point: [], question: [] },
+        reviews: {
+          I0: resolution(),
+          I1: resolution({ owner: 'Invented Person' }),
+        },
         additions: [],
         overview: null,
-        resolutions: [
-          resolution(),
-          resolution({ id: 'I1', owner: 'Invented Person' }),
-        ],
       }),
     );
     expect(projectAuditedNotes(reviewed).all_action_items).toHaveLength(1);
@@ -517,8 +528,17 @@ describe('complete-source coverage and source-cited additions', () => {
     overview: unknown = null,
   ) =>
     JSON.stringify({
-      unchanged: { point: resolutions.length ? [] : ['I0'], question: [] },
-      resolutions,
+      reviews: Object.fromEntries(
+        resolutions.length
+          ? resolutions.map((value, index) => {
+              const { id, ...item } = value as {
+                id: string;
+                [key: string]: unknown;
+              };
+              return [id ?? `I${index}`, item];
+            })
+          : [['I0', 'point']],
+      ),
       additions,
       overview,
     });
@@ -589,6 +609,9 @@ describe('complete-source coverage and source-cited additions', () => {
       ]!.sources.map((span) => span.segment),
     ).toEqual([0, 3]);
     expect(generate).toHaveBeenCalledOnce();
+    await expect(generate.mock.results[0]?.value).resolves.toEqual(
+      expect.any(String),
+    );
   });
   it.each(['point', 'accepted_action'])(
     'restores missing %s material even when the writer produced no action candidates',
@@ -727,8 +750,7 @@ describe('complete-source coverage and source-cited additions', () => {
         'I will publish the checklist. If approval arrives, I will enable the pilot.',
       ]);
       return JSON.stringify({
-        unchanged: { point: [], question: [] },
-        resolutions: [resolution({ text: 'Publish the checklist' })],
+        reviews: { I0: resolution({ text: 'Publish the checklist' }) },
         additions: [],
         overview: null,
       });
@@ -753,8 +775,7 @@ describe('complete-source coverage and source-cited additions', () => {
     notes.draft.sections[0]!.items[0]!.kind = 'decision';
     const reviewed = await reviewSourceBoundNotes(notes, async () =>
       JSON.stringify({
-        unchanged: { point: ['I0'], question: [] },
-        resolutions: [],
+        reviews: { I0: 'point' },
         additions: [],
         overview: null,
       }),
@@ -765,36 +786,27 @@ describe('complete-source coverage and source-cited additions', () => {
     );
   });
   it.each([
-    { point: [], question: [] },
-    { point: ['I0', 'I0'], question: [] },
-    { point: ['I0'], question: ['I0'] },
-    { point: ['foreign'], question: [] },
-    { point: [], question: [], accepted_action: ['I0'] },
-    { point: ['I0'], question: null },
-  ])(
-    'rejects missing, duplicate or unsupported unchanged classifications: %j',
-    async (unchanged) => {
-      const { notes } = fixture();
-      const before = structuredClone(notes.draft);
-      const result = await reviewSourceBoundNotes(notes, async () =>
-        JSON.stringify({
-          unchanged,
-          resolutions: [],
-          additions: [],
-          overview: null,
-        }),
-      );
-      expect(result.draft).toEqual(before);
-      expect(result.issues).toContain('semantic_notes_review_unavailable');
-    },
-  );
-  it('rejects an item appearing in both corrections and unchanged entries', async () => {
+    {},
+    { I0: 'accepted_action' },
+    { foreign: 'point' },
+    { I0: [] },
+    { I0: {} },
+    null,
+  ])('rejects missing or unsupported item reviews: %j', async (reviews) => {
+    const { notes } = fixture();
+    const before = structuredClone(notes.draft);
+    const result = await reviewSourceBoundNotes(notes, async () =>
+      JSON.stringify({ reviews, additions: [], overview: null }),
+    );
+    expect(result.draft).toEqual(before);
+    expect(result.issues).toContain('semantic_notes_review_unavailable');
+  });
+  it('rejects extra review ids instead of applying part of a batch', async () => {
     const { notes } = fixture();
     const before = structuredClone(notes.draft);
     const result = await reviewSourceBoundNotes(notes, async () =>
       JSON.stringify({
-        unchanged: { point: ['I0'], question: [] },
-        resolutions: [resolution()],
+        reviews: { I0: resolution(), foreign: 'point' },
         additions: [],
         overview: null,
       }),
@@ -813,8 +825,7 @@ describe('complete-source coverage and source-cited additions', () => {
     ];
     const reviewed = await reviewSourceBoundNotes(notes, async () =>
       JSON.stringify({
-        unchanged: { point: ['I0'], question: [] },
-        resolutions: [],
+        reviews: { I0: 'point' },
         additions: [],
         overview: null,
       }),

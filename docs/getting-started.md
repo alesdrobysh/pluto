@@ -48,16 +48,15 @@ Notes, meeting preparation, and chat use your selected intelligence provider.
 ### Local intelligence with Ollama
 
 [Download Ollama for Mac](https://ollama.com/download/mac), open it, and complete
-its command-line setup. Then download Pluto’s default models:
+its command-line setup. Then download Pluto’s default model:
 
 ```sh
 ollama pull gemma4:12b
-ollama pull phi4-mini:3.8b
 ```
 
-Keep Ollama running. New Pluto setups use **Gemma 4 12B** for analysis and
-**Phi-4 Mini** for fast chat by default. If you previously changed providers,
-select **Ollama** in **Settings → Intelligence** and choose these models.
+Keep Ollama running. Pluto uses **Gemma 4 12B** for notes, answers, and connected
+knowledge. To use another installed model, enter its name under **Settings →
+Intelligence → Local model**. Existing custom model choices are preserved.
 
 Speech models and Ollama models are separate downloads. Local models need
 additional disk space and memory; you can choose smaller installed models in

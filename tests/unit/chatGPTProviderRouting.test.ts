@@ -103,23 +103,23 @@ describe('ChatGPT intelligence routing', () => {
       const fetcher = vi.fn(async (_url, init) => {
         const body = JSON.parse(init.body);
         const schema = body.text.format.schema;
-        if (schema.properties?.resolutions) {
+        if (schema.properties?.reviews) {
           return response(
             JSON.stringify({
-              unchanged: { point: [], question: [] },
-              additions: [],
-              overview: null,
-              resolutions:
-                schema.properties.resolutions.items.anyOf[0].properties.id.enum.map(
-                  (id: string) => ({
-                    id,
+              reviews: Object.fromEntries(
+                schema.properties.reviews.required.map((id: string) => [
+                  id,
+                  {
                     kind: 'accepted_action',
                     text: 'Riley will send the checklist by Monday.',
                     owner: 'Riley',
                     due: 'Monday',
                     sources: ['R0'],
-                  }),
-                ),
+                  },
+                ]),
+              ),
+              additions: [],
+              overview: null,
             }),
           );
         }
@@ -195,23 +195,25 @@ describe('ChatGPT intelligence routing', () => {
       const body = JSON.parse(init.body);
       expect(body.model).toBe('account-model');
       expect(body.text.format.type).toBe('json_schema');
-      if (body.text.format.schema.properties?.resolutions) {
+      if (body.text.format.schema.properties?.reviews) {
         return response(
           JSON.stringify({
-            unchanged: { point: [], question: [] },
+            reviews: Object.fromEntries(
+              body.text.format.schema.properties.reviews.required.map(
+                (id: string) => [
+                  id,
+                  {
+                    kind: 'accepted_action',
+                    text: 'Send the outline',
+                    owner: 'Milo',
+                    due: null,
+                    sources: ['R0'],
+                  },
+                ],
+              ),
+            ),
             additions: [],
             overview: null,
-            resolutions:
-              body.text.format.schema.properties.resolutions.items.anyOf[0].properties.id.enum.map(
-                (id: string) => ({
-                  id,
-                  kind: 'accepted_action',
-                  text: 'Send the outline',
-                  owner: 'Milo',
-                  due: null,
-                  sources: ['R0'],
-                }),
-              ),
           }),
         );
       }

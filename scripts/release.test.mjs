@@ -273,3 +273,47 @@ test('signed CI validation fails closed without credentials and cannot publish',
     ),
   );
 });
+
+test('unsigned CI packaging removes empty signing variables before electron-builder', () => {
+  const workflow = readFileSync(
+    resolve('.github/workflows/release.yml'),
+    'utf8',
+  );
+  const step = workflow
+    .split('      - name: Build and Package DMG\n')[1]
+    .split('      - name: ')[0];
+  const script = step
+    .split('        run: |\n')[1]
+    .split('\n')
+    .map((line) => line.slice(10))
+    .join('\n');
+  const bin = mkdtempSync(resolve(tmpdir(), 'pluto-unsigned-gate-'));
+  try {
+    writeFileSync(
+      resolve(bin, 'pnpm'),
+      '#!/bin/sh\nif [ "$2" = electron-builder ]; then\n  for NAME in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do\n    env | cut -d= -f1 | grep -F -x "$NAME" >/dev/null && exit 63\n  done\nfi\nexit 0\n',
+      { mode: 0o755 },
+    );
+    const result = spawnSync(
+      '/bin/bash',
+      ['--noprofile', '--norc', '-c', script],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          BASH_ENV: undefined,
+          PATH: `${bin}:${process.env.PATH}`,
+          SIGNED_VALIDATION: 'false',
+          CSC_LINK: '',
+          CSC_KEY_PASSWORD: '',
+          APPLE_ID: '',
+          APPLE_APP_SPECIFIC_PASSWORD: '',
+          APPLE_TEAM_ID: '',
+        },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
+  }
+});

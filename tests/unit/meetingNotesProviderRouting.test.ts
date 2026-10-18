@@ -822,17 +822,15 @@ it.each([false, true])(
                 resolve(
                   JSON.stringify({
                     additions: [],
-                    resolutions: [
-                      {
-                        id,
+                    reviews: {
+                      [id]: {
                         kind: 'accepted_action',
                         text: 'Send the outline',
                         owner: 'Milo',
                         due: null,
                         sources: ['R0'],
                       },
-                    ],
-                    unchanged: { point: [], question: [] },
+                    },
                     overview: null,
                   }),
                 ),

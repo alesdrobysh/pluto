@@ -89,10 +89,10 @@ by default. [Connection and usage details →](docs/chatgpt-intelligence.md)
 command. Keep Ollama open, then run this command in Terminal:
 
 ```sh
-ollama pull gemma4:12b && ollama pull phi4-mini:3.8b
+ollama pull gemma4:12b
 ```
 
-Wait for both downloads to finish. Pluto’s speech models handle transcription;
+Wait for the download to finish. Pluto’s speech models handle transcription;
 Ollama’s models handle notes and chat when you choose Ollama—no model settings
 to enter. Existing users keep their provider after updating.
 

@@ -127,6 +127,7 @@ jobs:
           if [[ "$SIGNED_VALIDATION" == true ]]; then
             pnpm exec electron-builder --mac --publish never --config.forceCodeSigning=true --config.mac.hardenedRuntime=true --config.mac.notarize=true
           else
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
             pnpm exec electron-builder --mac --publish never
           fi
 
