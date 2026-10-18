@@ -2286,3 +2286,21 @@ evaluation is explicit and never runs or spends model usage in the unit suite.
 - **Extends:** “Replace pattern-based commitment recovery with source-bound semantic review” and the native MTP adoption plan. Preserve both the source-quality snapshot and the verified ChatGPT branch as separate parents.
 - **Decision:** Keep MTP's full-document completion/cancellation checks, exact action-state matching, personal ownership gates, and provider recovery alongside ChatGPT's semantic review, durable usage admission, coalescing, and historical reuse policy. Merge the compact writer guidance for current commitments, completed work, source-reported acceptance, conditions, durations, and unconfirmed arrangements. Version this combined prompt/publication contract as notes-v38.
 - **Boundary:** Recording and transcription stay local. Ollama remains the local route; merging the experimental work does not enable a native MTP provider or bypass its quality gates. Historical ChatGPT notes do not regenerate because of this version change. Validate the integrated source before publishing; both original worktrees and the installed app remain untouched.
+
+
+## 2026-10-17 — Review complete source coverage before publishing meeting notes
+
+- **Status:** Accepted for isolated validation; native MTP promotion and release remain separate gates.
+- **Supersedes:** The cited-window-only scope of “Replace pattern-based commitment recovery with source-bound semantic review,” and extends the notes-v38 integration checkpoint.
+- **Decision:** The existing bounded semantic pass receives complete chronological source and original narrow writer claims, independently classifies every item, and returns source-cited corrections and missing material. Earlier requests and later outcomes can correct original citation scope. Source IDs are resolved locally; new material and overview corrections retain canonical provenance. Writer kinds/owners/deadlines are withheld from the review input to avoid anchoring.
+- **Capacity and usage:** Reuse the existing pass rather than adding another automatic call. Source rows carry recorded speaker labels directly, with original task anchors and complete chronological speech. The local full-source review experiments with a 20K maximum context while writers retain 16K, with a bounded 1,024–2,048-token response selected after input admission. Oversized or failed reviews remain explicitly incomplete; no automatic retry, silent source truncation or historical cloud regeneration. ChatGPT retains its full-source cloud budget and durable usage controls. Full-meeting latency and memory acceptance are required before accepting the expanded local window.
+- **Contract:** Version this publication/review change as notes-v39. Accepted conditional work, current ownership, independent tasks, complete timing phrases and unresolved discussion remain distinct. New source meaning comes from semantic review, not English-pattern extraction.
+
+
+## 2026-10-18 — Use one configured local model across intelligence
+
+- **Status:** Accepted routing contract; MTP model promotion remains subject to quality, memory, recording and packaged acceptance.
+- **Supersedes:** The Phi quick-chat split in “Use Gemma 4 generally and Phi only for Quick chat” (2026-08-28), and fixed-model selection in the idle dreaming model-routing decision. Existing explicit quick-model overrides remain supported.
+- **Decision:** A configured Ollama model supplies notes, saved and live answers, intent/scope classification, and local People/Project background work. An optional explicit quick override applies only to quick requests. Blank fields use the shared local default. Do not impose model-specific draft parameters on custom models or silently substitute installed models.
+- **ChatGPT boundary:** ChatGPT remains an independent provider with its account model, admission limits, background opt-in and durable duplicate prevention. Selecting it does not require or probe Ollama. Recording and transcription stay local.
+- **MTP direction:** Evaluate Ollama’s built-in Gemma MTP support before adding a second managed inference runtime. A successful readiness response or decoding speed alone does not establish semantic quality or recording safety. Keep all production evaluation material private and preserve both source worktrees and the installed app.

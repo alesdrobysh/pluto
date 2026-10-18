@@ -1397,23 +1397,38 @@ export const acceptEditedNotes = ({
   return result;
 };
 
-export type SourceBoundNotesReplacement = NotesItem & {
-  discussion?: string | null;
-};
-
 export const applySourceBoundSemanticReview = (
   audited: AuditedNotes,
-  replacements: SourceBoundNotesReplacement[],
+  replacements: NotesItem[],
+  coverage?: {
+    sourceSpans: SourceSpan[];
+    additions: NotesItem[];
+    overview?: SupportedText;
+  },
 ): AuditedNotes => {
   if (!reviewedResults.has(audited))
     throw new MeetingNotesError('notes_unreviewed_projection');
   const next = { ...audited, draft: structuredClone(audited.draft) };
   const byId = new Map(replacements.map((item) => [item.id, item]));
-  if (byId.size !== replacements.length)
+  if (
+    byId.size !== replacements.length ||
+    replacements.some((item) => !parseItem(item))
+  )
     throw new MeetingNotesError('invalid_notes_audit');
   const existingIds = new Set(
     blocksForDraft(next.draft).map((block) => block.id),
   );
+  const inCoverage = (sources: SourceSpan[]) => {
+    validateSources(audited.source, sources);
+    return sources.every((span) =>
+      coverage?.sourceSpans.some(
+        (scope) =>
+          scope.segment === span.segment &&
+          scope.start <= span.start &&
+          scope.end >= span.end,
+      ),
+    );
+  };
   for (const section of next.draft.sections) {
     section.items = section.items.flatMap((item) => {
       const replacement = byId.get(item.id);
@@ -1423,32 +1438,58 @@ export const applySourceBoundSemanticReview = (
         JSON.stringify(replacement.sources) !==
           JSON.stringify(
             completeCitedSourceWindow(audited.source, item.sources),
-          )
+          ) &&
+        !inCoverage(replacement.sources)
       )
         throw new MeetingNotesError('notes_source_out_of_scope');
-      const { discussion, ...fields } = replacement;
-      const contextId = `${item.id}:semantic-context`;
-      if (discussion && existingIds.has(contextId))
-        throw new MeetingNotesError('invalid_notes_audit');
       byId.delete(item.id);
-      return [
-        fields,
-        ...(discussion
-          ? [
-              {
-                id: contextId,
-                kind: 'point' as const,
-                text: discussion,
-                owner: null,
-                due: null,
-                sources: replacement.sources,
-              },
-            ]
-          : []),
-      ];
+      return [replacement];
     });
   }
   if (byId.size) throw new MeetingNotesError('invalid_notes_audit');
+  if (coverage) {
+    validateSources(audited.source, coverage.sourceSpans);
+    for (const addition of coverage.additions) {
+      if (
+        !parseItem(addition) ||
+        existingIds.has(addition.id) ||
+        !inCoverage(addition.sources)
+      )
+        throw new MeetingNotesError('invalid_notes_audit');
+      existingIds.add(addition.id);
+    }
+    if (coverage.additions.length) {
+      const sectionId = 'semantic-additions';
+      const existingSection = next.draft.sections.find(
+        (section) => section.id === sectionId,
+      );
+      if (existingSection)
+        existingSection.items.push(...structuredClone(coverage.additions));
+      else {
+        if (existingIds.has(sectionId) || existingIds.has(`${sectionId}:title`))
+          throw new MeetingNotesError('invalid_notes_audit');
+        next.draft.sections.push({
+          id: sectionId,
+          title: {
+            id: `${sectionId}:title`,
+            text: 'Additional context',
+            sources: coverage.additions.flatMap((item) => item.sources),
+          },
+          items: structuredClone(coverage.additions),
+        });
+      }
+    }
+    if (coverage.overview) {
+      if (
+        !parseSupportedText(coverage.overview) ||
+        (coverage.overview.id !== audited.draft.overview?.id &&
+          existingIds.has(coverage.overview.id)) ||
+        !inCoverage(coverage.overview.sources)
+      )
+        throw new MeetingNotesError('invalid_notes_audit');
+      next.draft.overview = structuredClone(coverage.overview);
+    }
+  }
   const ids = new Set(replacements.map((item) => item.id));
   next.issues = audited.issues?.filter(
     (issue) =>
@@ -1463,7 +1504,8 @@ export const applySourceBoundSemanticReview = (
   next.semanticChangeCount =
     (audited.semanticChangeCount ?? 0) +
     replacements.length +
-    replacements.filter((item) => item.discussion).length;
+    (coverage?.additions.length ?? 0) +
+    (coverage?.overview ? 1 : 0);
   reviewedResults.add(next);
   return next;
 };

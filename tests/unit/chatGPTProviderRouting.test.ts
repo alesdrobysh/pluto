@@ -106,6 +106,9 @@ describe('ChatGPT intelligence routing', () => {
         if (schema.properties?.resolutions) {
           return response(
             JSON.stringify({
+              unchanged: { point: [], question: [] },
+              additions: [],
+              overview: null,
               resolutions:
                 schema.properties.resolutions.items.anyOf[0].properties.id.enum.map(
                   (id: string) => ({
@@ -114,7 +117,7 @@ describe('ChatGPT intelligence routing', () => {
                     text: 'Riley will send the checklist by Monday.',
                     owner: 'Riley',
                     due: 'Monday',
-                    discussion: null,
+                    sources: ['R0'],
                   }),
                 ),
             }),
@@ -195,6 +198,9 @@ describe('ChatGPT intelligence routing', () => {
       if (body.text.format.schema.properties?.resolutions) {
         return response(
           JSON.stringify({
+            unchanged: { point: [], question: [] },
+            additions: [],
+            overview: null,
             resolutions:
               body.text.format.schema.properties.resolutions.items.anyOf[0].properties.id.enum.map(
                 (id: string) => ({
@@ -203,7 +209,7 @@ describe('ChatGPT intelligence routing', () => {
                   text: 'Send the outline',
                   owner: 'Milo',
                   due: null,
-                  discussion: null,
+                  sources: ['R0'],
                 }),
               ),
           }),

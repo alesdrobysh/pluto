@@ -1,3 +1,4 @@
+import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import type {
   ApiKeyProviderId,
   CloudProviderId,
@@ -7,7 +8,7 @@ import type {
 export const CLOUD_CONSENT_VERSION = '1';
 
 export const PROVIDER_DEFAULT_MODELS: Record<ProviderId, string> = {
-  ollama: 'phi4-reasoning-plus:latest',
+  ollama: OLLAMA_GENERAL_MODEL,
   chatgpt: '', // The signed-in account supplies its model catalog.
   openai: 'gpt-4o-mini',
   openrouter: 'openai/gpt-4o-mini',

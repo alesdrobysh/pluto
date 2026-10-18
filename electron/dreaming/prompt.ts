@@ -1,10 +1,11 @@
+import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import type {
   DreamingEntityType,
   DreamingInputPackage,
   DreamingProposalKind,
 } from './types';
 
-export const DREAMING_MODEL = 'gemma4:12b';
+export const DREAMING_MODEL = OLLAMA_GENERAL_MODEL;
 export const DREAMING_PROMPT_VERSION = 'dreaming-proposals-v5';
 
 type JsonSchema = Record<string, unknown>;

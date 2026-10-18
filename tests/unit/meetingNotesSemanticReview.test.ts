@@ -44,16 +44,21 @@ const fixture = (
   return { notes, source, sources };
 };
 const resolution = (values: Record<string, unknown> = {}) => ({
-  id: 'task',
+  id: 'I0',
   kind: 'accepted_action',
   text: 'Tell Morgan about the pilot soon',
   owner: 'Remote Speaker 2',
   due: null,
-  discussion: null,
+  sources: ['R0'],
   ...values,
 });
 const response = (values: Record<string, unknown> = {}) =>
-  JSON.stringify({ resolutions: [resolution(values)] });
+  JSON.stringify({
+    unchanged: { point: [], question: [] },
+    resolutions: [resolution(values)],
+    additions: [],
+    overview: null,
+  });
 
 describe('bounded source-bound semantic notes review', () => {
   it('restores a valid promise rejected by the legacy wording check and rebuilds canonical provenance', async () => {
@@ -118,8 +123,8 @@ describe('bounded source-bound semantic notes review', () => {
       acceptancePolicy: 'conservative',
     });
     const reviewed = await reviewSourceBoundNotes(notes, async ({ prompt }) => {
-      const cases = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
-      expect(cases[0].source[0].text).toBe('I will not book the review.');
+      const packet = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
+      expect(packet.source[0][2]).toBe('I will not book the review.');
       return response({
         kind: 'point',
         text: 'The speaker will not book the review.',
@@ -147,7 +152,7 @@ describe('bounded source-bound semantic notes review', () => {
       expect(branches).toHaveLength(2);
       expect(branches[0].properties.kind.enum).toEqual([
         'accepted_action',
-        'decision',
+        'settled_choice',
       ]);
       expect(branches[1].properties.kind.enum).toEqual(['point', 'question']);
       for (const key of ['owner', 'due', 'discussion'])
@@ -243,6 +248,9 @@ describe('bounded source-bound semantic notes review', () => {
     ['invalid kind', { kind: 'approved' }],
     ['empty text', { text: '' }],
     ['numeric owner', { owner: 42 }],
+    ['string null owner', { owner: 'null' }],
+    ['string null deadline', { due: 'null' }],
+    ['string null discussion', { discussion: 'null' }],
     ['oversized text', { text: 'a'.repeat(1601) }],
     ['point owner', { kind: 'point', owner: 'Remote Speaker 2' }],
     ['unchanged corrections', { kind: 'unchanged' }],
@@ -273,14 +281,78 @@ describe('bounded source-bound semantic notes review', () => {
     expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
   });
 
-  it('does not issue requests for ordinary source-grounded discussion', async () => {
+  it('reviews ordinary discussion so omitted material can be added in the same request', async () => {
     const { notes } = fixture('The pilot remains in staging.');
     notes.draft.sections[0]!.items[0]!.kind = 'point';
     notes.issues = [];
     notes.proseReviewItems = [];
-    const generate = vi.fn();
-    expect(await reviewSourceBoundNotes(notes, generate)).toBe(notes);
-    expect(generate).not.toHaveBeenCalled();
+    const generate = vi.fn(async () =>
+      JSON.stringify({
+        unchanged: { point: ['I0'], question: [] },
+        resolutions: [],
+        additions: [],
+        overview: null,
+      }),
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, generate);
+    expect(reviewed.draft).toEqual(notes.draft);
+    expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it('coalesces an exact corrected fact also returned as an addition without losing its canonical identity', async () => {
+    const { notes } = fixture('I have not sent the draft.', 'Send the draft');
+    const text = 'The draft has not been sent.';
+    const generate = vi.fn(async () =>
+      JSON.stringify({
+        unchanged: { point: [], question: [] },
+        resolutions: [resolution({ kind: 'point', text, owner: null })],
+        additions: [
+          { kind: 'point', text, owner: null, due: null, sources: ['R0'] },
+        ],
+        overview: null,
+      }),
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, generate);
+    const items = reviewed.draft.sections.flatMap((section) => section.items);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ id: 'task', kind: 'point', text });
+    expect(reviewed.issues ?? []).not.toContain(
+      'semantic_notes_review_unavailable',
+    );
+    expect(generate).toHaveBeenCalledOnce();
+  });
+
+  it('preserves separate accepted work with the same wording and different source-supported owners', async () => {
+    const text = 'Review the plan';
+    const { notes } = fixture(
+      'I will review the plan. Jules will review the plan.',
+      text,
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      JSON.stringify({
+        unchanged: { point: [], question: [] },
+        resolutions: [resolution({ text })],
+        additions: [
+          {
+            kind: 'accepted_action',
+            text,
+            owner: 'Jules',
+            due: null,
+            sources: ['R0'],
+          },
+        ],
+        overview: null,
+      }),
+    );
+    const actions = projectAuditedNotes(reviewed).all_action_items;
+    expect(actions).toHaveLength(2);
+    expect(actions.map((action) => action.assignee)).toEqual([
+      'Remote Speaker 2',
+      'Jules',
+    ]);
+    expect(reviewed.issues ?? []).not.toContain(
+      'semantic_notes_review_unavailable',
+    );
   });
 
   it('keeps useful notes when admission or the review fails, without retrying', async () => {
@@ -295,81 +367,13 @@ describe('bounded source-bound semantic notes review', () => {
     expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
   });
 
-  it('holds an oversized case while reviewing an independent smaller commitment in one request', async () => {
-    const lines = [
-      {
-        speaker: 'Remote Speaker 2',
-        text: `I will send the outline. ${'FICTIONAL_LARGE_SOURCE '.repeat(1000)}`,
-      },
-      { speaker: 'Me', text: "I'll send the checklist." },
-    ];
-    const source = createNotesSource(JSON.stringify(lines));
-    const draft: NotesDraft = {
-      title: null,
-      meetingType: 'general',
-      overview: null,
-      sections: [
-        {
-          id: 's',
-          title: {
-            id: 'h',
-            text: 'Follow-ups',
-            sources: [{ segment: 1, start: 0, end: lines[1]!.text.length }],
-          },
-          items: lines.map((line, segment) => ({
-            id: segment ? 'small' : 'large',
-            kind: 'action',
-            text: segment ? 'Send the checklist' : 'Send the outline',
-            owner: line.speaker,
-            due: null,
-            sources: [{ segment, start: 0, end: line.text.length }],
-          })),
-        },
-      ],
-    };
-    const notes = acceptEditedNotes({
-      source,
-      draft,
-      acceptancePolicy: 'conservative',
-    });
-    const generate = vi.fn(async ({ prompt }) => {
-      const cases = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
-      expect(cases.map((entry: { id: string }) => entry.id)).toEqual(['small']);
-      expect(prompt).not.toContain('FICTIONAL_LARGE_SOURCE');
-      return JSON.stringify({
-        resolutions: [
-          resolution({ id: 'small', text: 'Send the checklist', owner: 'Me' }),
-        ],
-      });
-    });
-    const reviewed = await reviewSourceBoundNotes(notes, generate);
-    expect(generate).toHaveBeenCalledOnce();
-    expect(reviewed.issues).toContain('semantic_notes_review_capacity:large');
-    expect(projectAuditedNotes(reviewed).all_action_items).toContainEqual(
-      expect.objectContaining({ text: 'Send the checklist', assignee: 'Me' }),
+  it('rejects oversized complete source before egress instead of silently reviewing a smaller subset', async () => {
+    const { notes } = fixture(
+      `Riley agreed to send the checklist. ${'context '.repeat(6000)}`,
     );
-  });
-
-  it('caps source data and candidate counts before a request', async () => {
-    const { notes } = fixture();
-    const item = notes.draft.sections[0]!.items[0]!;
-    notes.draft.sections[0]!.items = Array.from({ length: 17 }, (_, index) => ({
-      ...item,
-      id: String(index),
-      kind: 'action',
-    }));
     const generate = vi.fn();
-    expect((await reviewSourceBoundNotes(notes, generate)).issues).toContain(
-      'semantic_notes_review_capacity',
-    );
-    expect(generate).not.toHaveBeenCalled();
-    const large = fixture(
-      `Riley agreed to send the checklist. ${'context '.repeat(1600)}`,
-    );
-    large.notes.draft.sections[0]!.items[0]!.kind = 'action';
-    expect(
-      (await reviewSourceBoundNotes(large.notes, generate)).issues,
-    ).toContain('semantic_notes_review_capacity');
+    const reviewed = await reviewSourceBoundNotes(notes, generate);
+    expect(reviewed.issues).toContain('semantic_notes_review_capacity');
     expect(generate).not.toHaveBeenCalled();
   });
 
@@ -427,9 +431,12 @@ describe('bounded source-bound semantic notes review', () => {
     notes.issues?.push('deterministic_unsupported_commitment:other');
     const reviewed = await reviewSourceBoundNotes(notes, async () =>
       JSON.stringify({
+        unchanged: { point: [], question: [] },
+        additions: [],
+        overview: null,
         resolutions: [
           resolution(),
-          resolution({ id: 'other', owner: 'Invented Person' }),
+          resolution({ id: 'I1', owner: 'Invented Person' }),
         ],
       }),
     );
@@ -465,5 +472,362 @@ describe('bounded source-bound semantic notes review', () => {
         running.signal,
       ),
     ).rejects.toThrow();
+  });
+});
+
+describe('complete-source coverage and source-cited additions', () => {
+  const coverageFixture = (
+    lines: Array<{ speaker: string; text: string }>,
+    itemText: string,
+    segment: number,
+    kind: 'point' | 'action' = 'action',
+  ) => {
+    const source = createNotesSource(JSON.stringify(lines));
+    const sources = [{ segment, start: 0, end: lines[segment]!.text.length }];
+    const draft: NotesDraft = {
+      title: null,
+      meetingType: 'general',
+      overview: null,
+      sections: [
+        {
+          id: 's',
+          title: { id: 'h', text: 'Review', sources },
+          items: [
+            {
+              id: 'task',
+              kind,
+              text: itemText,
+              owner: kind === 'action' ? lines[segment]!.speaker : null,
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    return acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+  };
+  const encode = (
+    resolutions: unknown[] = [],
+    additions: unknown[] = [],
+    overview: unknown = null,
+  ) =>
+    JSON.stringify({
+      unchanged: { point: resolutions.length ? [] : ['I0'], question: [] },
+      resolutions,
+      additions,
+      overview,
+    });
+  it('coalesces an unchanged fact while preserving both exact source contexts and the original draft', async () => {
+    const text = 'The prototype is in staging.';
+    const notes = coverageFixture(
+      [
+        { speaker: 'Tavi', text },
+        {
+          speaker: 'Ellis',
+          text: 'The prototype is in staging; production approval is pending.',
+        },
+      ],
+      text,
+      0,
+      'point',
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      encode(
+        [],
+        [{ kind: 'point', text, owner: null, due: null, sources: ['R1'] }],
+      ),
+    );
+    const items = reviewed.draft.sections.flatMap((section) => section.items);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.id).toBe('task');
+    expect(items[0]!.sources.map((span) => span.segment)).toEqual([0, 1]);
+    expect(notes.draft.sections[0]!.items[0]!.sources).toHaveLength(1);
+  });
+  it('recovers an uncited earlier recipient and deadline with precise provenance in one request', async () => {
+    const lines = [
+      {
+        speaker: 'Rowan',
+        text: 'We need three sample reports for Mika by Friday.',
+      },
+      {
+        speaker: 'Mika',
+        text: 'The samples are for accessibility review, not publication.',
+      },
+      { speaker: 'Rowan', text: 'Release approval is still pending.' },
+      { speaker: 'Ellis', text: 'I will provide the three sample reports.' },
+    ];
+    const notes = coverageFixture(lines, 'Provide the three sample reports', 3);
+    const generate = vi.fn(async ({ prompt }) => {
+      const data = JSON.parse(prompt.split('\n').at(-1)!);
+      expect(data.source.map((row: any) => row[2])).toEqual(
+        lines.map((line) => line.text),
+      );
+      return encode([
+        resolution({
+          owner: 'Ellis',
+          due: 'Friday',
+          text: 'Provide three sample reports for Mika by Friday',
+          sources: ['R0', 'R3'],
+        }),
+      ]);
+    });
+    const reviewed = await reviewSourceBoundNotes(notes, generate);
+    const projected = projectAuditedNotes(reviewed);
+    expect(projected.all_action_items[0]).toMatchObject({
+      assignee: 'Ellis',
+      due: 'Friday',
+      text: 'Provide three sample reports for Mika by Friday',
+    });
+    expect(
+      projected.generation_metadata!.source_provenance!.blocks[
+        'all_action_items:0'
+      ]!.sources.map((span) => span.segment),
+    ).toEqual([0, 3]);
+    expect(generate).toHaveBeenCalledOnce();
+  });
+  it.each(['point', 'accepted_action'])(
+    'restores missing %s material even when the writer produced no action candidates',
+    async (kind) => {
+      const notes = coverageFixture(
+        [
+          {
+            speaker: 'Rowan',
+            text: 'Could Mika update the handbook by Tuesday?',
+          },
+          {
+            speaker: 'Mika',
+            text: 'I will send the review checklist by Monday.',
+          },
+        ],
+        'The meeting discussed documentation',
+        0,
+        'point',
+      );
+      const addition = {
+        kind,
+        text:
+          kind === 'point'
+            ? 'A handbook update by Tuesday was requested; it was not accepted.'
+            : 'Send the review checklist by Monday',
+        owner: kind === 'point' ? null : 'Mika',
+        due: kind === 'point' ? null : 'Monday',
+        sources: [kind === 'point' ? 'R0' : 'R1'],
+      };
+      const reviewed = await reviewSourceBoundNotes(notes, async () =>
+        encode([], [addition]),
+      );
+      const result = projectAuditedNotes(reviewed);
+      expect(result.quality.issues).toEqual([]);
+      expect(JSON.stringify(result.topics)).toContain(addition.text);
+      expect(result.all_action_items).toHaveLength(kind === 'point' ? 0 : 1);
+      const block = Object.values(
+        result.generation_metadata!.source_provenance!.blocks,
+      ).find((block) => block.id === 'semantic-addition:0');
+      expect(block!.sources[0]!.segment).toBe(kind === 'point' ? 0 : 1);
+    },
+  );
+  it('checks later completion outside an action citation and preserves the resolved outcome', async () => {
+    const notes = coverageFixture(
+      [
+        { speaker: 'Noor', text: 'I will rerun the export.' },
+        {
+          speaker: 'Mika',
+          text: 'We discussed the layout; no changes were agreed.',
+        },
+        { speaker: 'Noor', text: 'I reran the export and it works now.' },
+      ],
+      'Rerun the export',
+      0,
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      encode([
+        resolution({
+          kind: 'point',
+          text: 'Noor reran the export successfully.',
+          owner: null,
+          sources: ['R0', 'R2'],
+        }),
+      ]),
+    );
+    expect(projectAuditedNotes(reviewed).all_action_items).toEqual([]);
+    expect(
+      reviewed.draft.sections[0]!.items[0]!.sources.map((span) => span.segment),
+    ).toEqual([0, 2]);
+  });
+  it('repairs a stale explicit overview from the same supplied source', async () => {
+    const notes = coverageFixture(
+      [{ speaker: 'Noor', text: 'The export works now.' }],
+      'The export works now',
+      0,
+      'point',
+    );
+    notes.draft.overview = {
+      id: 'overview',
+      text: 'The export is still broken',
+      sources: [{ segment: 0, start: 0, end: 21 }],
+    };
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      encode([], [], { text: 'The export now works.', sources: ['R0'] }),
+    );
+    expect(projectAuditedNotes(reviewed).overview).toBe(
+      'The export now works.',
+    );
+  });
+  it.each([
+    { sources: ['R99'] },
+    { sources: [] },
+    { sources: ['R0', 'R0'] },
+    { sources: [{ segment: 0, start: 0, end: 3 }] },
+    { id: 'model-assigned-id' },
+    { owner: 'Invented Person' },
+    { due: 'Friday' },
+  ])(
+    'does not insert unsupported or malformed additions: %j',
+    async (change) => {
+      const { notes } = fixture('The pilot is in staging.');
+      const before = structuredClone(notes.draft);
+      const { id: _id, ...addition } = resolution({
+        kind: 'point',
+        owner: null,
+        text: 'The pilot is in staging.',
+      });
+      const reviewed = await reviewSourceBoundNotes(notes, async () =>
+        encode([], [{ ...addition, ...change }]),
+      );
+      expect(reviewed.draft).toEqual(before);
+      expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
+    },
+  );
+  it('accepts an empty correction batch as a complete review without rewriting notes', async () => {
+    const { notes } = fixture();
+    const before = structuredClone(notes.draft);
+    const reviewed = await reviewSourceBoundNotes(notes, async () => encode());
+    expect(reviewed.draft).toEqual(before);
+  });
+  it('does not anchor the reviewer to writer kinds or normalized broad discussion', async () => {
+    const { notes } = fixture(
+      'I will publish the checklist. If approval arrives, I will enable the pilot.',
+      'Publish the checklist',
+    );
+    const generate = vi.fn(async ({ prompt }) => {
+      const data = JSON.parse(prompt.split('\n').at(-1)!);
+      expect(data.draft.items[0]).toEqual([
+        'I0',
+        'Publish the checklist',
+        ['R0'],
+      ]);
+      expect(data.source[0]).toEqual([
+        'R0',
+        'Remote Speaker 2',
+        'I will publish the checklist. If approval arrives, I will enable the pilot.',
+      ]);
+      return JSON.stringify({
+        unchanged: { point: [], question: [] },
+        resolutions: [resolution({ text: 'Publish the checklist' })],
+        additions: [],
+        overview: null,
+      });
+    });
+    const reviewed = await reviewSourceBoundNotes(notes, generate);
+    expect(projectAuditedNotes(reviewed).all_action_items[0]!.text).toBe(
+      'Publish the checklist',
+    );
+  });
+  it('applies a source-reviewed classification without rewriting accurate discussion', async () => {
+    const notes = coverageFixture(
+      [
+        {
+          speaker: 'Tavi',
+          text: 'We discussed the layout; no changes were agreed.',
+        },
+      ],
+      'No changes were agreed for the layout',
+      0,
+      'point',
+    );
+    notes.draft.sections[0]!.items[0]!.kind = 'decision';
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      JSON.stringify({
+        unchanged: { point: ['I0'], question: [] },
+        resolutions: [],
+        additions: [],
+        overview: null,
+      }),
+    );
+    expect(projectAuditedNotes(reviewed).all_decisions).toEqual([]);
+    expect(reviewed.draft.sections[0]!.items[0]!.text).toBe(
+      'No changes were agreed for the layout',
+    );
+  });
+  it.each([
+    { point: [], question: [] },
+    { point: ['I0', 'I0'], question: [] },
+    { point: ['I0'], question: ['I0'] },
+    { point: ['foreign'], question: [] },
+    { point: [], question: [], accepted_action: ['I0'] },
+    { point: ['I0'], question: null },
+  ])(
+    'rejects missing, duplicate or unsupported unchanged classifications: %j',
+    async (unchanged) => {
+      const { notes } = fixture();
+      const before = structuredClone(notes.draft);
+      const result = await reviewSourceBoundNotes(notes, async () =>
+        JSON.stringify({
+          unchanged,
+          resolutions: [],
+          additions: [],
+          overview: null,
+        }),
+      );
+      expect(result.draft).toEqual(before);
+      expect(result.issues).toContain('semantic_notes_review_unavailable');
+    },
+  );
+  it('rejects an item appearing in both corrections and unchanged entries', async () => {
+    const { notes } = fixture();
+    const before = structuredClone(notes.draft);
+    const result = await reviewSourceBoundNotes(notes, async () =>
+      JSON.stringify({
+        unchanged: { point: ['I0'], question: [] },
+        resolutions: [resolution()],
+        additions: [],
+        overview: null,
+      }),
+    );
+    expect(result.draft).toEqual(before);
+    expect(result.issues).toContain('semantic_notes_review_unavailable');
+  });
+  it('retires heuristic repair signals only after a complete successful source review', async () => {
+    const { notes } = fixture('The export succeeded.');
+    notes.draft.sections[0]!.items[0]!.kind = 'point';
+    notes.issues = [
+      'notes_guardrail:missing_action',
+      'deterministic_unsupported_commitment:task',
+      'semantic_notes_review_unavailable',
+      'notes_leaf_audit_fallback:deadline_budget',
+    ];
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      JSON.stringify({
+        unchanged: { point: ['I0'], question: [] },
+        resolutions: [],
+        additions: [],
+        overview: null,
+      }),
+    );
+    expect(reviewed.issues).toEqual([
+      'notes_leaf_audit_fallback:deadline_budget',
+    ]);
+    const failed = fixture();
+    failed.notes.issues = ['notes_guardrail:missing_action'];
+    const incomplete = await reviewSourceBoundNotes(failed.notes, async () => {
+      throw Error('usage_limit');
+    });
+    expect(incomplete.issues).toContain('notes_guardrail:missing_action');
+    expect(incomplete.issues).toContain('semantic_notes_review_unavailable');
   });
 });

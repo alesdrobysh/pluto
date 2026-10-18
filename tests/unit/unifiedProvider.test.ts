@@ -209,8 +209,8 @@ describe('UnifiedLLMProvider', () => {
     ]);
   });
 
-  it('versions compact writer-editor notes as notes-v38', () => {
-    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v38');
+  it('versions compact writer-editor notes as notes-v39', () => {
+    expect(STRUCTURED_ANALYSIS_PROMPT_VERSION).toBe('notes-v39');
   });
 
   beforeEach(() => {
@@ -1033,7 +1033,7 @@ describe('UnifiedLLMProvider', () => {
     await provider.classifyQueryIntent('Classify this query.');
 
     expect(requestBody).toMatchObject({
-      model: 'phi4-mini:3.8b',
+      model: 'gemma4:12b',
       think: false,
       format: 'json',
     });
@@ -1268,7 +1268,7 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModels).toEqual(['gemma4:12b', 'gemma4:12b', 'gemma4:12b']);
   });
 
-  it('uses Gemma for saved chat and Phi for active meeting chat', async () => {
+  it('uses the same default model for saved and active meeting chat', async () => {
     const selectedModels: string[] = [];
     installFetchMock(
       (url, init) => {
@@ -1301,12 +1301,33 @@ describe('UnifiedLLMProvider', () => {
     await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
     await provider.answerAskPluto('What are we discussing?', { live: true });
 
-    expect(selectedModels).toEqual([
-      'gemma4:12b',
-      'gemma4:12b',
-      'gemma4:12b',
-      'phi4-mini:3.8b',
-    ]);
+    expect(selectedModels).toEqual(['gemma4:12b', 'gemma4:12b', 'gemma4:12b']);
+  });
+
+  it('uses a custom model across chat routes without adding MTP options', async () => {
+    const requests: Record<string, unknown>[] = [];
+    installFetchMock((url, init) => {
+      if (url.endsWith('/api/ps')) return jsonResponse({ models: [] });
+      const body = parseRequestBody(init);
+      requests.push(body);
+      return jsonResponse({
+        response: 'Grounded answer',
+        message: { content: 'Grounded answer' },
+        done: true,
+        done_reason: 'stop',
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'custom:latest',
+    });
+    await provider.answerAskPluto('Who owns this?', { mode: 'fast' });
+    await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
+    await provider.answerAskPluto('What are we discussing?', { live: true });
+    expect(requests).toHaveLength(3);
+    for (const request of requests) {
+      expect(request.model).toBe('custom:latest');
+      expect(request.options).not.toHaveProperty('draft_num_predict');
+    }
   });
 
   it('does not substitute an arbitrary installed model for Gemma 4', async () => {

@@ -1266,14 +1266,17 @@ it('does not borrow settlement from an unrelated task and retains an explicitly 
   const id = accepted.draft.sections[0]!.items[0]!.id;
   const reviewed = await reviewSourceBoundNotes(accepted, async () =>
     JSON.stringify({
+      unchanged: { point: [], question: [] },
+      additions: [],
+      overview: null,
       resolutions: [
         {
-          id,
+          id: 'I0',
           kind: 'accepted_action',
           text: 'Send the outline',
           owner: null,
           due: null,
-          discussion: null,
+          sources: ['R0'],
         },
       ],
     }),
@@ -1332,21 +1335,35 @@ it('keeps only the promised action and preserves the tentative plan as source di
   const result = projectAuditedNotes(
     await reviewSourceBoundNotes(accepted, async () =>
       JSON.stringify({
+        unchanged: { point: [], question: [] },
+        additions: [
+          {
+            kind: 'point',
+            text: 'A possible meeting with Riley to review onboarding and have Riley design it was discussed, not agreed.',
+            owner: null,
+            due: null,
+            sources: ['R0', 'R1'],
+          },
+        ],
+        overview: null,
         resolutions: [
           {
-            id,
+            id: 'I0',
             kind: 'accepted_action',
             text: 'Schedule calendar time with Riley. Only after legal approves.',
             owner: 'Me',
             due: null,
-            discussion:
-              'A possible meeting with Riley to review onboarding and have Riley design it was discussed, not agreed.',
+            sources: ['R0', 'R1', 'R2'],
           },
         ],
       }),
     ),
   );
 
+  expect(
+    result.generation_metadata?.source_provenance?.blocks['all_action_items:0']
+      ?.id,
+  ).toBe(id);
   expect(result.all_action_items).toHaveLength(1);
   expect(result.all_action_items[0].assignee).toBe('Me');
   expect(result.all_action_items[0].text).toContain(

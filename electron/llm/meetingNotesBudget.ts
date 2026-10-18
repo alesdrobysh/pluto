@@ -92,6 +92,22 @@ export const calculateNotesRequestBudget = ({
   return { num_ctx: contextTokens, num_predict: outputTokens };
 };
 
+export const calculateNotesReviewBudget = ({
+  prompt,
+  contextTokens,
+}: { prompt: string; contextTokens: number }): {
+  num_ctx: number;
+  num_predict: number;
+} => {
+  const outputTokens = Math.min(
+    2048,
+    contextTokens - estimateNotesTokens(prompt) - 512,
+  );
+  if (outputTokens < 1024)
+    throw new MeetingNotesError('notes_context_exhausted');
+  return calculateNotesRequestBudget({ prompt, contextTokens, outputTokens });
+};
+
 const isSurrogateBoundary = (text: string, offset: number): boolean => {
   if (offset <= 0 || offset >= text.length) return false;
   const before = text.charCodeAt(offset - 1);

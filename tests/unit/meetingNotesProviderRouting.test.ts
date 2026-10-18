@@ -202,7 +202,7 @@ it.each(['ollama', 'openai', 'openrouter', 'claude', 'gemini'] as const)(
         expect(schema).toBeDefined();
       else expect(schema).toBeUndefined();
     }
-    expect(result.generation_metadata?.prompt_version).toBe('notes-v38');
+    expect(result.generation_metadata?.prompt_version).toBe('notes-v39');
     expect(result.generation_metadata?.pipeline_version).toBe(
       'writer-audit-v1',
     );
@@ -254,7 +254,7 @@ it('routes the compact product writer through the complete-document editor', asy
     ),
   ).toEqual([false, true]);
   expect(result.generation_metadata?.pipeline_version).toBe('writer-editor-v1');
-  expect(result.generation_metadata?.prompt_version).toBe('notes-v38');
+  expect(result.generation_metadata?.prompt_version).toBe('notes-v39');
 });
 
 it('emits a complete provisional bullet on actual streamed transport before writer completion', async () => {
@@ -779,5 +779,90 @@ it.each(['askPlutoLive', 'queryClassification'] as const)(
       resolveOllamaModel(task: string): Promise<string>;
     };
     expect(await resolver.resolveOllamaModel(task)).toBe('fast-model');
+  },
+);
+
+it.each([false, true])(
+  'allows a slow local source review while preserving caller cancellation (cancel: %s)',
+  async (cancel) => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+        const controller = new AbortController();
+        setTimeout(
+          () =>
+            controller.abort(
+              new DOMException('Review timed out', 'TimeoutError'),
+            ),
+          milliseconds,
+        );
+        return controller.signal;
+      });
+      const fixture = makeDirectNotesFixture();
+      const provider = new UnifiedLLMProvider('ollama', {});
+      vi.spyOn(provider as never, 'generateText').mockImplementation(
+        async (value) => {
+          const request = value as {
+            task: string;
+            prompt: string;
+            signal?: AbortSignal;
+          };
+          if (request.task === 'notesWriter')
+            return JSON.stringify(fixture.draft);
+          const packet = JSON.parse(request.prompt.split('\n').at(-1)!);
+          const id = packet.draft.items[0][0];
+          return new Promise<string>((resolve, reject) => {
+            request.signal?.addEventListener(
+              'abort',
+              () => reject(request.signal?.reason),
+              { once: true },
+            );
+            setTimeout(
+              () =>
+                resolve(
+                  JSON.stringify({
+                    additions: [],
+                    resolutions: [
+                      {
+                        id,
+                        kind: 'accepted_action',
+                        text: 'Send the outline',
+                        owner: 'Milo',
+                        due: null,
+                        sources: ['R0'],
+                      },
+                    ],
+                    unchanged: { point: [], question: [] },
+                    overview: null,
+                  }),
+                ),
+              120_000,
+            );
+          });
+        },
+      );
+      const caller = new AbortController();
+      const pending = provider.generateStructuredAnalysis('', '', 'auto', {
+        source: fixture.source,
+        hierarchyAuditStrategy: 'deterministic_only',
+        signal: caller.signal,
+      });
+      await vi.advanceTimersByTimeAsync(cancel ? 100_000 : 120_000);
+      if (cancel) {
+        caller.abort(new DOMException('Cancelled by caller', 'AbortError'));
+        await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+      } else {
+        const result = await pending;
+        expect(result.all_action_items).toEqual([
+          expect.objectContaining(fixture.expectedAction),
+        ]);
+        expect(result.quality.issues).not.toContain(
+          'semantic_notes_review_unavailable',
+        );
+      }
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   },
 );

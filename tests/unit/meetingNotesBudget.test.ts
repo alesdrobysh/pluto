@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import {
   bisectNotesSourceSpans,
   calculateNotesRequestBudget,
+  calculateNotesReviewBudget,
   estimateNotesTokens,
   partitionNotesSource,
   planNotesCapacity,
@@ -233,4 +234,25 @@ it('prefers a whitespace boundary when bisecting one oversized source span', () 
     [{ segment: 0, start: 0, end: 6 }],
     [{ segment: 0, start: 6, end: text.length }],
   ]);
+});
+
+it('bounds the complete-source review output without widening context or admitting an unusably small response', () => {
+  expect(
+    calculateNotesReviewBudget({
+      prompt: 'Short source.',
+      contextTokens: 16384,
+    }),
+  ).toEqual({ num_ctx: 16384, num_predict: 2048 });
+  const prompt = 'Ordinary conversation with several separate words. '.repeat(
+    650,
+  );
+  const input = estimateNotesTokens(prompt);
+  const budget = calculateNotesReviewBudget({
+    prompt,
+    contextTokens: input + 512 + 1200,
+  });
+  expect(budget).toEqual({ num_ctx: input + 512 + 1200, num_predict: 1200 });
+  expect(() =>
+    calculateNotesReviewBudget({ prompt, contextTokens: input + 512 + 1023 }),
+  ).toThrow('notes_context_exhausted');
 });

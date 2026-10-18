@@ -295,14 +295,32 @@ export const syncMeetingActionEntitiesFromUserEdits = (
     claimedEntityIds.add(entity.id);
 
     const meta = parseActionMetadata(entity.metadata);
-    // Require both the source slot and unique evidence before refreshing a suggestion.
+    const priorTask =
+      typeof meta.original_description === 'string'
+        ? meta.original_description
+        : typeof meta.full_description === 'string'
+          ? meta.full_description
+          : entity.name;
+    const uniqueTask =
+      actionItems.filter(
+        (candidate) =>
+          typeof candidate.text === 'string' &&
+          candidate.text.trim() === priorTask.trim(),
+      ).length === 1;
+    // Expanded citations may refresh an unchanged unique task; they cannot rebind different wording.
     const evidenceMatches =
       typeof meta.source_evidence === 'string' && meta.source_evidence.trim()
         ? actionItems.filter(
             (candidate) =>
               typeof candidate.evidence === 'string' &&
-              candidate.evidence.trim() ===
-                (meta.source_evidence as string).trim(),
+              (candidate.evidence.trim() ===
+                (meta.source_evidence as string).trim() ||
+                (uniqueTask &&
+                  typeof candidate.text === 'string' &&
+                  candidate.text.trim() === priorTask.trim() &&
+                  candidate.evidence.includes(
+                    (meta.source_evidence as string).trim(),
+                  ))),
           )
         : [];
     const correctedItem =
@@ -377,6 +395,7 @@ export const syncMeetingActionEntitiesFromUserEdits = (
         (meta.original_description !== correctedItem.text ||
           meta.assignee_name !== assignee ||
           meta.source_due_date !== correctedItem.due ||
+          meta.source_evidence !== correctedItem.evidence ||
           entity.due_date !== dueDate ||
           entity.assigned_to !== assignedTo)) ||
       Boolean(meta.user_edited) !== isUserEdited ||

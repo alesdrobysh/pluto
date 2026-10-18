@@ -1,8 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import {
-  OLLAMA_GENERAL_MODEL,
-  OLLAMA_QUICK_CHAT_MODEL,
-} from '../../src/utils/ollamaModels';
+import { resolveConfiguredOllamaModel } from '../../src/utils/ollamaModels';
 import { ChatGPTError } from '../chatgpt/auth';
 import { getChatGPTAuth } from '../chatgpt/runtime';
 import { askPlutoTimeoutMs } from '../intelligence/askPlutoDeadline';
@@ -21,6 +18,7 @@ import {
 } from './inferenceCoordinator';
 import type { InferenceRequest } from './inferenceTypes';
 import type { LLMWorkClass } from './llmWorkClass';
+import { calculateNotesReviewBudget } from './meetingNotesBudget';
 import { notesContextTokens, notesSourceSpanLimit } from './meetingNotesBudget';
 import { calculateNotesRequestBudget } from './meetingNotesBudget';
 import {
@@ -42,7 +40,7 @@ import { reviewSourceBoundNotes } from './meetingNotesSemanticReview';
 import { createNotesSourceFromText } from './meetingNotesSource';
 import { createNotesStreamPreview } from './meetingNotesStreamPreview';
 import type { ResolvedMeetingNotesTemplate } from './meetingNotesTemplates';
-import { NOTES_OLLAMA_MODEL, NOTES_PROMPT_VERSION } from './meetingNotesTypes';
+import { NOTES_PROMPT_VERSION } from './meetingNotesTypes';
 import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
@@ -673,11 +671,21 @@ export class UnifiedLLMProvider implements LLMProvider {
               reviewSourceBoundNotes(
                 notes,
                 async ({ prompt, responseSchema }) => {
+                  const reviewTimeoutMs =
+                    this.providerType === 'ollama'
+                      ? getOllamaTimeoutMs('notesAudit')
+                      : 90_000;
                   if (
                     options.optionalReviewDeadlineAtMs !== undefined &&
-                    Date.now() + 90_000 >= options.optionalReviewDeadlineAtMs
+                    Date.now() + reviewTimeoutMs >=
+                      options.optionalReviewDeadlineAtMs
                   )
                     throw new Error('semantic_review_publication_reserve');
+                  const budget = calculateNotesReviewBudget({
+                    prompt,
+                    contextTokens:
+                      this.providerType === 'chatgpt' ? 32768 : 20480,
+                  });
                   options.onStage?.('notesAudit');
                   return this.generateText({
                     prompt,
@@ -687,21 +695,20 @@ export class UnifiedLLMProvider implements LLMProvider {
                     notesModel: model,
                     notesStageObserver: options.onStageEvent,
                     notesBudget: {
-                      contextTokens:
-                        this.providerType === 'chatgpt' ? 32768 : 8192,
-                      outputTokens: 1536,
+                      contextTokens: budget.num_ctx,
+                      outputTokens: budget.num_predict,
                     },
                     workClass: options.workClass,
                     signal: options.signal
                       ? AbortSignal.any([
                           options.signal,
-                          AbortSignal.timeout(90_000),
+                          AbortSignal.timeout(reviewTimeoutMs),
                         ])
-                      : AbortSignal.timeout(90_000),
+                      : AbortSignal.timeout(reviewTimeoutMs),
                   });
                 },
                 options.signal,
-                this.providerType === 'chatgpt' ? 48_000 : 12_000,
+                this.providerType === 'chatgpt' ? 48_000 : 36_000,
               ),
           }
         : {}),
@@ -864,11 +871,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private getConfiguredAnalysisModel(): string {
     switch (this.providerType) {
       case 'ollama':
-        return (
-          this.settings.ollama_model ||
-          this.settings.llm_model ||
-          NOTES_OLLAMA_MODEL
-        );
+        return resolveConfiguredOllamaModel(this.settings);
       case 'chatgpt': {
         const model = this.settings.chatgpt_model?.trim();
         if (!model) throw new ChatGPTError('chatgpt_model_required');
@@ -2118,26 +2121,12 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
-    if (
+    return resolveConfiguredOllamaModel(
+      this.settings,
       task === 'askPlutoLive' ||
-      task === 'queryClassification' ||
-      task === 'askPlutoScope'
-    ) {
-      return (
-        (this.settings.ollama_fast_model || '').trim() ||
-        OLLAMA_QUICK_CHAT_MODEL
-      );
-    }
-    const configuredModel = (
-      this.settings.ollama_model ||
-      this.settings.llm_model ||
-      ''
-    ).trim();
-    if (configuredModel) {
-      return configuredModel;
-    }
-
-    return OLLAMA_GENERAL_MODEL;
+        task === 'queryClassification' ||
+        task === 'askPlutoScope',
+    );
   }
 
   private async ollamaFetch(

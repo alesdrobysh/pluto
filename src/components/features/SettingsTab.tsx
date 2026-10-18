@@ -36,10 +36,7 @@ import {
 } from '../../../electron/llm/providerCatalog';
 import { useAppUpdate } from '../../api/updater';
 import type { AppTheme } from '../../types/theme';
-import {
-  OLLAMA_GENERAL_MODEL,
-  OLLAMA_QUICK_CHAT_MODEL,
-} from '../../utils/ollamaModels';
+import { OLLAMA_GENERAL_MODEL } from '../../utils/ollamaModels';
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
@@ -1275,8 +1272,8 @@ export const SettingsTab = ({
               <>
                 <SettingsRow
                   htmlFor="ollama-model"
-                  label="Local Analysis & Deep Model"
-                  helper={`Used for meeting preparation and deeper cross-meeting analysis. Leave blank to use ${OLLAMA_GENERAL_MODEL}.`}
+                  label="Local model"
+                  helper={`Used for notes, answers, and connected knowledge. Leave blank for ${OLLAMA_GENERAL_MODEL}, or enter a model you installed in Ollama.`}
                 >
                   <Input
                     id="ollama-model"
@@ -1292,13 +1289,13 @@ export const SettingsTab = ({
                 </SettingsRow>
                 <SettingsRow
                   htmlFor="ollama-fast-model"
-                  label="Fast Chat Model"
-                  helper={`Quick Ask Pluto answers use ${OLLAMA_QUICK_CHAT_MODEL} by default. Deep questions continue to use the analysis model.`}
+                  label="Quick chat override (optional)"
+                  helper="Quick answers use your local model by default. Set a different installed model here only if you prefer."
                 >
                   <Input
                     id="ollama-fast-model"
                     type="text"
-                    placeholder={`Default: ${OLLAMA_QUICK_CHAT_MODEL}`}
+                    placeholder="Use local model"
                     value={ollamaFastModel}
                     onChange={(e) => {
                       const value = e.target.value;

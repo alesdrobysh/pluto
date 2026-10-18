@@ -1154,11 +1154,9 @@ it.each(['cancellation', 'completion'])(
         ],
       });
     });
-    const semanticGenerate = vi.fn(async () => {
-      throw new Error(
-        'No semantic request is needed for the retained discussion.',
-      );
-    });
+    const semanticGenerate = vi.fn(async () =>
+      JSON.stringify({ resolutions: [], additions: [], overview: null }),
+    );
     const review = vi.fn(
       (notes: Parameters<typeof reviewSourceBoundNotes>[0]) =>
         reviewSourceBoundNotes(notes, semanticGenerate),
@@ -1184,6 +1182,7 @@ it.each(['cancellation', 'completion'])(
       );
       expect(review).toHaveBeenCalledOnce();
       expect(semanticGenerate).not.toHaveBeenCalled();
+      expect(result.quality.issues).toContain('semantic_notes_review_capacity');
       expect(result.quality.issues).toEqual(
         expect.arrayContaining([expect.stringContaining('conflicting_action')]),
       );

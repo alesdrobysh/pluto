@@ -690,6 +690,99 @@ describe('corrected saved evidence for pending dashboard suggestions', () => {
     ).toBe(0);
   });
 
+  it('refreshes an unchanged pending task when review expands its exact source quote', () => {
+    const { entity, meetingId } = seed('expanded-evidence', {
+      full_description: correctedText,
+      original_description: correctedText,
+    });
+    const expanded = `Earlier request: arrange the planning discussion. ${evidence}`;
+    db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        all_action_items: [
+          { text: correctedText, assignee: 'Me', evidence: expanded },
+        ],
+      }),
+      meetingId,
+    );
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    const updated = getEntity(entity.id)!;
+    expect(updated.due_date).toBeNull();
+    expect(parseActionMetadata(updated.metadata)).toMatchObject({
+      assignee_name: 'Me',
+      source_evidence: expanded,
+    });
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(0);
+  });
+  it('refreshes evidence even when task, owner and deadline already match', () => {
+    const { entity, meetingId } = seed('evidence-only');
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    const expanded = `Earlier request: arrange the planning discussion. ${evidence}`;
+    db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        all_action_items: [
+          { text: correctedText, assignee: 'Me', evidence: expanded },
+        ],
+      }),
+      meetingId,
+    );
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(1);
+    expect(
+      parseActionMetadata(getEntity(entity.id)!.metadata).source_evidence,
+    ).toBe(expanded);
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(0);
+  });
+  it.each([
+    ['confirmed', { commitment_state: 'confirmed' }],
+    ['rejected', { commitment_state: 'rejected' }],
+    ['edited', { user_edited: true }],
+    ['reviewed', { reviewed_at: '2026-10-16T10:00:00Z' }],
+  ])(
+    'preserves %s state when an unchanged task gains wider source context',
+    (suffix, metadata) => {
+      const { entity, meetingId } = seed(`expanded-${suffix}`, {
+        full_description: correctedText,
+        original_description: correctedText,
+        ...metadata,
+      });
+      const expanded = `Earlier request: arrange the planning discussion. ${evidence}`;
+      db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+        JSON.stringify({
+          all_action_items: [
+            { text: correctedText, assignee: 'Me', evidence: expanded },
+          ],
+        }),
+        meetingId,
+      );
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+      const current = getEntity(entity.id)!;
+      expect(current.due_date).toBe('2026-10-16');
+      expect(parseActionMetadata(current.metadata)).toMatchObject({
+        assignee_name: 'Remote Speaker 2',
+        source_evidence: evidence,
+      });
+    },
+  );
+  it('does not rebind a different task merely because its expanded quote contains the old quote', () => {
+    const { entity, meetingId } = seed('expanded-different-task');
+    const expanded = `Earlier request: arrange the planning discussion. ${evidence}`;
+    db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        all_action_items: [
+          { text: correctedText, assignee: 'Me', evidence: expanded },
+        ],
+      }),
+      meetingId,
+    );
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(entity.id)?.name).toBe(staleText);
+    expect(getEntity(entity.id)?.due_date).toBe('2026-10-16');
+  });
   it('keeps a corrected suggestion anchored when the user later completes it', () => {
     const { entity, meetingId } = seed('corrected-completion');
     syncMeetingActionEntitiesFromUserEdits(db, meetingId);

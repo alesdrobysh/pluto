@@ -45,7 +45,7 @@ import {
 } from '../src/utils/liveMeetingCommands';
 import {
   OLLAMA_GENERAL_MODEL,
-  OLLAMA_QUICK_CHAT_MODEL,
+  resolveConfiguredOllamaModel,
 } from '../src/utils/ollamaModels';
 import { readProjectDisplayTitle } from '../src/utils/projectBriefing';
 import { parseTranscriptSegments } from '../src/utils/transcript';
@@ -646,7 +646,6 @@ import {
   generateDreamingWithProvider,
 } from './dreaming/idleDreamingCoordinator';
 import { packageEntityNotes } from './dreaming/packageEntityNotes';
-import { DREAMING_MODEL } from './dreaming/prompt';
 import {
   assertScopedPendingProposal,
   parseDreamingProposalScope,
@@ -1757,7 +1756,7 @@ app.whenReady().then(async () => {
       const selectedModel =
         settings.llm_provider === 'chatgpt'
           ? settings.chatgpt_model
-          : DREAMING_MODEL;
+          : resolveConfiguredOllamaModel(settings);
       if (model !== selectedModel) throw new Error('dreaming_provider_changed');
       const provider =
         settings.llm_provider === 'chatgpt'
@@ -1780,13 +1779,16 @@ app.whenReady().then(async () => {
       const settings = await getAllSettings(db);
       return settings.llm_provider === 'chatgpt'
         ? settings.chatgpt_model
-        : undefined;
+        : resolveConfiguredOllamaModel(settings);
     },
     unloadModel: async (signal) => {
       const settings = await getAllSettings(db);
       if (settings.llm_provider === 'chatgpt') return;
       const provider = new UnifiedLLMProvider('ollama', settings);
-      await provider.unloadModel(DREAMING_MODEL, signal);
+      await provider.unloadModel(
+        resolveConfiguredOllamaModel(settings),
+        signal,
+      );
     },
   });
 
@@ -5975,7 +5977,7 @@ app.whenReady().then(async () => {
             requiredModel:
               db.getSetting('llm_provider') === 'chatgpt'
                 ? String(db.getSetting('chatgpt_model') || '')
-                : DREAMING_MODEL,
+                : resolveConfiguredOllamaModel(await getAllSettings(db)),
             stage: 'prepare_updates',
             entityId: options.entityId,
             outcome:
@@ -6009,7 +6011,7 @@ app.whenReady().then(async () => {
             requiredModel:
               db.getSetting('llm_provider') === 'chatgpt'
                 ? String(db.getSetting('chatgpt_model') || '')
-                : DREAMING_MODEL,
+                : resolveConfiguredOllamaModel(await getAllSettings(db)),
             stage: 'prepare_updates',
             entityId: options.entityId,
             outcome: 'failed',
@@ -7527,9 +7529,7 @@ app.whenReady().then(async () => {
             providerAcquisitionCompletedAt = Date.now();
             providerName = provider.name;
             if (isLocalProvider) {
-              configuredModel =
-                (settings.ollama_fast_model || '').trim() ||
-                OLLAMA_QUICK_CHAT_MODEL;
+              configuredModel = resolveConfiguredOllamaModel(settings, true);
             }
             const prompt =
               promptOverride ||
