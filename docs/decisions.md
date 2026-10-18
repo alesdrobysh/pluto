@@ -2304,3 +2304,10 @@ evaluation is explicit and never runs or spends model usage in the unit suite.
 - **Decision:** A configured Ollama model supplies notes, saved and live answers, intent/scope classification, and local People/Project background work. An optional explicit quick override applies only to quick requests. Blank fields use the shared local default. Do not impose model-specific draft parameters on custom models or silently substitute installed models.
 - **ChatGPT boundary:** ChatGPT remains an independent provider with its account model, admission limits, background opt-in and durable duplicate prevention. Selecting it does not require or probe Ollama. Recording and transcription stay local.
 - **MTP direction:** Evaluate Ollama’s built-in Gemma MTP support before adding a second managed inference runtime. A successful readiness response or decoding speed alone does not establish semantic quality or recording safety. Keep all production evaluation material private and preserve both source worktrees and the installed app.
+
+## 2026-10-18 — Copy reviewed deadlines from exact source quotes
+
+- **Status:** Accepted contract for isolated validation; no release or MTP promotion.
+- **Supersedes:** Free-form deadline generation in the semantic review wire contract of “Review complete source coverage before publishing meeting notes” (2026-10-17).
+- **Decision:** In notes-v40, a reviewed deadline is null or an exact quote plus its source passage ID. Require that passage among the item's citations and verify the quote is present before copying it into the existing deadline field. Preserve spoken week/day qualifiers, month wording and stated years without language-pattern date parsing. Unsupported quotes hold that item while independent valid corrections remain available.
+- **Compatibility and usage:** Read saved string-based review responses under their existing conservative validation rules. New requests use the quote schema. No extra model call, automatic historical regeneration or change to ChatGPT usage admission is introduced. This validates quotation support; semantic correctness and completeness still require source review.

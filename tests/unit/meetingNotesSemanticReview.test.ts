@@ -548,6 +548,55 @@ describe('bounded source-bound semantic notes review', () => {
     expect(rejected.issues).toContain('semantic_notes_review_unavailable');
   });
 
+  it('copies a spoken deadline quote without parsing or normalizing its calendar wording', async () => {
+    const { notes } = fixture(
+      'Riley agreed to send the checklist in the week of the fifth of October.',
+    );
+    const generate = vi.fn(
+      async (_request: { responseSchema: Record<string, unknown> }) =>
+        response({
+          text: 'Send the checklist in the week of the fifth of October',
+          owner: 'Riley',
+          due: { source: 'R0', quote: 'the week of the fifth of October' },
+        }),
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, generate);
+    expect(reviewed.issues).not.toContain('semantic_notes_review_unavailable');
+    expect(projectAuditedNotes(reviewed).all_action_items[0]).toMatchObject({
+      assignee: 'Riley',
+      due: 'the week of the fifth of October',
+    });
+    const request = generate.mock.calls[0]?.[0] as unknown as {
+      responseSchema: any;
+    };
+    const due = request.responseSchema.$defs.reviewItem.anyOf[0].properties.due;
+    expect(due.anyOf[1]).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['source', 'quote'],
+      properties: { source: { $ref: '#/$defs/sourceId' } },
+    });
+  });
+
+  it.each([
+    { source: 'R0', quote: 'October 5, 2026' },
+    { source: 'R1', quote: 'the fifth of October' },
+    { source: 'R0', quote: 'October 5' },
+  ])('holds a deadline quote absent from its cited source: %j', async (due) => {
+    const { notes } = fixture(
+      'Riley agreed to send the checklist by the fifth of October.',
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({
+        text: 'Send the checklist',
+        owner: 'Riley',
+        due,
+      }),
+    );
+    expect(reviewed.issues).toContain('semantic_notes_review_unavailable');
+    expect(projectAuditedNotes(reviewed).all_action_items).toEqual([]);
+  });
+
   it('keeps valid independent corrections when another item has an unanchored owner', async () => {
     const { notes } = fixture();
     const second = {
