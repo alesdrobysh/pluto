@@ -43,10 +43,7 @@ import {
   LIVE_MEETING_SHORTCUT_HELP,
   parseLiveMeetingCommand,
 } from '../src/utils/liveMeetingCommands';
-import {
-  OLLAMA_GENERAL_MODEL,
-  resolveConfiguredOllamaModel,
-} from '../src/utils/ollamaModels';
+import { resolveConfiguredOllamaModel } from '../src/utils/ollamaModels';
 import { readProjectDisplayTitle } from '../src/utils/projectBriefing';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { registerDepartureService } from './activeCall/departureService';
@@ -139,6 +136,7 @@ import {
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
 import { checkOllamaReadiness } from './llm/ollamaReadiness';
+import { resolveConfiguredProviderModel } from './llm/providerCatalog';
 import {
   createLocalArtifactRecord,
   extractArtifactContent,
@@ -7377,20 +7375,7 @@ app.whenReady().then(async () => {
         let promptCharacters = 0;
         let outputCharacters = 0;
         let providerName: string = settings.llm_provider || 'ollama';
-        let configuredModel =
-          settings.llm_model ||
-          (settings.llm_provider === 'chatgpt'
-            ? settings.chatgpt_model
-            : settings.llm_provider === 'gemini'
-              ? settings.gemini_model
-              : settings.llm_provider === 'openai'
-                ? settings.openai_model
-                : settings.llm_provider === 'openrouter'
-                  ? settings.openrouter_model
-                  : settings.llm_provider === 'claude'
-                    ? settings.claude_model
-                    : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
-          'default';
+        let configuredModel = resolveConfiguredProviderModel(settings);
         let lastValidatedPresentation: SafeAnswerPresentation | undefined;
         let conversationAnchor: string | undefined;
         const elapsed = (from?: number, to?: number): number | null =>
@@ -9513,20 +9498,10 @@ app.whenReady().then(async () => {
           requestId,
           assistanceRoute,
           provider: settings.llm_provider,
-          configuredModel:
-            settings.llm_model ||
-            (settings.llm_provider === 'ollama'
-              ? settings.ollama_model
-              : settings.llm_provider === 'chatgpt'
-                ? settings.chatgpt_model
-                : settings.llm_provider === 'gemini'
-                  ? settings.gemini_model
-                  : settings.llm_provider === 'openai'
-                    ? settings.openai_model
-                    : settings.llm_provider === 'openrouter'
-                      ? settings.openrouter_model
-                      : settings.claude_model) ||
-            'default',
+          configuredModel: resolveConfiguredProviderModel(
+            settings,
+            context.scope.type === 'live_meeting',
+          ),
           promptChars: prompt.length,
           elapsedMs: Date.now() - startTime,
         });

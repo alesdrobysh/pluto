@@ -67,6 +67,7 @@ import type {
   LLMSettings,
   ProviderType,
 } from './provider';
+import { resolveGeminiModelName } from './providerCatalog';
 import { ChatGPTInferenceError, executeChatGPT } from './transports/chatGPT';
 import {
   InferenceTransportError,
@@ -87,13 +88,6 @@ const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = NOTES_PROMPT_VERSION;
-
-const resolveGeminiModelName = (configured?: string): string => {
-  const model = (configured || '').trim();
-  return !model || model === 'gemini-1.5-flash' || model === 'gemini-2.0-flash'
-    ? 'gemini-3.8-flash'
-    : model;
-};
 
 const reportsNotesInputOverflow = (value: unknown): boolean =>
   /context_length_exceeded|context[_ ](?:window|length|size).*(?:exceed|overflow|too (?:large|long))|(?:exceed|overflow).*(?:context|input.*tokens)|(?:prompt|input) (?:is )?too long/i.test(
