@@ -1397,6 +1397,23 @@ export const acceptEditedNotes = ({
   return result;
 };
 
+export const isUnchangedNotesNarrative = (
+  notes: AuditedNotes,
+  item: NotesItem,
+): boolean => {
+  const original = notes.reviewOriginals?.get(item.id) ?? item;
+  return (
+    (item.kind === 'point' || item.kind === 'question') &&
+    original.kind === item.kind &&
+    original.text === item.text &&
+    original.owner === null &&
+    item.owner === null &&
+    original.due === null &&
+    item.due === null &&
+    JSON.stringify(original.sources) === JSON.stringify(item.sources)
+  );
+};
+
 export const applySourceBoundSemanticReview = (
   audited: AuditedNotes,
   replacements: NotesItem[],
@@ -1404,6 +1421,7 @@ export const applySourceBoundSemanticReview = (
     sourceSpans: SourceSpan[];
     additions: NotesItem[];
     overview?: SupportedText;
+    narrativeDuplicates?: { id: string; retainedId: string }[];
   },
 ): AuditedNotes => {
   if (!reviewedResults.has(audited))
@@ -1447,6 +1465,36 @@ export const applySourceBoundSemanticReview = (
     });
   }
   if (byId.size) throw new MeetingNotesError('invalid_notes_audit');
+  const duplicates = coverage?.narrativeDuplicates ?? [];
+  const duplicateIds = new Set(duplicates.map((item) => item.id));
+  const originalItems = audited.draft.sections.flatMap(
+    (section) => section.items,
+  );
+  const retainedItems = next.draft.sections.flatMap((section) => section.items);
+  if (duplicateIds.size !== duplicates.length)
+    throw new MeetingNotesError('invalid_notes_audit');
+  for (const { id, retainedId } of duplicates) {
+    const original = originalItems.find((item) => item.id === id);
+    const retained = retainedItems.find((item) => item.id === retainedId);
+    if (
+      !original ||
+      !retained ||
+      duplicateIds.has(retainedId) ||
+      !isUnchangedNotesNarrative(audited, original) ||
+      replacements.some((item) => item.id === id) ||
+      !original.sources.every((span) =>
+        retained.sources.some(
+          (scope) =>
+            scope.segment === span.segment &&
+            scope.start <= span.start &&
+            scope.end >= span.end,
+        ),
+      )
+    )
+      throw new MeetingNotesError('invalid_notes_audit');
+  }
+  for (const section of next.draft.sections)
+    section.items = section.items.filter((item) => !duplicateIds.has(item.id));
   if (coverage) {
     validateSources(audited.source, coverage.sourceSpans);
     for (const addition of coverage.additions) {
@@ -1490,12 +1538,14 @@ export const applySourceBoundSemanticReview = (
       next.draft.overview = structuredClone(coverage.overview);
     }
   }
-  const ids = new Set(replacements.map((item) => item.id));
+  const ids = new Set([
+    ...replacements.map((item) => item.id),
+    ...duplicateIds,
+  ]);
   next.issues = audited.issues?.filter(
     (issue) =>
-      !replacements.some(
-        (item) =>
-          issue.startsWith('deterministic_') && issue.endsWith(`:${item.id}`),
+      ![...ids].some(
+        (id) => issue.startsWith('deterministic_') && issue.endsWith(`:${id}`),
       ),
   );
   next.proseReviewItems = audited.proseReviewItems?.filter(
@@ -1504,6 +1554,7 @@ export const applySourceBoundSemanticReview = (
   next.semanticChangeCount =
     (audited.semanticChangeCount ?? 0) +
     replacements.length +
+    duplicates.length +
     (coverage?.additions.length ?? 0) +
     (coverage?.overview ? 1 : 0);
   reviewedResults.add(next);
