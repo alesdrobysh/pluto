@@ -76,6 +76,12 @@ describe('About you form and invitation', () => {
         return profileState;
       }
       if (channel.startsWith('RECORDING_READINESS')) return readiness;
+      if (channel === 'OLLAMA_READINESS')
+        return {
+          status: 'ready',
+          models: ['gemma4:12b'],
+          missingModels: [],
+        };
       return true;
     });
     Object.defineProperty(window, 'ipcRenderer', {

@@ -1,6 +1,38 @@
 import { useEffect, useState } from 'react';
 import type { OllamaReadiness } from '../../../electron/llm/ollamaReadiness';
 
+const failedReadiness: OllamaReadiness = {
+  status: 'check_failed',
+  models: [],
+  missingModels: [],
+};
+
+const isReadiness = (value: unknown): value is OllamaReadiness => {
+  if (!value || typeof value !== 'object') return false;
+  return (
+    'status' in value &&
+    typeof value.status === 'string' &&
+    [
+      'ready',
+      'service_unavailable',
+      'model_missing',
+      'upgrade_required',
+      'check_failed',
+    ].includes(value.status) &&
+    'models' in value &&
+    Array.isArray(value.models) &&
+    value.models.every((model) => typeof model === 'string' && model.trim()) &&
+    'missingModels' in value &&
+    Array.isArray(value.missingModels) &&
+    value.missingModels.every(
+      (model) => typeof model === 'string' && model.trim(),
+    ) &&
+    (value.status !== 'ready' ||
+      (value.models.length > 0 && value.missingModels.length === 0)) &&
+    (!('version' in value) || typeof value.version === 'string')
+  );
+};
+
 export function OllamaReadinessStatus({
   onReadiness,
 }: {
@@ -15,19 +47,16 @@ export function OllamaReadinessStatus({
     setStatus(null);
     onReadiness?.(null);
     void window.ipcRenderer.invoke('OLLAMA_READINESS').then(
-      (next: OllamaReadiness) => {
+      (value: unknown) => {
         if (!current) return;
+        const next = isReadiness(value) ? value : failedReadiness;
         setStatus(next);
         onReadiness?.(next);
         setChecking(false);
       },
       () => {
         if (!current) return;
-        const next: OllamaReadiness = {
-          status: 'check_failed',
-          models: [],
-          missingModels: [],
-        };
+        const next = failedReadiness;
         setStatus(next);
         onReadiness?.(next);
         setChecking(false);

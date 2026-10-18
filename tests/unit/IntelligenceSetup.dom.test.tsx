@@ -13,6 +13,11 @@ afterEach(() => {
 async function renderSetup(
   saved: Record<string, string> = {},
   connection = false,
+  readiness: unknown = {
+    status: 'ready',
+    models: ['custom:local'],
+    missingModels: [],
+  },
 ) {
   const complete = vi.fn();
   let connected = connection;
@@ -24,8 +29,7 @@ async function renderSetup(
     }
     if (channel === 'CHATGPT_STATUS')
       return { connected, planEnabled: connected };
-    if (channel === 'OLLAMA_READINESS')
-      return { status: 'ready', models: ['custom:local'], missingModels: [] };
+    if (channel === 'OLLAMA_READINESS') return readiness;
     if (channel === 'CHATGPT_SIGN_IN') {
       connected = true;
       saved.chatgpt_model = 'account-model';
@@ -58,6 +62,37 @@ async function renderSetup(
 }
 
 describe('First-run intelligence choice', () => {
+  it.each([
+    null,
+    {},
+    { status: 'ready' },
+    { status: 'ready', models: [], missingModels: [] },
+    {
+      status: 'ready',
+      models: ['custom:local'],
+      missingModels: ['custom:local'],
+    },
+    { status: 'model_missing', models: [], missingModels: [null] },
+  ])(
+    'handles malformed local readiness %j without claiming a working model',
+    async (readiness) => {
+      const f = await renderSetup({}, false, readiness);
+      await f.choose('ollama');
+      expect(f.container.textContent).toContain(
+        'Could not verify your local models',
+      );
+      expect(f.container.textContent).not.toContain(
+        'Your local models are installed',
+      );
+      expect(
+        f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
+          .disabled,
+      ).toBe(true);
+      expect(f.container.textContent).toContain('Continue with recording');
+      expect(f.complete).not.toHaveBeenCalled();
+      act(() => f.root.unmount());
+    },
+  );
   it('requires a choice and remembers Ollama without requesting cloud access', async () => {
     const f = await renderSetup();
     expect(
