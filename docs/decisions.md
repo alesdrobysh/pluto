@@ -2320,3 +2320,10 @@ evaluation is explicit and never runs or spends model usage in the unit suite.
 - **Meaning:** Explicit operational responsibility for identifiable work is accepted work even without a discrete artifact or deadline. Resolve its referenced work and cite scope together with acceptance; preserve unfamiliar names. Unaccepted requests, tentative offers and unspecified social closings remain discussion.
 - **Review context:** Deterministic checks preserve the original structured writer items before applying guards. Compact leaves carry those snapshots under their canonical IDs into final source review. A source quotation used as a safe discussion fallback must not replace the original task's wording or metadata in that handoff.
 - **Usage and data:** Retain one bounded review request and existing output admission, historical reuse, duplicate prevention and user-review state. No pattern-based language repair, extra automatic request or historical regeneration is introduced.
+
+## 2026-10-18 - Release Gemma MTP between requests
+
+- **Status:** Accepted.
+- **Supersedes:** The two-hour retention window in “Retain local models for up to two hours with idle memory release” (2026-10-05), only for the canonical `gemma4:12b-mlx` model and its official library aliases.
+- **Decision:** Send `keep_alive: 0` on generation requests for this model. Its MLX prefix snapshots can otherwise accumulate across consecutive requests before the idle-release policy runs. Release between requests, including consecutive stages within one notes job.
+- **Compatibility:** Other Ollama models, custom namespaces, context/output budgets, prompts and cancellation retain their existing behavior. ChatGPT requests and usage safeguards are independent. This does not promote the MTP model to the default; source fidelity, performance and packaged acceptance remain required.

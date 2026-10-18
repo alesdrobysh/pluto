@@ -323,6 +323,42 @@ describe('UnifiedLLMProvider', () => {
     });
   });
 
+  it.each([
+    ['gemma4:12b-mlx', 0],
+    [' GEMMA4:12B-MLX ', 0],
+    ['library/gemma4:12b-mlx', 0],
+    ['registry.ollama.ai/library/gemma4:12b-mlx', 0],
+    ['gemma4:12b', '2h'],
+    ['private/gemma4:12b-mlx', '2h'],
+    ['custom:latest', '2h'],
+  ])(
+    'bounds Gemma MTP retention without changing %s selection',
+    async (model, keepAlive) => {
+      let requestBody: Record<string, unknown> | undefined;
+      installFetchMock((_url, init) => {
+        requestBody = parseRequestBody(init);
+        return jsonResponse({
+          response: validAnalysisMarkdown,
+          done: true,
+          done_reason: 'stop',
+        });
+      });
+      const provider = new UnifiedLLMProvider('ollama', {
+        ollama_model: String(model),
+      });
+
+      await expect(
+        provider.generateUserAnalysisMarkdown('Speaker A: status update'),
+      ).resolves.toBe(validAnalysisMarkdown);
+
+      expect(requestBody).toMatchObject({
+        model: String(model).trim(),
+        keep_alive: keepAlive,
+      });
+      expect(requestBody?.prompt).toBeTruthy();
+    },
+  );
+
   it('fails closed when Ollama residency discovery fails', async () => {
     const fetchMock = installFetchMock(
       () =>

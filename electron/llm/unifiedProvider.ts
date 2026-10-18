@@ -1,5 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
-import { resolveConfiguredOllamaModel } from '../../src/utils/ollamaModels';
+import {
+  resolveConfiguredOllamaModel,
+  usesGemmaMtpDefaults,
+} from '../../src/utils/ollamaModels';
 import { ChatGPTError } from '../chatgpt/auth';
 import { getChatGPTAuth } from '../chatgpt/runtime';
 import { askPlutoTimeoutMs } from '../intelligence/askPlutoDeadline';
@@ -1658,7 +1661,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         temperature: this.getTemperature(task),
         num_thread: 8, // Ensure multi-threading is utilized
       },
-      keep_alive: '2h', // Idle models can be released earlier under memory pressure.
+      // MLX prefix snapshots can outlive a request; release this model between requests.
+      keep_alive: usesGemmaMtpDefaults(model) ? 0 : '2h',
     };
 
     if (jsonMode) {
