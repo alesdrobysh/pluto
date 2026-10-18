@@ -155,7 +155,7 @@ describe('bounded source-bound semantic notes review', () => {
     const schema = generate.mock.calls[0]![0].responseSchema as any;
     expect(schema.properties.reviews.required).toEqual(['I0']);
     expect(schema.properties.reviews.additionalProperties).toBe(false);
-    expect(schema.properties.reviews.properties.I0.anyOf[1]).toEqual({
+    expect(schema.properties.reviews.properties.I0).toEqual({
       $ref: '#/$defs/reviewItem',
     });
     const branches = schema.$defs.reviewItem.anyOf;
@@ -939,7 +939,13 @@ describe('complete-source coverage and source-cited additions', () => {
     notes.draft.sections[0]!.items[0]!.kind = 'decision';
     const reviewed = await reviewSourceBoundNotes(notes, async () =>
       JSON.stringify({
-        reviews: { I0: 'point' },
+        reviews: {
+          I0: resolution({
+            kind: 'point',
+            text: 'No changes were agreed for the layout',
+            owner: null,
+          }),
+        },
         additions: [],
         overview: null,
       }),
@@ -948,6 +954,133 @@ describe('complete-source coverage and source-cited additions', () => {
     expect(reviewed.draft.sections[0]!.items[0]!.text).toBe(
       'No changes were agreed for the layout',
     );
+  });
+  it('keeps an unchanged narrative shortcut scoped to its exact existing kind', async () => {
+    const notes = coverageFixture(
+      [{ speaker: 'Tavi', text: 'The pilot remains in staging.' }],
+      'The pilot remains in staging.',
+      0,
+      'point',
+    );
+    const generate = vi.fn(async (_request: { responseSchema: any }) =>
+      JSON.stringify({
+        reviews: { I0: 'point' },
+        additions: [],
+        overview: null,
+      }),
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, generate);
+    expect(reviewed.issues ?? []).not.toContain(
+      'semantic_notes_review_unavailable',
+    );
+    expect(
+      generate.mock.calls[0]![0].responseSchema.properties.reviews.properties.I0
+        .anyOf[0],
+    ).toEqual({ type: 'string', enum: ['point'] });
+    expect(reviewed.draft.sections[0]!.items[0]!.text).toBe(
+      'The pilot remains in staging.',
+    );
+  });
+  it.each(['kind', 'wording', 'evidence'] as const)(
+    'does not certify a changed narrative through an old shortcut: %s',
+    async (change) => {
+      const notes = coverageFixture(
+        [{ speaker: 'Tavi', text: 'The pilot remains in staging.' }],
+        'The pilot remains in staging.',
+        0,
+        'point',
+      );
+      const item = notes.draft.sections[0]!.items[0]!;
+      if (change === 'kind') item.kind = 'question';
+      if (change === 'wording') item.text = 'The pilot is live.';
+      if (change === 'evidence')
+        item.sources = [{ segment: 0, start: 0, end: 9 }];
+      const before = structuredClone(notes.draft);
+      const generate = vi.fn(async (_request: { responseSchema: any }) =>
+        JSON.stringify({
+          reviews: { I0: 'point' },
+          additions: [],
+          overview: null,
+        }),
+      );
+      const reviewed = await reviewSourceBoundNotes(notes, generate);
+      expect(reviewed.draft).toEqual(before);
+      expect(reviewed.issues).toContain(
+        'semantic_notes_review_unavailable:task',
+      );
+      expect(
+        generate.mock.calls[0]![0].responseSchema.properties.reviews.properties
+          .I0,
+      ).toEqual({ $ref: '#/$defs/reviewItem' });
+      expect(generate).toHaveBeenCalledOnce();
+    },
+  );
+  it('does not silently downgrade an original action through a narrative shortcut', async () => {
+    const { notes } = fixture();
+    const before = structuredClone(notes.draft);
+    expect(notes.reviewOriginals?.get('task')?.kind).toBe('action');
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      JSON.stringify({
+        reviews: { I0: 'point' },
+        additions: [],
+        overview: null,
+      }),
+    );
+    expect(reviewed.draft).toEqual(before);
+    expect(reviewed.issues).toContain('semantic_notes_review_unavailable:task');
+  });
+  it('keeps independent complete corrections when an old shortcut is held for review', async () => {
+    const { notes } = fixture(
+      'I will send the checklist. I will update the runbook.',
+      'Send the checklist',
+    );
+    const first = structuredClone(notes.draft.sections[0]!.items[0]!);
+    notes.draft.sections[0]!.items.push({
+      ...structuredClone(first),
+      id: 'runbook',
+      kind: 'point',
+      text: 'Update the runbook',
+      owner: null,
+      due: null,
+    });
+    const generate = vi.fn(async () =>
+      JSON.stringify({
+        reviews: {
+          I0: 'point',
+          I1: resolution({ text: 'Update the runbook' }),
+        },
+        additions: [],
+        overview: null,
+      }),
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, generate);
+    expect(reviewed.draft.sections[0]!.items[0]).toEqual(first);
+    expect(
+      reviewed.draft.sections[0]!.items.find((item) => item.id === 'runbook'),
+    ).toMatchObject({
+      kind: 'action',
+      text: 'Update the runbook',
+      owner: 'Remote Speaker 2',
+    });
+    expect(reviewed.issues).toContain('semantic_notes_review_unavailable:task');
+    expect(generate).toHaveBeenCalledOnce();
+  });
+  it('requires complete wording to change an unchanged narrative into a question', async () => {
+    const notes = coverageFixture(
+      [{ speaker: 'Tavi', text: 'The pilot remains in staging.' }],
+      'The pilot remains in staging.',
+      0,
+      'point',
+    );
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      JSON.stringify({
+        reviews: { I0: 'question' },
+        additions: [],
+        overview: null,
+      }),
+    );
+    expect(reviewed.draft.sections[0]!.items[0]!.kind).toBe('point');
+    expect(reviewed.issues).toContain('semantic_notes_review_unavailable:task');
   });
   it.each([
     {},
@@ -989,7 +1122,13 @@ describe('complete-source coverage and source-cited additions', () => {
     ];
     const reviewed = await reviewSourceBoundNotes(notes, async () =>
       JSON.stringify({
-        reviews: { I0: 'point' },
+        reviews: {
+          I0: resolution({
+            kind: 'point',
+            text: 'The export succeeded.',
+            owner: null,
+          }),
+        },
         additions: [],
         overview: null,
       }),

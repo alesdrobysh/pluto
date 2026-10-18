@@ -22,6 +22,34 @@ export interface NotesSemanticReviewCase {
 
 export const notesSemanticReviewCases: NotesSemanticReviewCase[] = [
   {
+    id: 'operational-coordination-reference',
+    lines: [
+      {
+        speaker: 'Tavi',
+        text: 'For next quarter, our two workstreams are Juniper and Kestrel.',
+      },
+      { speaker: 'Ari', text: 'Any other questions?' },
+      {
+        speaker: 'Tavi',
+        text: "No, nothing else. I'll coordinate how that progresses.",
+      },
+    ],
+    citedLineIndexes: [2],
+    claim: {
+      kind: 'point',
+      text: 'Tavi will coordinate progress of the work',
+      owner: null,
+      due: null,
+    },
+    expected: {
+      kinds: ['action'],
+      owner: 'Tavi',
+      due: null,
+      required: ['Juniper', 'Kestrel'],
+      forbidden: [],
+    },
+  },
+  {
     id: 'independent-unconditional',
     lines: [
       {
