@@ -23,6 +23,7 @@ import {
 } from './database/errors';
 import { initializeDatabaseStorageSetup } from './database/storageSetup';
 import { probeSignedMacBuild } from './encryptionRollout';
+import { migrateOllamaModelDatabase } from './llm/ollamaModelMigration';
 import { createLogger, initializeElectronLogging } from './logger';
 
 // Guard against broken-pipe errors (EPIPE / EIO) on stdout/stderr early in process lifetime
@@ -142,10 +143,11 @@ if (!canOpenDatabase) {
             getKeyStore().getOrCreateMasterKey();
           },
           initialize: (storageMode) => {
-            initializeApplicationDatabase({
+            const connection = initializeApplicationDatabase({
               storageMode,
               keyStore: storageMode === 'encrypted' ? getKeyStore() : undefined,
             });
+            migrateOllamaModelDatabase(connection);
           },
         });
         if (mode === null) {

@@ -29,6 +29,29 @@ describe('Electron bootstrap boundary', () => {
     expect(source).toContain('describeDatabaseStartupError');
   });
 
+  it('runs model migration in the synchronous database recovery boundary before main import', () => {
+    const bootstrap = fs.readFileSync(
+      path.join(root, 'electron/bootstrap.ts'),
+      'utf8',
+    );
+    const main = fs.readFileSync(path.join(root, 'electron/main.ts'), 'utf8');
+    const initialize = bootstrap.indexOf('initialize: (storageMode) => {');
+    const migration = bootstrap.indexOf(
+      'migrateOllamaModelDatabase(connection);',
+    );
+    const completed = bootstrap.indexOf('initialized = true;', initialize);
+    const mainImport = bootstrap.indexOf("import('./main')", completed);
+    const recovery = bootstrap.indexOf('} catch (error) {', mainImport);
+    expect(initialize).toBeGreaterThan(-1);
+    expect(migration).toBeGreaterThan(initialize);
+    expect(migration).toBeLessThan(bootstrap.indexOf('},', migration));
+    expect(migration).toBeLessThan(completed);
+    expect(completed).toBeLessThan(mainImport);
+    expect(recovery).toBeGreaterThan(mainImport);
+    expect(main).not.toContain('migrateOllamaModelSettings');
+    expect(main).not.toContain('migrateOllamaModelDatabase');
+  });
+
   it('builds both source commands from the same bootstrap and profile selection', () => {
     const source = fs.readFileSync(path.join(root, 'vite.config.ts'), 'utf8');
     const packageJson = JSON.parse(

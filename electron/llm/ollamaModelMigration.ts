@@ -1,9 +1,28 @@
+import type Database from 'better-sqlite3';
 import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
 import { PROVIDER_DEFAULT_MODELS } from './providerCatalog';
 
 export const OLLAMA_MODEL_MIGRATION_SETTING =
   'ollama_default_model_migration_v1';
 const historicalModel: string = 'gemma4:12b';
+
+export function migrateOllamaModelDatabase(
+  connection: Pick<Database.Database, 'prepare' | 'transaction'>,
+): void {
+  migrateOllamaModelSettings({
+    getSetting: (key) =>
+      (
+        connection
+          .prepare('SELECT value FROM settings WHERE key = ?')
+          .get(key) as { value: string } | undefined
+      )?.value ?? null,
+    setSetting: (key, value) =>
+      connection
+        .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+        .run(key, value),
+    transaction: (run) => connection.transaction(run)(),
+  });
+}
 
 export function migrateOllamaModelSettings(store: {
   getSetting: (key: string) => unknown;

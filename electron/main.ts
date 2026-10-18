@@ -135,7 +135,6 @@ import {
 } from './intelligence/askPlutoSemanticScope';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
-import { migrateOllamaModelSettings } from './llm/ollamaModelMigration';
 import { checkOllamaReadiness } from './llm/ollamaReadiness';
 import { resolveConfiguredProviderModel } from './llm/providerCatalog';
 import {
@@ -1308,11 +1307,6 @@ app.on(
 );
 
 app.whenReady().then(async () => {
-  migrateOllamaModelSettings({
-    getSetting: db.getSetting,
-    setSetting: db.setSetting,
-    transaction: (run) => db.db.transaction(run)(),
-  });
   const chatGPTAuth = new ChatGPTAuth({
     ...createChatGPTStorage(createElectronSecureSettingsBackend()),
     getHostId: () => {

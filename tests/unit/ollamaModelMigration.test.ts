@@ -1,6 +1,11 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { initializeDatabaseStorageSetup } from '../../electron/database/storageSetup';
 import {
   OLLAMA_MODEL_MIGRATION_SETTING,
+  migrateOllamaModelDatabase,
   migrateOllamaModelSettings,
 } from '../../electron/llm/ollamaModelMigration';
 
@@ -166,5 +171,168 @@ describe('one-time Ollama default migration', () => {
       ollama_model: 'gemma4:12b',
       [OLLAMA_MODEL_MIGRATION_SETTING]: '1',
     });
+  });
+});
+
+describe('migration inside database startup recovery', () => {
+  function databaseFixture() {
+    const f = fixture({ setup_complete: 'true' });
+    const connection = {
+      prepare: vi.fn((sql: string) => {
+        if (sql === 'SELECT value FROM settings WHERE key = ?') {
+          return {
+            get: (key: string) => {
+              const value = f.store.getSetting(key);
+              return value === undefined ? undefined : { value };
+            },
+          };
+        }
+        if (
+          sql === 'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
+        ) {
+          return { run: f.store.setSetting };
+        }
+        throw new Error('Unexpected settings query');
+      }),
+      transaction: (run: () => void) => () => f.store.transaction(run),
+    } as unknown as Parameters<typeof migrateOllamaModelDatabase>[0];
+    return { ...f, connection };
+  }
+
+  it('rolls back a failed marker write, enters recovery without main, and retries once', () => {
+    defaults.model = 'future-mtp:12b';
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'pluto-migration-startup-'),
+    );
+    const databasePath = path.join(dir, 'pluto.db');
+    fs.writeFileSync(databasePath, 'SQLite format 3\0');
+    const f = databaseFixture();
+    const main = vi.fn();
+    const recovery = vi.fn();
+    const save = f.store.setSetting.getMockImplementation()!;
+    let failMarker = true;
+    f.store.setSetting.mockImplementation((key, value) => {
+      if (key === OLLAMA_MODEL_MIGRATION_SETTING && failMarker) {
+        failMarker = false;
+        throw new Error('disk full');
+      }
+      save(key, value);
+    });
+    const start = () => {
+      try {
+        initializeDatabaseStorageSetup({
+          databasePath,
+          chooseMode: () => {
+            throw new Error('Existing profile must retain storage');
+          },
+          prepareEncryption: () => {
+            throw new Error('Standard profile must not request keys');
+          },
+          initialize: () => migrateOllamaModelDatabase(f.connection),
+        });
+        main();
+      } catch (error) {
+        recovery(error);
+      }
+    };
+    try {
+      start();
+      expect(recovery).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'disk full' }),
+      );
+      expect(main).not.toHaveBeenCalled();
+      expect(f.values).toEqual({ setup_complete: 'true' });
+      expect(fs.existsSync(path.join(dir, 'database-storage.json'))).toBe(
+        false,
+      );
+      start();
+      expect(main).toHaveBeenCalledOnce();
+      expect(recovery).toHaveBeenCalledOnce();
+      expect(f.values).toEqual({
+        setup_complete: 'true',
+        ollama_model: 'gemma4:12b',
+        [OLLAMA_MODEL_MIGRATION_SETTING]: '1',
+      });
+      expect(
+        JSON.parse(
+          fs.readFileSync(path.join(dir, 'database-storage.json'), 'utf8'),
+        ),
+      ).toEqual({ version: 1, mode: 'standard', initialized: true });
+      f.store.setSetting.mockClear();
+      migrateOllamaModelDatabase(f.connection);
+      expect(f.store.setSetting).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['database is locked', 'encrypted database key unavailable'])(
+    'propagates initialization failure before migration: %s',
+    (message) => {
+      defaults.model = 'future-mtp:12b';
+      const dir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'pluto-migration-init-'),
+      );
+      const databasePath = path.join(dir, 'pluto.db');
+      fs.writeFileSync(databasePath, 'SQLite format 3\0');
+      const f = databaseFixture();
+      const initializeConnection = vi.fn(() => {
+        throw new Error(message);
+      });
+      try {
+        expect(() =>
+          initializeDatabaseStorageSetup({
+            databasePath,
+            chooseMode: () => 'standard',
+            prepareEncryption: vi.fn(),
+            initialize: () => {
+              initializeConnection();
+              migrateOllamaModelDatabase(f.connection);
+            },
+          }),
+        ).toThrow(message);
+        expect(f.connection.prepare).not.toHaveBeenCalled();
+        expect(f.values).toEqual({ setup_complete: 'true' });
+        expect(fs.existsSync(path.join(dir, 'database-storage.json'))).toBe(
+          false,
+        );
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('does not touch the database adapter before a default transition', () => {
+    defaults.model = 'gemma4:12b';
+    const f = databaseFixture();
+    migrateOllamaModelDatabase(f.connection);
+    expect(f.connection.prepare).not.toHaveBeenCalled();
+    expect(f.store.transaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps malformed existing storage in recovery before migration or main starts', () => {
+    defaults.model = 'future-mtp:12b';
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'pluto-migration-invalid-'),
+    );
+    const databasePath = path.join(dir, 'pluto.db');
+    fs.writeFileSync(databasePath, 'broken');
+    const f = databaseFixture();
+    const initialize = vi.fn(() => migrateOllamaModelDatabase(f.connection));
+    try {
+      expect(() =>
+        initializeDatabaseStorageSetup({
+          databasePath,
+          chooseMode: () => 'standard',
+          prepareEncryption: vi.fn(),
+          initialize,
+        }),
+      ).toThrow('incomplete');
+      expect(initialize).not.toHaveBeenCalled();
+      expect(f.connection.prepare).not.toHaveBeenCalled();
+      expect(fs.readFileSync(databasePath, 'utf8')).toBe('broken');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
