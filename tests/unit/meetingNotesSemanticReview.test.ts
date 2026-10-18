@@ -155,7 +155,10 @@ describe('bounded source-bound semantic notes review', () => {
     const schema = generate.mock.calls[0]![0].responseSchema as any;
     expect(schema.properties.reviews.required).toEqual(['I0']);
     expect(schema.properties.reviews.additionalProperties).toBe(false);
-    const branches = schema.properties.reviews.properties.I0.anyOf[1].anyOf;
+    expect(schema.properties.reviews.properties.I0.anyOf[1]).toEqual({
+      $ref: '#/$defs/reviewItem',
+    });
+    const branches = schema.$defs.reviewItem.anyOf;
     expect(branches).toHaveLength(2);
     expect(branches[0].properties.kind.enum).toEqual([
       'accepted_action',
@@ -165,6 +168,118 @@ describe('bounded source-bound semantic notes review', () => {
     for (const key of ['owner', 'due'])
       expect(branches[1].properties[key]).toEqual({ type: 'null' });
     expect(branches[1].properties).not.toHaveProperty('discussion');
+  });
+
+  it('shares schema definitions so many draft items do not multiply citation enums', async () => {
+    const source = createNotesSource(
+      JSON.stringify(
+        Array.from({ length: 100 }, (_, index) => ({
+          speaker: index % 2 ? 'Tavi' : 'Rowan',
+          text: `Status ${index}.`,
+        })),
+      ),
+    );
+    const span = (segment: number) => [
+      { segment, start: 0, end: source.segments[segment]!.text.length },
+    ];
+    const notes = acceptEditedNotes({
+      source,
+      acceptancePolicy: 'conservative',
+      draft: {
+        title: null,
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            id: 'section',
+            title: { id: 'heading', text: 'Status', sources: span(0) },
+            items: Array.from({ length: 40 }, (_, index) => ({
+              id: `item-${index}`,
+              kind: 'point' as const,
+              text: source.segments[index]!.text,
+              owner: null,
+              due: null,
+              sources: span(index),
+            })),
+          },
+        ],
+      },
+    });
+    let schema: any;
+    await reviewSourceBoundNotes(notes, async (request) => {
+      schema = request.responseSchema;
+      return JSON.stringify({
+        reviews: Object.fromEntries(
+          Array.from({ length: 40 }, (_, index) => [`I${index}`, 'point']),
+        ),
+        additions: [],
+        overview: null,
+      });
+    });
+    const enumCount = (value: unknown): number => {
+      if (!value || typeof value !== 'object') return 0;
+      if (Array.isArray(value))
+        return value.reduce((total, item) => total + enumCount(item), 0);
+      return Object.entries(value).reduce(
+        (total, [key, item]) =>
+          total +
+          (key === 'enum' && Array.isArray(item)
+            ? item.length
+            : enumCount(item)),
+        0,
+      );
+    };
+    expect(schema.$defs.sourceId.enum).toHaveLength(100);
+    expect(Object.keys(schema.properties.reviews.properties)).toHaveLength(40);
+    expect(enumCount(schema)).toBeLessThanOrEqual(1000);
+    expect(JSON.stringify(schema).length).toBeLessThan(20_000);
+    expect(notes.issues ?? []).not.toContain(
+      'semantic_notes_review_unavailable',
+    );
+  });
+
+  it('declines a schema exceeding enum capacity before making any model request', async () => {
+    const { notes } = fixture('The pilot remains in staging.');
+    const source = createNotesSource(
+      JSON.stringify(
+        Array.from({ length: 1000 }, (_, index) => ({
+          speaker: index % 2 ? 'Tavi' : 'Rowan',
+          text: `Status ${index}.`,
+        })),
+      ),
+    );
+    const sources = [
+      { segment: 0, start: 0, end: source.segments[0]!.text.length },
+    ];
+    const draft = {
+      ...notes.draft,
+      sections: [
+        {
+          id: 'section',
+          title: { id: 'heading', text: 'Status', sources },
+          items: [
+            {
+              id: 'item',
+              kind: 'point' as const,
+              text: source.segments[0]!.text,
+              owner: null,
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    const input = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    const generate = vi.fn(async () => response());
+    const result = await reviewSourceBoundNotes(input, generate);
+    expect(generate).not.toHaveBeenCalled();
+    expect(result.issues).toContain('semantic_notes_review_capacity');
+    expect(result.draft).toEqual(input.draft);
   });
 
   it('does not treat the word me in another participant’s speech as the reserved Me identity', async () => {

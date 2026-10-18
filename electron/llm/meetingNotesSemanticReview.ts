@@ -80,7 +80,11 @@ export const reviewSourceBoundNotes = async (
   });
 
   // Never hide missing source behind a successful partial review.
-  if (data.length > maxSourceCharacters)
+  // Structured outputs cap citation and verdict enums at 1,000 total values.
+  if (
+    data.length > maxSourceCharacters ||
+    source.length + reviewIds.length * 2 + 4 > 1000
+  )
     return unavailable('semantic_notes_review_capacity');
   const nullable = (maxLength: number) => ({
     anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength }],
@@ -89,7 +93,7 @@ export const reviewSourceBoundNotes = async (
     type: 'array',
     minItems: 1,
     maxItems: 8,
-    items: { type: 'string', enum: source.map((row) => row.id) },
+    items: { $ref: '#/$defs/sourceId' },
   };
   const fields = (assigned: boolean) => ({
     kind: {
@@ -127,6 +131,10 @@ export const reviewSourceBoundNotes = async (
     const raw = await generate({
       prompt,
       responseSchema: {
+        $defs: {
+          sourceId: { type: 'string', enum: source.map((row) => row.id) },
+          reviewItem: itemSchema,
+        },
         type: 'object',
         additionalProperties: false,
         required: ['reviews', 'additions', 'overview'],
@@ -141,13 +149,17 @@ export const reviewSourceBoundNotes = async (
                 {
                   anyOf: [
                     { type: 'string', enum: ['point', 'question'] },
-                    itemSchema,
+                    { $ref: '#/$defs/reviewItem' },
                   ],
                 },
               ]),
             ),
           },
-          additions: { type: 'array', maxItems: 8, items: itemSchema },
+          additions: {
+            type: 'array',
+            maxItems: 8,
+            items: { $ref: '#/$defs/reviewItem' },
+          },
           overview: {
             anyOf: [
               { type: 'null' },
