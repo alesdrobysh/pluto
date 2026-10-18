@@ -1100,6 +1100,131 @@ it('recovers deterministically and records missing_action as advisory when leaf 
   }
 });
 
+it('carries raw writer claims through deterministic leaves into source review', async () => {
+  const source = makeSyntheticNotesSource([
+    {
+      speaker: 'Remote Speaker 2',
+      text: `I haven't told Morgan about the pilot yet, but I'll tell them soon. ${'Background. '.repeat(1400)}`,
+    },
+    {
+      speaker: 'Riley',
+      text: `I will update the runbook by Friday. ${'Background. '.repeat(1400)}`,
+    },
+  ]);
+  const plan = vi.spyOn(hierarchy, 'planNotesLeaves').mockReturnValue(
+    source.segments.map((segment) => {
+      const span = {
+        segment: segment.index,
+        start: 0,
+        end: segment.text.length,
+      };
+      return {
+        primarySpans: [span],
+        overlapSpans: [],
+        primaryText: segment.text,
+        sourceText: segment.text,
+        sourceRevision: source.revision,
+      };
+    }),
+  );
+  const originalText = 'Remote Speaker 2 will tell Morgan about the pilot soon';
+  const generate = vi.fn(async (request: NotesRequest) => {
+    const span = sourceDescriptors(request.prompt)[0]!.descriptor;
+    return JSON.stringify({
+      title: null,
+      sections: [
+        {
+          title: 'Follow-ups',
+          items: [
+            {
+              kind: 'action',
+              text: span.segment === 0 ? originalText : 'Update the runbook',
+              owner: span.segment === 0 ? 'Remote Speaker 2' : 'Riley',
+              due: span.segment === 0 ? null : 'Friday',
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    });
+  });
+  let originals: any;
+  let packet: any;
+  let schema: any;
+  const review = vi.fn(
+    (notes: Parameters<typeof reviewSourceBoundNotes>[0]) => {
+      originals = notes.reviewOriginals;
+      return reviewSourceBoundNotes(notes, async (request) => {
+        packet = JSON.parse(request.prompt.split('\n').at(-1)!);
+        schema = request.responseSchema;
+        return JSON.stringify({
+          reviews: {
+            I0: {
+              kind: 'accepted_action',
+              text: 'Tell Morgan about the pilot soon',
+              owner: 'Remote Speaker 2',
+              due: null,
+              sources: ['R0'],
+            },
+            I1: {
+              kind: 'accepted_action',
+              text: 'Update the runbook',
+              owner: 'Riley',
+              due: { source: 'R1', quote: 'Friday' },
+              sources: ['R1'],
+            },
+          },
+          additions: [],
+          overview: null,
+        });
+      });
+    },
+  );
+  try {
+    const result = await generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      generate,
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 16384,
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+      reviewSourceBoundNotes: review,
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(review).toHaveBeenCalledOnce();
+    expect(originals.size).toBe(2);
+    expect(originals.get('leaf0:s0:item:0')).toMatchObject({
+      kind: 'action',
+      text: originalText,
+      owner: 'Remote Speaker 2',
+    });
+    expect(packet.draft.items[0][1]).toBe(originalText);
+    expect(schema.properties.reviews.properties.I0).toEqual({
+      $ref: '#/$defs/reviewItem',
+    });
+    expect(result.all_action_items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: 'Tell Morgan about the pilot soon',
+          assignee: 'Remote Speaker 2',
+        }),
+        expect.objectContaining({
+          text: 'Update the runbook',
+          assignee: 'Riley',
+          due: 'Friday',
+        }),
+      ]),
+    );
+    expect(result.quality.issues).not.toContain(
+      'semantic_notes_review_unavailable',
+    );
+  } finally {
+    plan.mockRestore();
+  }
+});
+
 it.each(['cancellation', 'completion'])(
   'keeps later %s authoritative through compact leaves and semantic review',
   async (resolution) => {

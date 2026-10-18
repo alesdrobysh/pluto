@@ -674,6 +674,13 @@ const deterministicallyCheckedDraft = (
     changeCount: 0,
     audited: {
       source: input.source,
+      reviewOriginals: new Map(
+        draft.sections.flatMap((section) =>
+          section.items.map(
+            (item) => [item.id, structuredClone(item)] as const,
+          ),
+        ),
+      ),
       draft: checkedDraft,
       verdicts: new Map(),
       acceptedTerminology: [],
@@ -699,6 +706,7 @@ const deterministicallyAcceptedDraft = (
     draft: checked.draft,
     acceptancePolicy: 'conservative',
   });
+  audited.reviewOriginals = checked.audited.reviewOriginals;
   audited.issues = [
     ...new Set([...(checked.audited.issues ?? []), ...(audited.issues ?? [])]),
   ];
