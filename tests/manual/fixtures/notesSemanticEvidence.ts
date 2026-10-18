@@ -37,3 +37,25 @@ export const scoreNotesSemanticEvidence = (
   }
   return failures;
 };
+
+export const scoreNotesSemanticCollection = (
+  items: NotesItem[],
+  expected: { maxActionItems: number; forbiddenAnywhere?: string[] },
+): string[] => {
+  if (!Number.isInteger(expected.maxActionItems) || expected.maxActionItems < 0)
+    throw new Error('invalid_gold_action_limit');
+  const failures =
+    items.filter((item) => item.kind === 'action').length >
+    expected.maxActionItems
+      ? ['excess_actions']
+      : [];
+  for (const phrase of expected.forbiddenAnywhere ?? []) {
+    if (
+      items.some((item) =>
+        item.text.toLowerCase().includes(phrase.toLowerCase()),
+      )
+    )
+      failures.push(`unsupported_text:${phrase}`);
+  }
+  return failures;
+};

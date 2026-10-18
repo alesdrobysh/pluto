@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type { NotesItem } from '../../electron/llm/meetingNotesTypes';
 import { notesSemanticReviewCases } from '../fixtures/notes-semantic-review';
-import { scoreNotesSemanticEvidence } from '../manual/fixtures/notesSemanticEvidence';
+import {
+  scoreNotesSemanticCollection,
+  scoreNotesSemanticEvidence,
+} from '../manual/fixtures/notesSemanticEvidence';
 
 const source = createNotesSource(
   JSON.stringify([
@@ -171,5 +174,75 @@ describe('fictional semantic evidence requirements', () => {
         ),
       ).toEqual([]);
     }
+  });
+});
+
+describe('semantic collection oracle', () => {
+  it('rejects unaccepted or duplicate additional actions even when the original task is correct', () => {
+    expect(
+      scoreNotesSemanticCollection(
+        [item, { ...item, id: 'semantic-addition:0', owner: null }],
+        { maxActionItems: 1 },
+      ),
+    ).toEqual(['excess_actions']);
+    expect(
+      scoreNotesSemanticCollection(
+        [item, { ...item, id: 'semantic-addition:0' }],
+        { maxActionItems: 2 },
+      ),
+    ).toEqual([]);
+  });
+  it('checks forbidden invented wording in additions without searching citations or due fields', () => {
+    const expectations = {
+      maxActionItems: 2,
+      forbiddenAnywhere: ['about the work'],
+    };
+    expect(
+      scoreNotesSemanticCollection(
+        [
+          item,
+          {
+            ...item,
+            id: 'semantic-addition:0',
+            text: 'Tell Casey about the work',
+          },
+        ],
+        expectations,
+      ),
+    ).toEqual(['unsupported_text:about the work']);
+    expect(
+      scoreNotesSemanticCollection(
+        [{ ...item, due: 'about the work' }],
+        expectations,
+      ),
+    ).toEqual([]);
+  });
+  it('fails invalid action limits instead of silently disabling the count gate', () => {
+    for (const maxActionItems of [-1, 1.5, Number.NaN])
+      expect(() =>
+        scoreNotesSemanticCollection([item], { maxActionItems }),
+      ).toThrow('invalid_gold_action_limit');
+  });
+  it('declares source-audited action bounds and source-absent forbidden wording for all gold cases', () => {
+    expect(notesSemanticReviewCases).toHaveLength(50);
+    for (const gold of notesSemanticReviewCases) {
+      expect(Number.isInteger(gold.expected.maxActionItems)).toBe(true);
+      expect(gold.expected.maxActionItems).toBeGreaterThanOrEqual(0);
+      for (const phrase of gold.expected.forbiddenAnywhere ?? [])
+        expect(
+          gold.lines.some((line) =>
+            line.text.toLowerCase().includes(phrase.toLowerCase()),
+          ),
+        ).toBe(false);
+    }
+    const pairs = notesSemanticReviewCases.filter(
+      (row) => row.expected.maxActionItems === 2,
+    );
+    expect(pairs.map((row) => row.id)).toEqual([
+      'independent-unconditional',
+      'independent-conditional',
+      'reaffirmed-owner-self',
+      'reaffirmed-owner-named',
+    ]);
   });
 });
