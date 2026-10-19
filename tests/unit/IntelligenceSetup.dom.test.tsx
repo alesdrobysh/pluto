@@ -25,6 +25,11 @@ afterEach(() => {
 async function renderSetup(
   saved: Record<string, string> = {},
   connection = false,
+  readiness: unknown = {
+    status: 'ready',
+    models: ['custom:local'],
+    missingModels: [],
+  },
 ) {
   const complete = vi.fn();
   let connected = connection;
@@ -34,6 +39,7 @@ async function renderSetup(
       saved[input.key] = input.value;
       return;
     }
+    if (channel === 'OLLAMA_READINESS') return readiness;
     if (channel === 'CHATGPT_STATUS')
       return { connected, planEnabled: connected };
     if (channel === 'CHATGPT_SIGN_IN') {
@@ -60,7 +66,9 @@ async function renderSetup(
     );
   const submit = async () =>
     act(async () =>
-      container.querySelector<HTMLButtonElement>('button')!.click(),
+      container
+        .querySelector<HTMLButtonElement>('#intelligence-continue')!
+        .click(),
     );
   const welcome = async () =>
     act(async () =>
@@ -70,6 +78,38 @@ async function renderSetup(
 }
 
 describe('First-run intelligence choice', () => {
+  it.each([
+    null,
+    {},
+    { status: 'ready' },
+    { status: 'ready', models: [], missingModels: [] },
+    {
+      status: 'ready',
+      models: ['custom:local'],
+      missingModels: ['custom:local'],
+    },
+    { status: 'model_missing', models: [], missingModels: [null] },
+  ])(
+    'handles malformed local readiness %j without claiming a working model',
+    async (readiness) => {
+      const f = await renderSetup({}, false, readiness);
+      await f.choose('ollama');
+      expect(f.container.textContent).toContain(
+        'Could not verify your local models',
+      );
+      expect(f.container.textContent).not.toContain(
+        'Your local models are installed',
+      );
+      expect(
+        f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
+          .disabled,
+      ).toBe(true);
+      expect(f.container.textContent).toContain('Continue with recording');
+      expect(f.complete).not.toHaveBeenCalled();
+      act(() => f.root.unmount());
+    },
+  );
+
   it('requires a choice and remembers Ollama without requesting cloud access', async () => {
     const f = await renderSetup();
     expect(
@@ -191,6 +231,59 @@ describe('First-run intelligence choice', () => {
     expect(f.container.querySelector('[role="alert"]')?.textContent).toContain(
       'Could not save your choice',
     );
+    act(() => f.root.unmount());
+  });
+
+  it('lets users keep recording while local intelligence is not installed, and remembers their choice', async () => {
+    const f = await renderSetup();
+    const original = f.invoke.getMockImplementation()!;
+    f.invoke.mockImplementation(async (channel, input) =>
+      channel === 'OLLAMA_READINESS'
+        ? {
+            status: 'model_missing',
+            models: ['custom:local'],
+            missingModels: ['custom:local'],
+          }
+        : original(channel, input),
+    );
+    await f.choose('ollama');
+    expect(f.container.textContent).toContain('not installed');
+    expect(
+      f.container.querySelector<HTMLButtonElement>('#intelligence-continue')!
+        .disabled,
+    ).toBe(true);
+    const later = [...f.container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Continue with recording',
+    )!;
+    await act(async () => later.click());
+    expect(f.saved).toMatchObject({
+      llm_provider: 'ollama',
+      intelligence_setup_complete: 'true',
+    });
+    expect(f.complete).toHaveBeenCalledOnce();
+    expect(f.invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+    act(() => f.root.unmount());
+  });
+
+  it('rechecks without changing an existing local model selection', async () => {
+    const f = await renderSetup({
+      llm_provider: 'ollama',
+      ollama_model: 'my-model:latest',
+      ollama_fast_model: 'my-quick:latest',
+    });
+    expect(f.container.textContent).toContain(
+      'Your local models are installed',
+    );
+    const recheck = [...f.container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Check again',
+    )!;
+    await act(async () => recheck.click());
+    expect(
+      f.invoke.mock.calls.filter(([channel]) => channel === 'OLLAMA_READINESS'),
+    ).toHaveLength(2);
+    await f.submit();
+    expect(f.saved.ollama_model).toBe('my-model:latest');
+    expect(f.saved.ollama_fast_model).toBe('my-quick:latest');
     act(() => f.root.unmount());
   });
 

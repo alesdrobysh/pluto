@@ -4,11 +4,10 @@ import {
   createBeforeQuitHandler,
 } from '../../electron/database/shutdown';
 
-const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
-
 describe('database shutdown ownership', () => {
   afterEach(() => vi.useRealTimers());
-  it('prevents quit until async consumers settle and the database closes', async () => {
+  it('waits for cleanup and defers the quit retry until the next event-loop turn', async () => {
+    vi.useFakeTimers();
     let finishConsumers: (() => void) | undefined;
     const shutdownConsumers = vi.fn(
       () =>
@@ -32,8 +31,10 @@ describe('database shutdown ownership', () => {
     expect(shutdownConsumers).toHaveBeenCalledOnce();
     expect(closeDatabase).not.toHaveBeenCalled();
     finishConsumers?.();
-    await flushPromises();
+    await Promise.resolve();
     expect(closeDatabase).toHaveBeenCalledOnce();
+    expect(quit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(0);
     expect(quit).toHaveBeenCalledOnce();
 
     const finalEvent = { preventDefault: vi.fn() };
@@ -42,6 +43,7 @@ describe('database shutdown ownership', () => {
   });
 
   it('closes and resumes quit even when consumer shutdown rejects', async () => {
+    vi.useFakeTimers();
     const onError = vi.fn();
     const closeDatabase = vi.fn();
     const quit = vi.fn();
@@ -55,7 +57,7 @@ describe('database shutdown ownership', () => {
       onError,
     });
     handler({ preventDefault: vi.fn() });
-    await flushPromises();
+    await vi.advanceTimersByTimeAsync(0);
     expect(onError).toHaveBeenCalledOnce();
     expect(closeDatabase).toHaveBeenCalledOnce();
     expect(quit).toHaveBeenCalledOnce();

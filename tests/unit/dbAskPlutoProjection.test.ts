@@ -14,6 +14,7 @@ import {
   getAskPlutoMeetingHeaders,
   getAskPlutoMeetings,
   getCanonicalPersonCommitments,
+  identityStore,
   saveMeeting,
   searchMeetingNotesFts,
   upsertEntity,
@@ -21,6 +22,87 @@ import {
 
 afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
+});
+
+it('keeps completed adopted legacy actions and rejected self aliases closed in recall', () => {
+  const self = upsertEntity({
+    id: 'projection-self',
+    type: 'person',
+    name: 'Alex',
+  });
+  identityStore.setSelfPersonId(self.id);
+  upsertEntity({
+    id: 'legacy-adopted',
+    type: 'action_item',
+    name: 'Prepare the old checklist',
+    status: 'completed',
+    dedupe_by_name: false,
+    metadata: {
+      commitment_state: 'confirmed',
+      dreamingSources: [{ meetingIds: ['scoped'] }],
+    },
+  });
+  upsertEntity({
+    id: 'rejected-self-alias',
+    type: 'action_item',
+    name: 'Send an obsolete report',
+    status: 'active',
+    dedupe_by_name: false,
+    metadata: {
+      commitment_state: 'rejected',
+      assignee_name: 'Me',
+      source_meeting_id: 'scoped',
+      source_evidence: 'I will send an obsolete report',
+    },
+  });
+  expect(getCanonicalPersonCommitments(self.id)?.excluded).toEqual(
+    expect.arrayContaining([
+      {
+        text: 'Prepare the old checklist',
+        status: 'completed',
+        sourceMeetingId: 'scoped',
+      },
+      {
+        text: 'Send an obsolete report',
+        status: 'rejected',
+        sourceMeetingId: 'scoped',
+      },
+    ]),
+  );
+});
+
+it('does not attribute rejected owner-like prose or other owners to self', () => {
+  const self = upsertEntity({
+    id: 'structured-self',
+    type: 'person',
+    name: 'Riley',
+  });
+  identityStore.setSelfPersonId(self.id);
+  for (const [id, assignedTo, name] of [
+    ['rejected-prose-only', null, 'I will send the unknown checklist'],
+    ['rejected-other-owner', 'other-owner', 'I will send the other checklist'],
+    ['rejected-canonical-self', self.id, 'Send the self checklist'],
+  ] as const) {
+    upsertEntity({
+      id,
+      type: 'action_item',
+      name,
+      status: 'active',
+      assigned_to: assignedTo,
+      dedupe_by_name: false,
+      metadata: {
+        commitment_state: 'rejected',
+        source_meeting_id: 'structured-meeting',
+        source_evidence: name,
+      },
+    });
+  }
+  const texts = getCanonicalPersonCommitments(self.id)!.excluded.map(
+    (action) => action.text,
+  );
+  expect(texts).toContain('Send the self checklist');
+  expect(texts).not.toContain('I will send the unknown checklist');
+  expect(texts).not.toContain('I will send the other checklist');
 });
 
 describe('Ask Pluto synthesized meeting projection', () => {

@@ -235,6 +235,7 @@ describe('packageEntityNotes', () => {
       'id',
       'started_at',
       'title',
+      'user_edits_json',
       'user_notes',
     ]);
     expect(JSON.stringify(projected)).not.toContain('SECRET RAW TRANSCRIPT');
@@ -440,6 +441,36 @@ describe('packageEntityNotes', () => {
 });
 
 describe('saved action-item evidence projection', () => {
+  it.each([
+    { 'completion:all_action_items:0': { edited: 'true' } },
+    { 'all_action_items:0': { original: 'Prepare the checklist', edited: '' } },
+  ])('does not re-propose completed or removed note actions: %j', (edits) => {
+    const source = {
+      ...note('m', '2026-10-01', 'Prepare the checklist'),
+      action_items_json: '[{"text":"Prepare the checklist"}]',
+      user_edits_json: JSON.stringify(edits),
+    };
+    const pkg = packageEntityNotes(
+      'project-586',
+      packageDeps({ getDreamingEntityNotes: vi.fn(() => [source]) }),
+    );
+    expect(pkg?.recentMeetingNotes[0].actionItems).toEqual([]);
+  });
+  it('preserves an empty saved action list as an authoritative classification', () => {
+    const source = {
+      ...note(
+        'm',
+        '2026-10-01',
+        'Jordan noted that the group will transfer records into the report.',
+      ),
+      action_items_json: '[]',
+    };
+    const pkg = packageEntityNotes(
+      'project-586',
+      packageDeps({ getDreamingEntityNotes: vi.fn(() => [source]) }),
+    );
+    expect(pkg?.recentMeetingNotes[0].actionItems).toEqual([]);
+  });
   it('carries classified action text only while it remains in the bounded notes', () => {
     const source = {
       ...note('m', '2026-10-01', 'Prepare the launch checklist'),
@@ -527,7 +558,9 @@ describe('saved action-item evidence projection', () => {
         'project-586',
         packageDeps({ getDreamingEntityNotes: vi.fn(() => [source]) }),
       );
-      expect(pkg?.recentMeetingNotes[0].actionItems).toBeUndefined();
+      expect(pkg?.recentMeetingNotes[0].actionItems).toEqual(
+        action_items_json.startsWith('[') ? [] : undefined,
+      );
     }
   });
 });

@@ -60,7 +60,7 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
 
   // 3. Start initialization if no pending promise exists
   if (!pendingProviderPromise) {
-    pendingProviderPromise = (async (): Promise<LLMProvider> => {
+    const initialization = (async (): Promise<LLMProvider> => {
       const providerType: ProviderType = settings.llm_provider || 'ollama';
       let providerInstance: LLMProvider;
 
@@ -75,8 +75,11 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
             console.log('[LLM Factory] Ollama is available');
             providerInstance = ollama;
           } else {
-            throw new Error(
-              'Ollama is not running. Start Ollama or explicitly select a configured cloud provider in Settings.',
+            throw Object.assign(
+              new Error(
+                'Ollama is not running. Start Ollama or explicitly select a configured cloud provider in Settings.',
+              ),
+              { code: 'provider_unavailable' },
             );
           }
           break;
@@ -134,6 +137,16 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
       }
       return providerInstance;
     })();
+    const guarded = initialization.catch((error) => {
+      // A rejected initialization is not a cached provider. Retry must probe
+      // the service again after it restarts, even with unchanged settings.
+      if (pendingProviderPromise === guarded) {
+        pendingProviderPromise = null;
+        lastHealthCheck = 0;
+      }
+      throw error;
+    });
+    pendingProviderPromise = guarded;
   }
 
   return pendingProviderPromise;

@@ -959,9 +959,18 @@ export function createDreamingProposalStore(
         applyProjectSummary(proposal, timestamp);
       else if (proposal.kind === 'project_milestone')
         applyProjectMilestone(proposal, timestamp);
-      else if (proposal.kind === 'project_commitment')
-        applyProjectCommitment(proposal, timestamp);
-      else if (
+      else if (proposal.kind === 'project_commitment') {
+        try {
+          applyProjectCommitment(proposal, timestamp);
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === 'unsupported_project_commitment'
+          )
+            return markProposalStale(proposal.id, timestamp);
+          throw error;
+        }
+      } else if (
         proposal.kind === 'person_headline' ||
         proposal.kind === 'person_focus' ||
         proposal.kind === 'person_collaborator'

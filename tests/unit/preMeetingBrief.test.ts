@@ -66,7 +66,7 @@ const action = (status: Entity['status']): Entity => ({
   status,
   due_date: null,
   assigned_to: null,
-  metadata: null,
+  metadata: JSON.stringify({ commitment_state: 'confirmed' }),
   saliency_score: 1,
   domain_tag: 'work',
   created_at: '2026-09-14T17:00:00.000Z',
@@ -113,7 +113,26 @@ describe('pre-meeting briefs', () => {
       {
         listPriorMeetingContexts: () => [priorContext()],
         getMeeting: () => meeting,
-        getMeetingEntities: () => [action('active'), action('completed')],
+        getMeetingEntities: () => [
+          action('active'),
+          action('completed'),
+          { ...action('active'), id: 'unconfirmed', metadata: null },
+          ...['cancelled_at', 'meeting_regeneration_retired_at'].map(
+            (field) => ({
+              ...action('active'),
+              id: field,
+              metadata: JSON.stringify({
+                commitment_state: 'confirmed',
+                [field]: '2026-10-18',
+              }),
+            }),
+          ),
+          {
+            ...action('active'),
+            id: 'rejected',
+            metadata: JSON.stringify({ commitment_state: 'rejected' }),
+          },
+        ],
         getBlockedActionItems: () => [],
         searchMeetingSummaries: () => [],
         getGlobalWorkingMemory: () => undefined,

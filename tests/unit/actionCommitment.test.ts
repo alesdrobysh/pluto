@@ -1,7 +1,9 @@
 import {
   areActionsEquivalent,
   canonicalizeActionText,
+  getActionSourceMeetingId,
   getCommitmentState,
+  isPersonalAction,
   isThirdPartyAction,
   isThirdPartyAssignee,
   mergeCommitmentReview,
@@ -9,6 +11,69 @@ import {
 } from '../../src/utils/actionCommitment';
 
 describe('action commitment metadata', () => {
+  it('does not infer personal ownership from first-person prose alone', () => {
+    const action = {
+      name: 'I will send the checklist',
+      status: 'active',
+      metadata: JSON.stringify({
+        source_meeting_id: 'meeting-1',
+        source_evidence: 'I will send the checklist',
+      }),
+    };
+    expect(isPersonalAction(action, { selfNames: ['Alex'] })).toBe(false);
+    expect(
+      isPersonalAction(
+        {
+          ...action,
+          metadata: JSON.stringify({
+            source_meeting_id: 'meeting-1',
+            source_evidence: 'I will send the checklist',
+            assignee_name: 'Me',
+          }),
+        },
+        {},
+      ),
+    ).toBe(true);
+  });
+  it('uses canonical ownership before adoption and never guesses from owner-like prose', () => {
+    const action = {
+      name: 'Jordan will send the checklist',
+      status: 'active',
+      assigned_to: 'self',
+      metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+    };
+    expect(isPersonalAction(action, { selfPersonId: 'self' })).toBe(true);
+    expect(isPersonalAction(action, {})).toBe(false);
+    expect(
+      isPersonalAction(
+        { ...action, assigned_to: 'other' },
+        { selfPersonId: 'self' },
+      ),
+    ).toBe(false);
+  });
+
+  it('recovers a unique legacy source without guessing across meetings', () => {
+    expect(
+      getActionSourceMeetingId(
+        JSON.stringify({
+          dreamingSources: [{ meetingIds: ['m'] }, { meetingIds: ['m'] }],
+        }),
+      ),
+    ).toBe('m');
+    expect(
+      getActionSourceMeetingId(
+        JSON.stringify({ dreamingSources: [{ meetingIds: ['m', 'other'] }] }),
+      ),
+    ).toBeNull();
+    expect(
+      getActionSourceMeetingId(
+        JSON.stringify({
+          source_meeting_id: 'explicit',
+          dreamingSources: [{ meetingIds: ['m'] }],
+        }),
+      ),
+    ).toBe('explicit');
+  });
   it.each([null, '', 'not-json', '[]', '42'])(
     'treats legacy or malformed metadata %j as a possible commitment',
     (metadata) => {

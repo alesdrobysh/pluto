@@ -25,6 +25,7 @@ import {
 import {
   extractAndProcessEntities,
   processExtractedEntities as processWithIdentity,
+  requireSavedMeetingActions,
 } from '../../electron/entityPipeline';
 import type { ExtractedEntities } from '../../electron/llm/provider';
 
@@ -37,6 +38,58 @@ afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
 });
 
+it('requires saved task classification at legacy extraction entry points', () => {
+  expect(
+    requireSavedMeetingActions({
+      analysis_json: '{"all_action_items":[{"text":"Removed task"}]}',
+      user_edits_json:
+        '{"all_action_items:0":{"original":"Removed task","edited":"","edited_at":"2026-10-14T12:00:00Z"}}',
+    } as any),
+  ).toEqual([]);
+  expect(
+    requireSavedMeetingActions({
+      analysis_json: JSON.stringify({
+        all_action_items: [{ text: 'Old wording' }],
+      }),
+      user_edits_json: JSON.stringify({
+        'all_action_items:0': {
+          original: 'Old wording',
+          edited: 'Reviewed wording',
+          edited_at: '2026-10-18T12:00:00Z',
+        },
+      }),
+    } as any)?.[0].description,
+  ).toBe('Reviewed wording');
+  expect(() => requireSavedMeetingActions(undefined)).toThrow(
+    'meeting_action_classification_unavailable',
+  );
+  expect(() =>
+    requireSavedMeetingActions({
+      analysis_format_pass: false,
+      analysis_json: '{"all_action_items":[{"text":"Invented task"}]}',
+    } as any),
+  ).toThrow('meeting_action_classification_unavailable');
+  expect(
+    requireSavedMeetingActions({
+      analysis_json: '{"all_action_items":[]}',
+    } as any),
+  ).toEqual([]);
+  expect(
+    requireSavedMeetingActions({
+      analysis_format_pass: true,
+      analysis_json:
+        '{"all_action_items":[{"text":"Send the checklist","assignee":"Me","evidence":"I will send the checklist"}]}',
+    } as any),
+  ).toEqual([
+    {
+      description: 'Send the checklist',
+      assignee: 'Me',
+      evidence: 'I will send the checklist',
+      due_date: undefined,
+    },
+  ]);
+});
+
 const extractedAction = (description: string): ExtractedEntities => ({
   people: [],
   topics: [],
@@ -47,6 +100,139 @@ const extractedAction = (description: string): ExtractedEntities => ({
 });
 
 describe('extracted action idempotency', () => {
+  it('resolves explicit project relationships against preserved canonical actions', async () => {
+    const meetingId = 'secondary-project-link';
+    const task = 'Send the review checklist';
+    const quote = 'Send the review checklist for Project Atlas.';
+    saveMeeting({ id: meetingId, title: 'Project relationship fixture' });
+    const first = await processWithIdentity(extractedAction(task), meetingId);
+    const action = updateActionCommitmentState(
+      first.entities[0].id,
+      'confirmed',
+    );
+    updateEntityStatus(action.id, 'completed');
+    const before = getEntity(action.id)!;
+    const project = upsertEntity({
+      id: 'secondary-project-atlas',
+      type: 'project',
+      name: 'Project Atlas',
+      metadata: {
+        projectQualification: {
+          version: 1,
+          state: 'qualified',
+          source: 'user',
+          reason: 'Confirmed fictional project',
+          assessedAt: '2026-10-18T12:00:00Z',
+        },
+      },
+    });
+    const replay = await processWithIdentity(
+      {
+        ...extractedAction('Ignored secondary task'),
+        relationships: [
+          {
+            source: task,
+            target: project.name,
+            relationship: 'belongs_to',
+            context: quote,
+          },
+        ],
+      },
+      meetingId,
+      undefined,
+      quote,
+      { preserveMeetingActions: true },
+    );
+    expect(replay.created).toBe(0);
+    expect(replay.entities.map((entity) => entity.id)).toContain(action.id);
+    expect(getEntityLinks(action.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source_entity_id: action.id,
+          target_entity_id: project.id,
+          relationship: 'belongs_to',
+        }),
+      ]),
+    );
+    expect(getEntity(action.id)).toEqual(before);
+  });
+
+  it.each(['confirmed', 'rejected', 'completed'] as const)(
+    'preserves %s tasks and user edits during secondary entity extraction',
+    async (state) => {
+      const meetingId = `secondary-preservation-${state}`;
+      const original = 'Send the checklist';
+      const edited = 'Send the reviewed checklist';
+      saveMeeting({
+        id: meetingId,
+        title: 'Secondary extraction fixture',
+        analysis_format_pass: true,
+        analysis_json: JSON.stringify({
+          all_action_items: [{ text: original, assignee: 'Me' }],
+        }),
+      });
+      const first = await processWithIdentity(
+        extractedAction(original),
+        meetingId,
+      );
+      const id = first.entities[0].id;
+      updateActionCommitmentState(
+        id,
+        state === 'rejected' ? 'rejected' : 'confirmed',
+      );
+      if (state === 'completed') updateEntityStatus(id, 'completed');
+      const before = getEntity(id)!;
+      upsertEntity({
+        ...before,
+        assigned_to: 'confirmed-owner',
+        metadata: { ...JSON.parse(before.metadata!), owner_source: 'user' },
+      });
+      saveMeeting({
+        id: meetingId,
+        title: 'Secondary extraction fixture',
+        user_edits_json: JSON.stringify({
+          'all_action_items:0': {
+            original,
+            edited,
+            edited_at: '2026-10-18T12:00:00Z',
+          },
+          ...(state === 'completed'
+            ? {
+                'completion:all_action_items:0': {
+                  original: 'false',
+                  edited: 'true',
+                },
+              }
+            : {}),
+        }),
+      });
+      const result = await extractAndProcessEntities(
+        { extractEntities: async () => extractedAction(original) },
+        'A fictional transcript.',
+        meetingId,
+        undefined,
+        { preserveMeetingActions: true },
+      );
+      expect(result.created).toBe(0);
+      const actions = getMeetingEntities(meetingId).filter(
+        (entity) => entity.type === 'action_item',
+      );
+      expect(actions.map((entity) => entity.id)).toEqual([id]);
+      expect(getEntity(id)).toMatchObject({
+        assigned_to: 'confirmed-owner',
+        status: state === 'completed' ? 'completed' : 'active',
+      });
+      expect(JSON.parse(getEntity(id)!.metadata!)).toMatchObject({
+        full_description: edited,
+        owner_source: 'user',
+        commitment_state: state === 'rejected' ? 'rejected' : 'confirmed',
+      });
+      expect(
+        JSON.parse(getEntity(id)!.metadata!).meeting_regeneration_retired_at,
+      ).toBeUndefined();
+    },
+  );
+
   it('does not commit provider results after the owning run is superseded', async () => {
     const meetingId = 'meeting-superseded-extraction';
     saveMeeting({ id: meetingId, title: 'Superseded extraction fixture' });

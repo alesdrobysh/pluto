@@ -47,15 +47,6 @@ const normalizeEvidenceText = (text: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const EXPLICIT_COMMITMENT_CUE =
-  /\b(?:will|i'll|we'll|agreed (?:to|that|on)|committed (?:to|that)|promised (?:to|that)|must|needs? to|assigned (?:to|that)|(?:is |are |was |were )?required to|action items?(?: is| are)?|owns? the task of|responsible for|tasked with|decided (?:to|that))\b/;
-const TENTATIVE_COMMITMENT_CUE =
-  /\b(?:propos(?:e|es|ed|ing|als?)|suggest(?:s|ed|ing|ions?)?|consider(?:s|ed|ing|ation)?|might|may|could|aim(?:s|ed|ing)? to|aspirations?|likely|probably|possibly|as long as)\b/;
-const NEGATED_COMMITMENT_CUE =
-  /\b(?:not|never|no longer|(?:is|was|are|were|has|have|had|does|do|did|will|would|should|could|can)n't|cannot|declined to|refused to|withdrawn?|cancel(?:led|ed)|no action item)\b/;
-const CONDITIONAL_COMMITMENT_CUE =
-  /\b(?:if|unless|once|when|until|upon approval|after approval|subject to|pending|provided that|assuming|depending on|contingent (?:on|upon))\b/;
-
 const supportedCommitmentTask = (
   proposal: Extract<RawDreamingProposal, { kind: 'project_commitment' }>,
   pkg: DreamingInputPackage,
@@ -76,17 +67,6 @@ const supportedCommitmentTask = (
         containsEvidencePhrase(reference.excerpt, task),
     );
     if (saved) return saved;
-    for (const sentence of reference.excerpt.match(/[^.!?]+[.!?]?/g) ?? []) {
-      const excerpt = normalizeEvidenceText(sentence);
-      if (
-        containsEvidencePhrase(excerpt, proposal.payload.task) &&
-        EXPLICIT_COMMITMENT_CUE.test(excerpt) &&
-        !TENTATIVE_COMMITMENT_CUE.test(excerpt) &&
-        !NEGATED_COMMITMENT_CUE.test(excerpt) &&
-        !CONDITIONAL_COMMITMENT_CUE.test(excerpt)
-      )
-        return proposal.payload.task;
-    }
   }
   return null;
 };

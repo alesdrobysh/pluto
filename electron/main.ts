@@ -43,10 +43,7 @@ import {
   LIVE_MEETING_SHORTCUT_HELP,
   parseLiveMeetingCommand,
 } from '../src/utils/liveMeetingCommands';
-import {
-  OLLAMA_GENERAL_MODEL,
-  OLLAMA_QUICK_CHAT_MODEL,
-} from '../src/utils/ollamaModels';
+import { resolveConfiguredOllamaModel } from '../src/utils/ollamaModels';
 import { readProjectDisplayTitle } from '../src/utils/projectBriefing';
 import { parseTranscriptSegments } from '../src/utils/transcript';
 import { registerDepartureService } from './activeCall/departureService';
@@ -138,6 +135,8 @@ import {
 } from './intelligence/askPlutoSemanticScope';
 import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import { buildMeetingNotesEvidenceDocument } from './intelligence/meetingNotesEvidence';
+import { checkOllamaReadiness } from './llm/ollamaReadiness';
+import { resolveConfiguredProviderModel } from './llm/providerCatalog';
 import {
   createLocalArtifactRecord,
   extractArtifactContent,
@@ -663,6 +662,7 @@ import type { DreamingEntityType } from './dreaming/types';
 import {
   extractAndProcessEntities,
   processExtractedEntities,
+  requireSavedMeetingActions,
 } from './entityPipeline';
 import { IDENTITY_CHANNELS, handleIdentityRequest } from './identityHandlers';
 import { startIdentityReconciliation } from './identityReconciliation';
@@ -6469,6 +6469,13 @@ app.whenReady().then(async () => {
       throw new Error('chatgpt_desktop_unavailable');
     }
   });
+  ipcMain.handle('OLLAMA_READINESS', () =>
+    checkOllamaReadiness({
+      ollama_model: db.getSetting('ollama_model') || undefined,
+      ollama_fast_model: db.getSetting('ollama_fast_model') || undefined,
+      llm_model: db.getSetting('llm_model') || undefined,
+    }),
+  );
   ipcMain.handle('GET_SETTING', (_event, key) => {
     if (typeof key !== 'string' || isSecretSettingKey(key)) {
       throw new Error('secret_setting_requires_credential_ipc');
@@ -6964,7 +6971,26 @@ app.whenReady().then(async () => {
           `[LLM] Extracting and processing entities for meeting ${meetingId}`,
         );
         const result = await extractAndProcessEntities(
-          provider,
+          {
+            synthesizeKnowledgeDocument:
+              provider.synthesizeKnowledgeDocument?.bind(provider),
+            extractEntities: async (...args) => {
+              requireSavedMeetingActions(
+                db.getMeeting(String(meetingId)) as
+                  | db.PersistedMeeting
+                  | undefined,
+              );
+              const extracted = await provider.extractEntities(...args);
+              return {
+                ...extracted,
+                action_items: requireSavedMeetingActions(
+                  db.getMeeting(String(meetingId)) as
+                    | db.PersistedMeeting
+                    | undefined,
+                ),
+              };
+            },
+          },
           transcript,
           meetingId,
           {
@@ -6972,7 +6998,7 @@ app.whenReady().then(async () => {
             valueSignals: normalizedSignals,
             priorityHints: mergedPriorityHints,
           },
-          { canCommit, signal },
+          { canCommit, signal, preserveMeetingActions: true },
         );
 
         if (signal.aborted) {
@@ -7096,12 +7122,20 @@ app.whenReady().then(async () => {
           `[EntityPipeline] Processing pre-extracted entities for meeting ${meetingId}`,
         );
         const result = await processExtractedEntities(
-          entities,
+          {
+            ...entities,
+            action_items: requireSavedMeetingActions(
+              db.getMeeting(String(meetingId)) as
+                | db.PersistedMeeting
+                | undefined,
+            ),
+          },
           meetingId,
           undefined,
           undefined,
           {
             signal: getAbortSignalForMeeting(String(meetingId)),
+            preserveMeetingActions: true,
           },
         );
         backgroundKnowledgeRefresh?.enqueue(`meeting:${meetingId}`);
@@ -7361,20 +7395,7 @@ app.whenReady().then(async () => {
         let promptCharacters = 0;
         let outputCharacters = 0;
         let providerName: string = settings.llm_provider || 'ollama';
-        let configuredModel =
-          settings.llm_model ||
-          (settings.llm_provider === 'chatgpt'
-            ? settings.chatgpt_model
-            : settings.llm_provider === 'gemini'
-              ? settings.gemini_model
-              : settings.llm_provider === 'openai'
-                ? settings.openai_model
-                : settings.llm_provider === 'openrouter'
-                  ? settings.openrouter_model
-                  : settings.llm_provider === 'claude'
-                    ? settings.claude_model
-                    : settings.ollama_model || OLLAMA_GENERAL_MODEL) ||
-          'default';
+        let configuredModel = resolveConfiguredProviderModel(settings);
         let lastValidatedPresentation: SafeAnswerPresentation | undefined;
         let conversationAnchor: string | undefined;
         const elapsed = (from?: number, to?: number): number | null =>
@@ -7521,9 +7542,7 @@ app.whenReady().then(async () => {
             providerAcquisitionCompletedAt = Date.now();
             providerName = provider.name;
             if (isLocalProvider) {
-              configuredModel =
-                (settings.ollama_fast_model || '').trim() ||
-                OLLAMA_QUICK_CHAT_MODEL;
+              configuredModel = resolveConfiguredOllamaModel(settings, true);
             }
             const prompt =
               promptOverride ||
@@ -7769,10 +7788,16 @@ app.whenReady().then(async () => {
               !isExplicitInformationRequest(queryText),
             ...(semanticScope ? { classification: semanticScope } : {}),
           });
-          const assigneeRecall = buildAssigneeActionRecall(
-            effectiveQueryText,
-            persistedMeetings,
-          );
+          const assigneeRecall =
+            buildAssigneeActionRecall(effectiveQueryText, persistedMeetings) ??
+            (conversationResolution.relation !== 'new_topic'
+              ? buildAssigneeActionRecall(
+                  conversationResolution.priorQuestion ||
+                    planningConversationAnchor ||
+                    '',
+                  persistedMeetings,
+                )
+              : null);
           const overviewRecall = buildWorkingMemoryOverviewRecall(
             effectiveQueryText,
             parsed.entity_mentions,
@@ -8187,15 +8212,10 @@ app.whenReady().then(async () => {
               !temporalResolvedScope &&
               !currentMeetingRequested &&
               !isPlanning &&
+              conversationResolution.task === 'lookup' &&
+              (!inheritedScope || inheritedScope.kind === 'global') &&
               assigneeRecall &&
-              !assigneeRecall.coverageLimited &&
-              (conversationResolution.relation === 'new_topic' ||
-                (conversationResolution.task === 'lookup' &&
-                  conversationResolution.retrievalPolicy === 'fresh' &&
-                  conversationResolution.retrievalQuery ===
-                    conversationResolution.priorQuestion &&
-                  conversationResolution.answerQuery ===
-                    conversationResolution.priorQuestion)),
+              !assigneeRecall.coverageLimited,
           );
           if (explicitMeetingScope) {
             scopeLabel = explicitMeetingScope.label;
@@ -9500,20 +9520,10 @@ app.whenReady().then(async () => {
           requestId,
           assistanceRoute,
           provider: settings.llm_provider,
-          configuredModel:
-            settings.llm_model ||
-            (settings.llm_provider === 'ollama'
-              ? settings.ollama_model
-              : settings.llm_provider === 'chatgpt'
-                ? settings.chatgpt_model
-                : settings.llm_provider === 'gemini'
-                  ? settings.gemini_model
-                  : settings.llm_provider === 'openai'
-                    ? settings.openai_model
-                    : settings.llm_provider === 'openrouter'
-                      ? settings.openrouter_model
-                      : settings.claude_model) ||
-            'default',
+          configuredModel: resolveConfiguredProviderModel(
+            settings,
+            context.scope.type === 'live_meeting',
+          ),
           promptChars: prompt.length,
           elapsedMs: Date.now() - startTime,
         });

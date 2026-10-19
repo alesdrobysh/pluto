@@ -1835,7 +1835,14 @@ function App() {
         finalTranscriptionAbortRef.current = null;
         setFinalTranscriptionMeetingId(null);
       }
-      await fetchMeetings();
+      try {
+        await refreshSelectedMeetingState();
+      } catch (error) {
+        console.error(
+          '[Pluto] Failed to refresh final transcription state',
+          error,
+        );
+      }
     }
   };
 

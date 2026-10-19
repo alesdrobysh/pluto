@@ -34,8 +34,11 @@ import type {
   MeetingContextSnapshot,
 } from '../src/types/meetingContext';
 import {
+  getActionSourceMeetingId,
   getCommitmentState,
+  hasPersonalActionOwner,
   mergeCommitmentReview,
+  normalizeActionText,
   parseActionMetadata,
 } from '../src/utils/actionCommitment';
 import {
@@ -8451,33 +8454,93 @@ function upsertCanonicalDreamingProjectCommitment(input: {
   evidence: Array<{ meetingId: string; excerpt: string }>;
   timestamp: string;
 }): void {
-  const normalizedTask = normalizeEntityName(input.task);
-  const matchingRows = db
-    .prepare(
-      `SELECT id FROM entities
-       WHERE type = 'action_item' AND normalized_name = ? ORDER BY id`,
+  const sourceAction = input.evidence.flatMap((reference) => {
+    const meeting = getMeeting(reference.meetingId) as
+      | PersistedMeeting
+      | undefined;
+    if (
+      !meeting ||
+      !(
+        meeting.analysis_format_pass ||
+        (meeting.analysis_format_pass == null &&
+          meeting.analysis_schema_version === 3)
+      )
     )
-    .all(normalizedTask) as Array<{ id: string }>;
+      return [];
+    const analysis = parseActionMetadata(meeting.analysis_json ?? null);
+    const edits = parseUserEditsJson(meeting.user_edits_json);
+    return Array.isArray(analysis.all_action_items)
+      ? analysis.all_action_items.flatMap((action, index) => {
+          if (!action || typeof action.text !== 'string') return [];
+          const edited =
+            edits[`all_action_items:${index}`] ?? edits[`v2:action:${index}`];
+          const text = edited ? edited.edited : action.text;
+          const completed =
+            edits[`completion:all_action_items:${index}`] ??
+            edits[`completion:v2:action:${index}`];
+          return typeof text === 'string' &&
+            completed?.edited !== 'true' &&
+            normalizeActionText(text, action.assignee) ===
+              normalizeActionText(input.task, action.assignee)
+            ? [
+                {
+                  meetingId: reference.meetingId,
+                  index,
+                  text,
+                  assignee:
+                    typeof action.assignee === 'string'
+                      ? action.assignee
+                      : undefined,
+                  evidence:
+                    typeof action.evidence === 'string'
+                      ? action.evidence
+                      : reference.excerpt,
+                },
+              ]
+            : [];
+        })
+      : [];
+  })[0];
+  if (!sourceAction) throw new Error('unsupported_project_commitment');
+  const sourceIds = [...new Set(input.evidence.map((item) => item.meetingId))];
+  const matchingRows = sourceIds.flatMap(
+    (meetingId) =>
+      db
+        .prepare(`SELECT * FROM entities WHERE type = 'action_item' AND (
+      json_extract(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.source_meeting_id') = ?
+      OR id IN (SELECT entity_id FROM meeting_entities WHERE meeting_id = ?)
+      OR EXISTS (
+        SELECT 1 FROM json_each(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.dreamingSources') source,
+          json_each(source.value, '$.meetingIds') meeting WHERE meeting.value = ?
+      )
+    )`)
+        .all(meetingId, meetingId, meetingId) as Entity[],
+  );
   const canonicalMatches = new Map<string, Entity>();
   for (const row of matchingRows) {
+    const metadata = parseActionMetadata(row.metadata);
+    const assignee =
+      typeof metadata.assignee_name === 'string'
+        ? metadata.assignee_name
+        : sourceAction.assignee;
+    const text =
+      typeof metadata.full_description === 'string'
+        ? metadata.full_description
+        : row.name;
+    if (
+      normalizeActionText(text, assignee) !==
+      normalizeActionText(input.task, assignee)
+    )
+      continue;
     const resolved = resolveCommitmentIdentity(row.id);
-    if (resolved?.type === 'action_item')
+    if (resolved?.type === 'action_item' && !isRetiredCommitment(resolved.id))
       canonicalMatches.set(resolved.id, resolved);
   }
   if (canonicalMatches.size > 1)
     throw new Error('dreaming_commitment_conflict');
-  const action =
-    canonicalMatches.values().next().value ??
-    upsertEntity({
-      type: 'action_item',
-      name: input.task.trim().replace(/\s+/g, ' '),
-      status: 'active',
-      assigned_to: null,
-      dedupe_by_name: true,
-    });
-  if (action.type !== 'action_item' || action.assigned_to !== null) {
-    throw new Error('dreaming_commitment_conflict');
-  }
+  // Consolidation links an existing obligation; it never manufactures a new lifecycle.
+  const action = canonicalMatches.values().next().value;
+  if (!action) throw new Error('unsupported_project_commitment');
   let metadata: Record<string, unknown> = {};
   try {
     const parsed = JSON.parse(action.metadata || '{}') as unknown;
@@ -8486,6 +8549,19 @@ function upsertCanonicalDreamingProjectCommitment(input: {
     }
   } catch {
     metadata = {};
+  }
+  if (!metadata.source_meeting_id) {
+    metadata = {
+      ...metadata,
+      origin: metadata.origin ?? 'extraction',
+      source_meeting_id: sourceAction.meetingId,
+      source_path: `all_action_items:${sourceAction.index}`,
+      source_index: sourceAction.index,
+      original_description: metadata.original_description ?? sourceAction.text,
+      full_description: metadata.full_description ?? action.name,
+      source_evidence: metadata.source_evidence ?? sourceAction.evidence,
+      assignee_name: metadata.assignee_name ?? sourceAction.assignee,
+    };
   }
   const existingSources = Array.isArray(metadata.dreamingSources)
     ? metadata.dreamingSources.filter(
@@ -8826,6 +8902,7 @@ export const getEntityMeetings = (
 
 export interface DreamingEntityNoteSource {
   action_items_json?: string | null;
+  user_edits_json?: string | null;
   id: string;
   title: string;
   started_at: string | null;
@@ -8853,6 +8930,7 @@ const dreamingEntityNotesQuery = (
     m.created_at,
     m.user_notes,
     m.enhanced_notes,
+    m.user_edits_json,
     CASE WHEN (m.analysis_format_pass = 1 OR
       (m.analysis_format_pass IS NULL AND m.analysis_schema_version = 3))
       AND json_valid(m.analysis_json)
@@ -10082,24 +10160,41 @@ export const getCanonicalPersonCommitments = (
       UNION SELECT LOWER(TRIM(display_name)) FROM person_name_aliases
       WHERE person_id IN (SELECT id FROM family)
     )
-    SELECT name, status, metadata FROM entities
+    SELECT name, status, assigned_to, metadata FROM entities
     WHERE type = 'action_item' AND (
       assigned_to IN (SELECT id FROM family)
       OR (assigned_to IS NULL AND LOWER(TRIM(json_extract(
         CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, '$.assignee_name'
       ))) IN (SELECT name FROM names))
+      OR (assigned_to IS NULL AND ? = 1)
     )
   `)
-    .all(briefing.person.id, briefing.person.id) as Array<
-    Pick<Entity, 'name' | 'status' | 'metadata'>
-  >;
+    .all(
+      briefing.person.id,
+      briefing.person.id,
+      briefing.isSelf ? 1 : 0,
+    ) as Array<Pick<Entity, 'name' | 'status' | 'metadata' | 'assigned_to'>>;
+  const profile = briefing.isSelf ? identityStore.getProfile() : null;
   const excluded = actions.flatMap((action) => {
-    const metadata = parseActionMetadata(action.metadata);
+    const canonicalAction = {
+      ...action,
+      assigned_to: action.assigned_to
+        ? resolvePersonIdentityId(action.assigned_to)
+        : null,
+    };
     const rejected = getCommitmentState(action.metadata) === 'rejected';
+    const selfOptions = {
+      selfPersonId: briefing.person.id,
+      selfNames: profile ? [profile.preferredName, ...profile.aliases] : [],
+    };
     if (
-      (!rejected && action.status !== 'completed') ||
-      typeof metadata.source_meeting_id !== 'string'
+      briefing.isSelf &&
+      !hasPersonalActionOwner(canonicalAction, selfOptions)
     )
+      return [];
+    const metadata = parseActionMetadata(action.metadata);
+    const sourceMeetingId = getActionSourceMeetingId(action.metadata);
+    if ((!rejected && action.status !== 'completed') || !sourceMeetingId)
       return [];
     return [
       {
@@ -10108,7 +10203,7 @@ export const getCanonicalPersonCommitments = (
             ? metadata.full_description
             : action.name,
         status: rejected ? ('rejected' as const) : ('completed' as const),
-        sourceMeetingId: metadata.source_meeting_id,
+        sourceMeetingId,
       },
     ];
   });

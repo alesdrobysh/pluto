@@ -65,6 +65,82 @@ afterEach(() => {
 });
 
 describe('SettingsTab', () => {
+  it.each([true, false])(
+    'refreshes readiness only after model persistence succeeds (%s)',
+    async (saved) => {
+      let finishSave!: () => void;
+      const invoke = vi.fn(async (channel: string, input?: { key: string }) => {
+        if (channel === 'GET_SETTING') return '';
+        if (channel === 'OLLAMA_READINESS')
+          return {
+            status: 'ready',
+            models: ['custom:local'],
+            missingModels: [],
+          };
+        if (channel === 'SET_SETTING' && input?.key === 'ollama_fast_model') {
+          await new Promise<void>((resolve) => {
+            finishSave = resolve;
+          });
+          if (!saved) throw new Error('save failed');
+        }
+        return null;
+      });
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: { invoke, on: vi.fn(() => () => {}) },
+      });
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () =>
+        root.render(
+          <SettingsTab {...defaultProps} initialTab="intelligence" />,
+        ),
+      );
+      expect(
+        invoke.mock.calls.filter(([channel]) => channel === 'OLLAMA_READINESS'),
+      ).toHaveLength(1);
+      const input =
+        container.querySelector<HTMLInputElement>('#ollama-fast-model')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        )!.set!.call(input, 'custom:quick');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(container.textContent).toContain('Finish editing your model');
+      await act(async () =>
+        input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
+      );
+      expect(container.textContent).toContain('Saving your local model');
+      expect(
+        invoke.mock.calls.filter(([channel]) => channel === 'OLLAMA_READINESS'),
+      ).toHaveLength(1);
+      await act(async () => finishSave());
+      if (saved) {
+        expect(
+          invoke.mock.calls.filter(
+            ([channel]) => channel === 'OLLAMA_READINESS',
+          ),
+        ).toHaveLength(2);
+        expect(container.textContent).toContain(
+          'Your local models are installed',
+        );
+      } else {
+        expect(
+          invoke.mock.calls.filter(
+            ([channel]) => channel === 'OLLAMA_READINESS',
+          ),
+        ).toHaveLength(1);
+        expect(container.textContent).toContain(
+          'Could not save your local model',
+        );
+      }
+      act(() => root.unmount());
+    },
+  );
+
   it.each(['standard', 'encrypted'] as const)(
     'displays the %s database setup without a toggle',
     async (mode) => {

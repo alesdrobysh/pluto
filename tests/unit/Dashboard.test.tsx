@@ -195,6 +195,23 @@ const makeMeetingWithSupportedWin = (): Meeting =>
   });
 
 describe('Dashboard', () => {
+  it('does not render unowned background prose as a personal suggestion', () => {
+    const statement =
+      'Jordan noted that the group will transfer records into the report.';
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [makeAction({ name: statement, metadata: null })],
+      workspace: null,
+      graphStats: null,
+    });
+    const markup = renderDashboard(model);
+    expect(markup).toContain('Nothing needs your attention');
+    expect(markup).not.toContain(statement);
+    expect(markup).not.toContain('Add to commitments');
+  });
   it('shows a retryable commitments error instead of a trustworthy empty state', () => {
     const markup = renderDashboard(makeEmptyDashboardModel(), {
       dashboardError: new Error('identity unavailable'),
@@ -407,6 +424,8 @@ describe('Dashboard', () => {
           id: 'suggestion-1',
           name: 'Send the revised launch brief',
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            assignee_name: 'Me',
             commitment_state: 'possible',
             source_meeting_id: 'meeting-1',
           }),
@@ -414,12 +433,22 @@ describe('Dashboard', () => {
         makeAction({
           id: 'suggestion-2',
           name: 'Schedule the privacy review',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
         makeAction({
           id: 'suggestion-3',
           name: 'Draft the launch checklist',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       attentionAlerts: [],
@@ -456,7 +485,12 @@ describe('Dashboard', () => {
         makeAction({
           id: `possible-${index + 1}`,
           name: `Possible item ${index + 1}`,
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ),
       attentionAlerts: [],
@@ -1010,6 +1044,8 @@ describe('Dashboard', () => {
         makeAction({
           name: 'Check whether privacy review is assigned',
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            assignee_name: 'Me',
             commitment_state: 'possible',
             origin: 'extraction',
             source_meeting_id: 'meeting-1',
@@ -1062,7 +1098,12 @@ describe('Dashboard', () => {
       staleActions: [],
       activeActions: [
         makeAction({
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       workspace: null,
@@ -1100,7 +1141,12 @@ describe('Dashboard', () => {
       activeActions: [
         makeAction({
           id: 'action-without-source',
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       workspace: null,
@@ -1127,6 +1173,8 @@ describe('Dashboard', () => {
         makeAction({
           id: 'action-exact',
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            assignee_name: 'Me',
             commitment_state: 'possible',
             source_meeting_id: 'meeting-exact',
           }),
@@ -1166,7 +1214,12 @@ describe('Dashboard', () => {
       meetings: [],
       overdueActions: [
         makeAction({
-          metadata: JSON.stringify({ commitment_state: 'possible' }),
+          metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
+            commitment_state: 'possible',
+          }),
         }),
       ],
       staleActions: [],

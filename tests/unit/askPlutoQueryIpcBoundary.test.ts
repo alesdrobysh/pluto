@@ -54,6 +54,7 @@ describe('Ask Pluto query IPC boundary', () => {
       'currentMeetingRequested',
       'isPlanning',
       'assigneeRecall',
+      'inheritedScope',
       'conversationResolution',
       `${queryHandler.slice(start, end + 1)} return usePreparedAssigneeRecall;`,
     );
@@ -63,10 +64,30 @@ describe('Ask Pluto query IPC boundary', () => {
       false,
       false,
       { coverageLimited: false },
-      { relation: 'new_topic' },
+      undefined,
+      { task: 'lookup' },
     ];
     expect(selectPrepared({ llm_provider: 'ollama' }, ...args)).toBe(true);
     expect(selectPrepared({ llm_provider: 'chatgpt' }, ...args)).toBe(false);
+    for (const task of ['draft', 'analysis']) {
+      expect(
+        selectPrepared({ llm_provider: 'ollama' }, ...args.slice(0, -1), {
+          task,
+        }),
+      ).toBe(false);
+    }
+    expect(
+      selectPrepared(
+        { llm_provider: 'ollama' },
+        undefined,
+        undefined,
+        false,
+        false,
+        { coverageLimited: true },
+        undefined,
+        { task: 'lookup' },
+      ),
+    ).toBe(false);
   });
 
   it('keeps project recall diagnostics opt-in and model classification disabled by default', () => {
@@ -131,12 +152,8 @@ describe('Ask Pluto query IPC boundary', () => {
   });
   it('uses structured assignee recall before invoking the answer provider', () => {
     expect(main).toContain('buildAssigneeActionRecall');
-    expect(queryHandler).toContain(
-      'const assigneeRecall = buildAssigneeActionRecall',
-    );
-    const assigneeRecallIndex = queryHandler.indexOf(
-      'const assigneeRecall = buildAssigneeActionRecall',
-    );
+    expect(queryHandler).toContain('const assigneeRecall =');
+    const assigneeRecallIndex = queryHandler.indexOf('const assigneeRecall =');
     const extractiveAnswerIndex = queryHandler.indexOf(
       'const extractiveAnswer =',
     );
@@ -148,7 +165,9 @@ describe('Ask Pluto query IPC boundary', () => {
     expect(extractiveAnswerIndex).toBeLessThan(groundedProviderIndex);
     expect(queryHandler).toContain('assigneeRecall?.context');
     expect(queryHandler).toContain('assigneeRecall?.answer');
-    expect(queryHandler).toContain('!assigneeRecall.coverageLimited');
+    expect(queryHandler).toContain(
+      "(!inheritedScope || inheritedScope.kind === 'global')",
+    );
     expect(queryHandler).toContain('const usePreparedAssigneeRecall');
     expect(queryHandler).toContain(
       "conversationResolution.relation === 'new_topic'",

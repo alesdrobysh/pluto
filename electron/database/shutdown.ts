@@ -49,7 +49,8 @@ export const createBeforeQuitHandler = (
         report(error);
       } finally {
         state = 'complete';
-        options.quit();
+        // Let the native quit event unwind before retrying Electron termination.
+        setImmediate(() => options.quit());
       }
     })();
   };

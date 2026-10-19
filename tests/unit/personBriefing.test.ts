@@ -476,6 +476,28 @@ describe('selectPersonCommitments', () => {
     expect(result.candidates.map((item) => item.id)).toEqual(['extracted-1']);
     expect(result.delivered).toEqual([]);
   });
+  it.each(['meeting_regeneration_retired_at', 'cancelled_at'])(
+    'excludes %s actions from both verified and candidate projections',
+    (flag) => {
+      const retired = (
+        action: typeof verifiedAction | typeof extractedAction,
+      ) => ({
+        ...action,
+        metadata: JSON.stringify({
+          ...JSON.parse(action.metadata),
+          [flag]: '2026-10-14',
+        }),
+      });
+      const result = selectPersonCommitments({
+        personId: 'person-1',
+        personNames: ['Jordan Vale'],
+        actions: [retired(verifiedAction)],
+        candidateActions: [retired(extractedAction)],
+        isSelf: true,
+      });
+      expect(result).toEqual({ open: [], delivered: [], candidates: [] });
+    },
+  );
 
   it('keeps extracted tasks as candidates for other people too', () => {
     const result = selectPersonCommitments({

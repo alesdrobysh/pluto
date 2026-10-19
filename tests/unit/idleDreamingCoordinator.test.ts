@@ -142,23 +142,26 @@ describe('IdleDreamingCoordinator', () => {
     });
   });
 
-  it('records and generates with the selected ChatGPT model instead of the local model', async () => {
-    const coordinator = createIdleDreamingCoordinator({
-      getPolicy: () => policy,
-      getModel: async () => 'account-model',
-      getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
-      packageNotes: packageNotesMock,
-      generate: generateMock,
-      proposalStore,
-    });
-    await expect(coordinator.attemptIdleRun()).resolves.toMatchObject({
-      status: 'no_change',
-    });
-    expect(proposalStore.startRun).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'account-model' }),
-    );
-    expect(generateMock.mock.calls[0][3]).toBe('account-model');
-  });
+  it.each(['account-model', 'custom:latest'])(
+    'records and generates with the selected model %s',
+    async (model) => {
+      const coordinator = createIdleDreamingCoordinator({
+        getPolicy: () => policy,
+        getModel: async () => model,
+        getNextDirtyEntityId: () => ({ entityId: 'proj-1', type: 'project' }),
+        packageNotes: packageNotesMock,
+        generate: generateMock,
+        proposalStore,
+      });
+      await expect(coordinator.attemptIdleRun()).resolves.toMatchObject({
+        status: 'no_change',
+      });
+      expect(proposalStore.startRun).toHaveBeenCalledWith(
+        expect.objectContaining({ model }),
+      );
+      expect(generateMock.mock.calls[0][3]).toBe(model);
+    },
+  );
 
   it('returns validated proposals without mutating canonical data', async () => {
     generateMock.mockResolvedValue(

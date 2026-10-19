@@ -43,6 +43,8 @@ const makeAction = (overrides: Partial<Entity> = {}): Entity => ({
   due_date: null,
   assigned_to: null,
   metadata: JSON.stringify({
+    source_evidence: 'I will prepare the requested follow-up.',
+    assignee_name: 'Me',
     commitment_state: 'possible',
     source_meeting_id: 'meeting-1',
   }),
@@ -180,6 +182,7 @@ describe('Dashboard interactions', () => {
         id: 'remaining',
         name: fullDescription.slice(0, 100),
         metadata: JSON.stringify({
+          assignee_name: 'Me',
           commitment_state: 'possible',
           full_description: fullDescription,
           source_meeting_id: 'meeting-1',
@@ -243,7 +246,7 @@ describe('Dashboard interactions', () => {
       row?.querySelector<HTMLButtonElement>('button[aria-expanded]')?.click(),
     );
     expect(row?.textContent).toContain(sourceEvidence);
-    expect(row?.textContent).toContain('Owner not confirmed');
+    expect(row?.textContent).toContain('Suggested owner: Me');
     await act(async () =>
       row
         ?.querySelector<HTMLButtonElement>(
@@ -548,6 +551,8 @@ describe('Dashboard interactions', () => {
           id: 'action-2',
           name: 'Assign the customer recap',
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            assignee_name: 'Me',
             commitment_state: 'possible',
             source_meeting_id: 'meeting-2',
           }),
@@ -1072,6 +1077,9 @@ describe('Dashboard interactions', () => {
         makeAction({
           due_date: '2026-09-28',
           metadata: JSON.stringify({
+            source_evidence: 'I will prepare the requested follow-up.',
+            source_meeting_id: 'meeting-1',
+            assignee_name: 'Me',
             commitment_state: 'possible',
             dashboard_daily_priority: { date: '2026-09-27', rank: 0 },
           }),

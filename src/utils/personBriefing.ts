@@ -311,6 +311,8 @@ export const selectVerifiedPersonCommitments = (input: {
     if (
       action.assigned_to !== input.personId ||
       metadata.owner_source !== 'user' ||
+      metadata.meeting_regeneration_retired_at ||
+      metadata.cancelled_at ||
       getCommitmentState(action.metadata) === 'rejected' ||
       !['active', 'overdue', 'completed'].includes(action.status || '') ||
       typeof metadata.source_meeting_id !== 'string'
@@ -377,6 +379,8 @@ export const selectCandidatePersonCommitments = (input: {
       if (
         action.assigned_to !== null ||
         metadata.owner_source === 'user' ||
+        metadata.meeting_regeneration_retired_at ||
+        metadata.cancelled_at ||
         getCommitmentState(action.metadata) === 'rejected' ||
         !['active', 'overdue'].includes(action.status || '') ||
         typeof metadata.source_meeting_id !== 'string' ||
