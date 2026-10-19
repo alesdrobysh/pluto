@@ -625,7 +625,7 @@ import {
   createBackgroundKnowledgeRefreshCoordinator,
 } from './backgroundKnowledgeRefresh';
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
-import { ChatGPTAuth } from './chatgpt/auth';
+import { ChatGPTAuth, ChatGPTError } from './chatgpt/auth';
 import { registerChatGPTHandlers } from './chatgpt/ipc';
 import {
   cancelChatGPTInference,
@@ -6492,7 +6492,13 @@ app.whenReady().then(async () => {
       (key === 'cloud_consent_chatgpt' &&
         String(value) !== CLOUD_CONSENT_VERSION)
     )
-      cancelChatGPTInference();
+      cancelChatGPTInference(
+        new ChatGPTError(
+          key === 'llm_provider'
+            ? 'chatgpt_not_selected'
+            : 'chatgpt_cloud_consent_required',
+        ),
+      );
     invalidateProviderCache();
     if (
       key === 'automaticCommitmentReminders' ||
