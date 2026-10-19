@@ -59,6 +59,70 @@ const response = (values: Record<string, unknown> = {}) =>
   JSON.stringify({ resolutions: [resolution(values)] });
 
 describe('bounded source-bound semantic notes review', () => {
+  it('treats string null metadata as absent instead of publishing a placeholder point', async () => {
+    const { notes } = fixture();
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({ due: 'null', discussion: 'null' }),
+    );
+    const result = projectAuditedNotes(reviewed);
+    expect(result.all_action_items).toHaveLength(1);
+    expect(result.topics[0]!.key_points).toHaveLength(0);
+    expect(result.quality.issues).toEqual([]);
+  });
+  it('does not publish string null as reviewed wording', async () => {
+    const { notes } = fixture();
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({ text: 'null' }),
+    );
+    expect(projectAuditedNotes(reviewed).quality.issues).toContain(
+      'semantic_notes_review_unavailable',
+    );
+    expect(reviewed.draft.sections[0]!.items[0]!.text).not.toBe('null');
+  });
+  it('preserves a literal null speaker label instead of treating it as missing identity', async () => {
+    const text = 'I will book the room by Friday.';
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'null', text }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const draft: NotesDraft = {
+      title: null,
+      overview: null,
+      sections: [
+        {
+          id: 's',
+          title: { id: 'h', text: 'Room', sources },
+          items: [
+            {
+              id: 'task',
+              kind: 'action',
+              text: 'Book the room by Friday',
+              owner: 'null',
+              due: 'Friday',
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    const notes = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({
+        text: 'Book the room by Friday',
+        owner: 'null',
+        due: 'Friday',
+        discussion: 'null',
+      }),
+    );
+    expect(projectAuditedNotes(reviewed).all_action_items[0]!.assignee).toBe(
+      'null',
+    );
+    expect(projectAuditedNotes(reviewed).topics[0]!.key_points).toHaveLength(0);
+  });
   it('does not spend another review request rewriting exact attributed speech', async () => {
     const text = 'My cousin uses she and her.';
     const { notes, source, sources } = fixture(text, text);

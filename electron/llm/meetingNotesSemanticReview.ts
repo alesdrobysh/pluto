@@ -246,6 +246,19 @@ export const reviewSourceBoundNotes = async (
         )
           throw new Error('invalid_semantic_review');
       }
+      if (result.text.trim() === 'null')
+        throw new Error('invalid_semantic_review');
+      for (const key of ['due', 'discussion'] as const) {
+        if (typeof result[key] === 'string' && result[key].trim() === 'null')
+          result[key] = null;
+      }
+      if (typeof result.owner === 'string' && result.owner.trim() === 'null') {
+        result.owner = entry.source.some(
+          ({ speaker, text }) => speaker === 'null' || contains(text, 'null'),
+        )
+          ? 'null'
+          : null;
+      }
       seen.add(result.id);
       if (
         (result.kind === 'point' || result.kind === 'question') &&

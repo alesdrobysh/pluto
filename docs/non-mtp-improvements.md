@@ -33,7 +33,7 @@ ownership stays out of personal reminders.
 Release acceptance additionally disambiguates identically worded tasks by recorded
 owner and evidence. Existing source review can repair disputed conditions before
 promotion; conditional discussion, missing withdrawal context and unsupported personal
-references retain attributed source speech. Complete literal policies keep their source wording.
+references retain attributed source speech. Complete literal policies keep their source wording; nullable metadata does not become visible placeholder prose.
 These changes retain the existing model, context, request and deadline limits.
 
 ## Already preserved in PR #880

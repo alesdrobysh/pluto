@@ -118,7 +118,6 @@ export const buildNotesWriterPrompt = ({
   template,
 }: WriterPromptInput): string =>
   [
-    'You produce compact, source-grounded Pluto meeting-note drafts.',
     notesContentGuidance,
     notesProseGuidance,
     'Every still-valid commitment belongs in a kind:action item. An overview mention is not a substitute for an action. Do not emit document rollups; code derives them from retained items.',
@@ -145,14 +144,11 @@ export const buildCompactNotesWriterPrompt = ({
   [
     "Start the notes with accepted current responsibilities and future commitments: find each speaker's actual promise anywhere in the source, including brief colloquial promises between long discussions. A fragmented 'let me' promise can span adjacent fragments from the same identified speaker; retain all necessary fragments and its condition. Do not substitute an earlier tentative plan, proposed meeting time, or request from somebody else. State each promise close to its source wording as kind action with its actual speaker owner. Separate uncertain access approval, testing, a later production request and production availability; do not turn an estimate into a promise.",
     'Track concrete work and scheduling commitments. Routine farewells or saying people will speak later, without a defined topic, task or arrangement, are not action items. A promised call about a specific task or an arranged meeting remains an action.',
-    'Only explicit settled choices are decisions, with reasons and final state. Completed facts, status confirmations and conditional possible refusals remain points.',
-    "Keep completed work with its actor and time, and each speaker's own experience, feeling and reason as attributed points. Others' reactions do not cover the speaker's own reaction.",
+    'Retain every explicit settled choice as kind decision, with its reason and final state. Completed facts and status confirmations are points with actor and time. Conditional possible refusals remain discussion.',
+    "Keep each speaker's explicit experience, feeling and reason as an attributed point. Reports about other people's feelings do not cover the speaker's own reaction.",
     'Preserve epistemic status: believed, expected, requested and confirmed are distinct. Preserve every prerequisite step and actor in order; an anticipated approval is not a confirmed approval.',
-    'You produce compact, source-grounded Pluto meeting-note drafts.',
     notesContentGuidance,
     notesProseGuidance,
-    'Return the overall meeting title plus useful note items. Code derives the overview and section-heading evidence; do not substitute the first section heading for the overall title.',
-    'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments; compact repetition, not facts.',
     'Read the final turns again before returning: retain every accepted future commitment as an action, even when it is a short scheduling or notification promise after a long discussion. Cite the full task and acceptance, including antecedent requests and conditions, not an earlier tentative plan.',
     'Keep every duration estimate tied to its stated starting point and endpoint. A total wait that includes approval, testing or provisioning must not become an additional wait after those steps. Preserve prerequisites and uncertainty in discussion points as well as actions; do not invent a relative date or a causal link.',
     'Fictional writing example, not meeting facts: source "I think the sandbox approval went through. Once validation finishes, we can request live access. All of that should take another two or three working days." becomes "Sandbox approval was believed complete. Validation must finish before live access is requested. The total estimate, including those steps, was another two or three working days." Apply the same fidelity to the actual source; never copy facts from this example.',
@@ -174,6 +170,7 @@ export const buildCompactNotesWriterPrompt = ({
       'at most 3',
       `at most ${maxSourceSpans}`,
     ),
+    'Before returning, account for every source turn. Preserve all material names, numbers, definitions, reasons, state changes and current commitments. Include unaccepted offers with their latest disposition, and every speaker’s own feelings and reasons; others’ reactions do not replace them. Compact repetition, not facts.',
   ].join('\n');
 
 export const buildNotesAuditPrompt = ({

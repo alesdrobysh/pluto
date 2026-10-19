@@ -47,9 +47,13 @@ it('asks the compact writer for complete items and bounded evidence', () => {
   expect(prompt).toContain('Routine farewells');
   expect(prompt).toContain('A promised call about a specific task');
   expect(prompt).toContain('account for every source turn');
-  expect(prompt).toContain('Only explicit settled choices are decisions');
-  expect(prompt).toContain('conditional possible refusal');
-  expect(prompt).toContain("each speaker's own experience, feeling and reason");
+  expect(prompt).toContain(
+    'Retain every explicit settled choice as kind decision',
+  );
+  expect(prompt).toMatch(/conditional possible refusals?/i);
+  expect(prompt).toContain(
+    "each speaker's explicit experience, feeling and reason",
+  );
   expect(prompt).toContain(
     'retain every accepted future commitment as an action',
   );
@@ -206,7 +210,7 @@ it('preserves attributed personal context without inventing feelings or conseque
 it('retains complete work and explicit offer status without inventing future tasks or refusals', () => {
   for (const prompt of stagePrompts()) {
     expect(prompt).toContain(
-      'Retain all material operations and their current status across turns',
+      'Keep all material operations and their status across turns',
     );
     expect(prompt).toContain('completed work is not a future action');
     expect(prompt).toContain(
