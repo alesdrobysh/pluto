@@ -112,6 +112,7 @@ suite(
                     contextTokens: config.contextTokens,
                     compactWriterContract: true,
                     hierarchyAuditStrategy: 'deterministic_only',
+                    onStage: (task) => stages.push(task),
                   })
               : generateMeetingNotes;
             analysis = await generateNotes({

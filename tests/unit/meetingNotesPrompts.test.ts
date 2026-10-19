@@ -50,6 +50,9 @@ it('asks the compact writer for complete items and bounded evidence', () => {
   );
   expect(prompt).toContain('conditional possible refusal');
   expect(prompt).toContain(
+    "each speaker's explicit experience, feeling and reason",
+  );
+  expect(prompt).toContain(
     'retain every accepted future commitment as an action',
   );
   expect(prompt).toContain(
