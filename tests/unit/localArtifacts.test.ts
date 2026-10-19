@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,21 @@ const testDatabase = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   app: { getPath: () => testDatabase.directory },
 }));
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  const execFile = vi.fn(actual.execFile);
+  Object.defineProperty(execFile, Symbol.for('nodejs.util.promisify.custom'), {
+    value: (file: string, args: string[], options: object) =>
+      new Promise((resolve, reject) => {
+        execFile(file, args, options, (error, stdout, stderr) => {
+          if (error) reject(error);
+          else resolve({ stdout, stderr });
+        });
+      }),
+  });
+  return { ...actual, execFile };
+});
 
 import {
   deleteLocalArtifact,
@@ -134,17 +149,31 @@ startxref
     expect(extractedViaHelper).toBe(text);
   });
 
-  it('extracts text from Pages documents when available', async () => {
-    const samplePages =
-      '/Users/metagrover/Desktop/work/Cognitive_AI_Interview_Guide.pages';
-    if (fs.existsSync(samplePages)) {
-      const text = await extractTextFromPages(samplePages);
-      expect(text).toContain('Cognitive Task Analysis');
-      expect(text).toContain('GOMS');
+  it('extracts and cleans Pages metadata without reading a personal document', async () => {
+    const samplePages = path.join(testDatabase.directory, 'fictional.pages');
+    const temporaryPlists: string[] = [];
+    const importMetadata = ((command, args, _options, callback) => {
+      expect(command).toBe('/usr/bin/mdimport');
+      expect(args).toEqual(['-t', '-o', expect.any(String), samplePages]);
+      const plistPath = args[2];
+      temporaryPlists.push(plistPath);
+      fs.writeFileSync(
+        plistPath,
+        '<?xml version="1.0"?><plist version="1.0"><dict><key>kMDItemTextContent</key><string>Fictional Juniper plan.\n01234567-89ab-cdef-0123-456789abcdef\nSupport owns the update.\n</string></dict></plist>',
+      );
+      callback(null, '', '');
+    }) as typeof execFile;
 
-      const extractedViaHelper = await extractArtifactContent(samplePages);
-      expect(extractedViaHelper).toContain('Cognitive Task Analysis');
-    }
+    vi.mocked(execFile).mockImplementationOnce(importMetadata);
+    expect(await extractTextFromPages(samplePages)).toBe(
+      'Fictional Juniper plan.\n\nSupport owns the update.',
+    );
+    vi.mocked(execFile).mockImplementationOnce(importMetadata);
+    expect(await extractArtifactContent(samplePages)).toBe(
+      'Fictional Juniper plan.\n\nSupport owns the update.',
+    );
+    expect(temporaryPlists).toHaveLength(2);
+    expect(temporaryPlists.every((file) => !fs.existsSync(file))).toBe(true);
   });
 
   it('persists and indexes docx and pages artifacts with FTS5', () => {
