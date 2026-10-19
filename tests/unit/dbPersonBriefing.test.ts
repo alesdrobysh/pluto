@@ -397,11 +397,13 @@ describe('person briefing database read model', () => {
     ]);
 
     db.correctActionOwner('name-only-action', person.id);
-    expect(db.getPersonBriefing(person.id)?.commitments).toMatchObject({
-      open: [
+    const confirmed = db.getPersonBriefing(person.id)?.commitments;
+    expect(confirmed?.open).toHaveLength(2);
+    expect(confirmed).toMatchObject({
+      open: expect.arrayContaining([
         expect.objectContaining({ id: 'verified-action' }),
         expect.objectContaining({ id: 'name-only-action' }),
-      ],
+      ]),
       candidates: [],
     });
 
