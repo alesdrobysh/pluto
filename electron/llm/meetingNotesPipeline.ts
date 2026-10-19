@@ -42,11 +42,11 @@ import {
   buildNotesWriterPrompt,
   notesAuditCorrectionGuidance,
 } from './meetingNotesPrompts';
-import { resolveMeetingNotesTemplateInput } from './meetingNotesTemplates';
 import {
   completeCitedSourceWindow,
   groupCitedSourcePassages,
 } from './meetingNotesSource';
+import { resolveMeetingNotesTemplateInput } from './meetingNotesTemplates';
 import {
   type GenerateMeetingNotesInput,
   MeetingNotesError,
