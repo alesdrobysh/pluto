@@ -46,6 +46,10 @@ it('asks the compact writer for complete items and bounded evidence', () => {
   expect(prompt).toContain('A promised call about a specific task');
   expect(prompt).toContain('account for every source turn');
   expect(prompt).toContain(
+    'Retain every explicit settled choice as kind decision',
+  );
+  expect(prompt).toContain('conditional possible refusal');
+  expect(prompt).toContain(
     'retain every accepted future commitment as an action',
   );
   expect(prompt).toContain(

@@ -23,6 +23,8 @@ const model = process.env.OLLAMA_BENCHMARK_MODEL || OLLAMA_GENERAL_MODEL;
 const seed = Number(process.env.MEETING_NOTES_ACCEPTANCE_SEED ?? 41);
 const reviewProtocol = process.env.MEETING_NOTES_REVIEW_PROTOCOL || 'audit';
 const caseSet = process.env.MEETING_NOTES_ACCEPTANCE_CASE_SET || 'fixed';
+const productionPath =
+  process.env.MEETING_NOTES_ACCEPTANCE_PATH === 'production';
 if (!['fixed', 'heldout', 'private'].includes(caseSet))
   throw new Error(
     'MEETING_NOTES_ACCEPTANCE_CASE_SET must be fixed, heldout or private',
@@ -71,6 +73,7 @@ suite(
             ) => Promise<string>;
           };
           const config = {
+            path: productionPath ? 'production' : 'audit_harness',
             case: fixture.id,
             provider: 'ollama',
             model,
@@ -101,7 +104,17 @@ suite(
             }),
           );
           try {
-            analysis = await generateMeetingNotes({
+            const generateNotes: typeof generateMeetingNotes = productionPath
+              ? () =>
+                  provider.generateStructuredAnalysis('', '', 'auto', {
+                    source,
+                    signal: controller.signal,
+                    contextTokens: config.contextTokens,
+                    compactWriterContract: true,
+                    hierarchyAuditStrategy: 'deterministic_only',
+                  })
+              : generateMeetingNotes;
+            analysis = await generateNotes({
               source,
               context: {
                 userNotes: '',

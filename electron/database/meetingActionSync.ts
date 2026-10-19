@@ -45,6 +45,29 @@ interface NativeContinuationItem {
   completed?: boolean;
 }
 
+const matchesActionSource = (
+  action: { assignee?: unknown; evidence?: unknown },
+  metadata: ReturnType<typeof parseActionMetadata>,
+): boolean => {
+  const evidence =
+    typeof metadata.source_evidence === 'string'
+      ? metadata.source_evidence.trim()
+      : '';
+  const owner =
+    typeof metadata.assignee_name === 'string'
+      ? metadata.assignee_name.trim()
+      : '';
+  return Boolean(
+    (evidence || owner) &&
+      (!evidence ||
+        (typeof action.evidence === 'string' &&
+          action.evidence.trim() === evidence)) &&
+      (!owner ||
+        (typeof action.assignee === 'string' &&
+          action.assignee.trim() === owner)),
+  );
+};
+
 /** Mirror an explicit entity completion into its exact source note block. */
 export const syncActionCompletionToMeetingNotes = (
   sqlite: Database.Database,
@@ -96,7 +119,7 @@ export const syncActionCompletionToMeetingNotes = (
         : typeof meta.full_description === 'string'
           ? meta.full_description
           : entity.name;
-    const matches = actions.flatMap(
+    let matches: number[] = actions.flatMap(
       (action: { text?: unknown }, index: number) =>
         [
           action?.text,
@@ -108,6 +131,10 @@ export const syncActionCompletionToMeetingNotes = (
           ? [index]
           : [],
     );
+    if (matches.length > 1)
+      matches = matches.filter((index) =>
+        matchesActionSource(actions[index], meta),
+      );
     if (matches.length !== 1) return;
     // Both note formats read the same completion, including after format changes.
     for (const prefix of ['all_action_items', 'v2:action']) {
@@ -259,7 +286,7 @@ export const syncMeetingActionEntitiesFromUserEdits = (
           typeof candidate.evidence === 'string' &&
           candidate.evidence.trim() === evidence,
       ).length === 1;
-    const matches = existingEntities.filter((entity) => {
+    let matches = existingEntities.filter((entity) => {
       if (claimedEntityIds.has(entity.id)) return false;
       const metadata = parseActionMetadata(entity.metadata);
       if (metadata.continuation_id || metadata.origin === 'user') return false;
@@ -288,6 +315,17 @@ export const syncMeetingActionEntitiesFromUserEdits = (
         metadata.source_evidence.trim() === evidence
       );
     });
+    if (
+      matches.length > 1 ||
+      actionItems.filter(
+        (candidate) => candidate.text?.trim() === item?.text?.trim(),
+      ).length > 1
+    )
+      matches = matches.filter(
+        (entity) =>
+          item &&
+          matchesActionSource(item, parseActionMetadata(entity.metadata)),
+      );
     // Ambiguous legacy duplicates must not inherit another action's completion.
     const entity = matches.length === 1 ? matches[0] : undefined;
 

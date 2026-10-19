@@ -35,6 +35,75 @@ afterAll(() => {
 });
 
 describe('meeting action entity and user edit synchronization', () => {
+  it.each(['entity', 'notes', 'reordered', 'shared-owner', 'ambiguous'])(
+    'preserves task identity for %s completion with identical task text',
+    (direction) => {
+      const meetingId = `duplicate-task-${direction}`;
+      const actions = [
+        {
+          text: 'Send the checklist',
+          assignee: 'Avery',
+          evidence: 'Avery will send the checklist to Design.',
+        },
+        {
+          text: 'Send the checklist',
+          assignee: direction === 'shared-owner' ? 'Avery' : 'Blake',
+          evidence: `${direction === 'shared-owner' ? 'Avery' : 'Blake'} will send the checklist to Finance.`,
+        },
+      ];
+      saveMeeting({
+        id: meetingId,
+        title: 'Checklist review',
+        analysis_json: JSON.stringify({ all_action_items: actions }),
+      });
+      const entities = actions.map((action, index) =>
+        upsertEntity({
+          id: `${meetingId}-${index}`,
+          type: 'action_item',
+          name: action.text,
+          status: 'active',
+          dedupe_by_name: false,
+          metadata: {
+            origin: 'extraction',
+            commitment_state: 'confirmed',
+            source_meeting_id: meetingId,
+            source_path: `all_action_items:${index}`,
+            source_index: index,
+            original_description: action.text,
+            source_evidence:
+              direction === 'ambiguous' ? undefined : action.evidence,
+            assignee_name:
+              direction === 'ambiguous' ? undefined : action.assignee,
+          },
+        }),
+      );
+      const index = direction === 'reordered' ? 0 : 1;
+      if (direction === 'reordered')
+        db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+          JSON.stringify({ all_action_items: [...actions].reverse() }),
+          meetingId,
+        );
+      if (direction === 'notes') {
+        db.prepare('UPDATE meetings SET user_edits_json = ? WHERE id = ?').run(
+          JSON.stringify({
+            [`completion:all_action_items:${index}`]: {
+              original: 'false',
+              edited: 'true',
+            },
+          }),
+          meetingId,
+        );
+        syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+      } else updateEntityStatus(entities[1].id, 'completed');
+      const edits = JSON.parse(getMeeting(meetingId)!.user_edits_json || '{}');
+      expect(edits[`completion:all_action_items:${index}`]?.edited).toBe(
+        direction === 'ambiguous' ? undefined : 'true',
+      );
+      expect(edits[`completion:all_action_items:${1 - index}`]).toBeUndefined();
+      expect(getEntity(entities[1].id)?.status).toBe('completed');
+      expect(getEntity(entities[0].id)?.status).toBe('active');
+    },
+  );
   it('preserves completed actions when the saved edit document is unreadable', () => {
     const meetingId = 'unreadable-edit-state';
     saveMeeting({
