@@ -30,17 +30,30 @@ vi.mock('../../src/components/features/Dashboard', () => ({
 vi.mock('../../src/components/features/MeetingView', () => ({
   MeetingView: ({
     onRetryTranscriptValidation,
+    selectedMeeting,
   }: {
+    selectedMeeting?: {
+      transcript_status?: string;
+      finalization_status?: string;
+      transcript_integrity_json?: string;
+    };
     onRetryTranscriptValidation: (
       kind: 'transcript' | 'speaker_labels',
     ) => void;
   }) => (
-    <button
-      type="button"
-      onClick={() => onRetryTranscriptValidation(requestedRetry.kind)}
-    >
-      Retry transcript
-    </button>
+    <>
+      <p data-testid="selected-transcript-state">
+        {selectedMeeting?.transcript_status} /{' '}
+        {selectedMeeting?.finalization_status} /{' '}
+        {selectedMeeting?.transcript_integrity_json}
+      </p>
+      <button
+        type="button"
+        onClick={() => onRetryTranscriptValidation(requestedRetry.kind)}
+      >
+        Retry transcript
+      </button>
+    </>
   ),
 }));
 
@@ -54,6 +67,102 @@ afterEach(() => {
 });
 
 describe('App final transcription retry boundary', () => {
+  it('refreshes the open meeting after asynchronous integrity rejection', async () => {
+    const meeting = {
+      id: 'retry-meeting',
+      title: 'Recording check',
+      created_at: '2026-09-04T00:00:00Z',
+      transcript_status: 'provisional',
+      finalization_status: 'finalized',
+      capture_journal_generation: 'generation-1',
+      audio_path: '/fixture/mic.wav',
+      system_audio_path: '/fixture/system.wav',
+      mixed_audio_path: '/fixture/mix.wav',
+      transcript_json: JSON.stringify({
+        segments: [{ text: 'retained words', startTime: 0, endTime: 1 }],
+      }),
+      transcript_integrity_json: '{}',
+    };
+    let finishWorker!: () => void;
+    runFinal.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          meeting.transcript_status = 'validating';
+          finishWorker = () => {
+            meeting.transcript_status = 'needs_attention';
+            meeting.finalization_status = 'needs_attention';
+            meeting.transcript_integrity_json = JSON.stringify({
+              finalTranscription: {
+                state: 'needs_attention',
+                failure: 'integrity_rejected',
+              },
+            });
+            resolve({ status: 'needs_attention' });
+          };
+        }),
+    );
+    window.__PLUTO_BROWSER_PREVIEW__ = false;
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: {
+        invoke: vi.fn(async (channel: string, key?: string) => {
+          if (channel === 'GET_SETTING')
+            return key === 'setup_complete' ? 'true' : null;
+          if (channel === 'GET_MEETINGS') return structuredClone([meeting]);
+          if (channel === 'GET_MEETING') return structuredClone(meeting);
+          if (channel === 'CALENDAR_GET_STATE') return { enabled: false };
+          if (channel === 'BOOT_PROBE_STATUS') return true;
+          if (channel === 'DETECT_ACTIVE_CALL') return { active: false };
+          if (channel === 'RECORDING_READINESS_STATUS')
+            return {
+              details: {
+                parakeetClient: true,
+                parakeetModel: true,
+                parakeetEouReady: true,
+                audiocapExists: true,
+                audiocapExecutable: true,
+              },
+            };
+          return null;
+        }),
+        send: vi.fn(),
+        on: vi.fn(() => () => undefined),
+        off: vi.fn(),
+      },
+    });
+    const { default: App } = await import('../../src/App');
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<App />);
+        await flush();
+      });
+      expect(runFinal).toHaveBeenCalledOnce();
+      await act(async () => {
+        Array.from(container.querySelectorAll('button'))
+          .find((button) => button.textContent === 'Open retry meeting')
+          ?.click();
+        await flush();
+      });
+      const selectedState = () =>
+        container.querySelector('[data-testid="selected-transcript-state"]')
+          ?.textContent;
+      expect(selectedState()).toContain('validating / finalized');
+      await act(async () => {
+        finishWorker();
+        await flush();
+      });
+      expect(selectedState()).toContain('needs_attention / needs_attention');
+      expect(selectedState()).toContain('integrity_rejected');
+      expect(runFinal).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it.each([
     {
       reason: 'manual',

@@ -1835,7 +1835,7 @@ function App() {
         finalTranscriptionAbortRef.current = null;
         setFinalTranscriptionMeetingId(null);
       }
-      await fetchMeetings();
+      await refreshSelectedMeetingState();
     }
   };
 
