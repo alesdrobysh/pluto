@@ -129,7 +129,7 @@ describe('SetupWizard', () => {
         .find((button) => button.textContent === 'Continue')!
         .click(),
     );
-    expect(container.textContent).toContain('How should Pluto think?');
+    expect(container.textContent).toContain('Choose your intelligence');
     expect(invoke).toHaveBeenCalledWith('SET_SETTING', {
       key: 'setup_step',
       value: 'intelligence',
@@ -143,7 +143,7 @@ describe('SetupWizard', () => {
     const complete = vi.fn();
     await act(async () => root.render(<SetupWizard onComplete={complete} />));
     expect(complete).toHaveBeenCalledOnce();
-    expect(container.textContent).not.toContain('How should Pluto think?');
+    expect(container.textContent).not.toContain('Choose your intelligence');
     expect(invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
   });
 
@@ -160,7 +160,7 @@ describe('SetupWizard', () => {
     expect(
       container.querySelector('[aria-label="About you setup"]'),
     ).toBeTruthy();
-    expect(container.textContent).not.toContain('How should Pluto think?');
+    expect(container.textContent).not.toContain('Choose your intelligence');
     expect(invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
   });
 

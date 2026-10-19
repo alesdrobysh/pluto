@@ -92,7 +92,29 @@ function fixture(
       client_id: 'oaiapp_test',
     }).toString();
     options.callback?.(callback);
-    await visit(callback.toString());
+    await new Promise<void>((resolve, reject) => {
+      get(callback, (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (part) => {
+          body += part;
+        });
+        response.on('end', () => {
+          if (response.statusCode === 200) {
+            expect(response.headers['content-type']).toContain('text/html');
+            expect(response.headers['cache-control']).toBe('no-store');
+            expect(response.headers['referrer-policy']).toBe('no-referrer');
+            expect(response.headers['content-security-policy']).toContain(
+              "default-src 'none'",
+            );
+            expect(body).toContain('You can close this tab.');
+            expect(body).not.toContain('test-code');
+            expect(body).not.toContain(authorizeUrl.searchParams.get('state')!);
+          }
+          resolve();
+        });
+      }).on('error', reject);
+    });
   });
   const save = vi.fn((value: string) => {
     stored = value;

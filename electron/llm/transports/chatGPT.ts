@@ -1,5 +1,10 @@
 import { ChatGPTError } from '../../chatgpt/auth';
-import { getChatGPTAuth, getChatGPTUsage } from '../../chatgpt/runtime';
+import {
+  assertChatGPTSelected,
+  getChatGPTAuth,
+  getChatGPTInferenceSignal,
+  getChatGPTUsage,
+} from '../../chatgpt/runtime';
 import type { InferenceRequest, InferenceResult } from '../inferenceTypes';
 
 export class ChatGPTInferenceError extends ChatGPTError {
@@ -41,11 +46,12 @@ export async function executeChatGPT(
     onStart?: () => void;
   } = {},
 ): Promise<InferenceResult> {
+  assertChatGPTSelected();
   const auth = getChatGPTAuth();
   auth.assertUsageAvailable();
   return getChatGPTUsage().run(
     request,
-    auth.inferenceSignal(),
+    getChatGPTInferenceSignal(),
     callbacks,
     (signal, listeners) =>
       executeChatGPTRequest({ ...request, signal }, listeners),
@@ -59,14 +65,15 @@ async function executeChatGPTRequest(
   const startedAt = Date.now();
   const auth = getChatGPTAuth();
   const signal = AbortSignal.any([
-    auth.inferenceSignal(),
+    getChatGPTInferenceSignal(),
     ...(request.signal ? [request.signal] : []),
     AbortSignal.timeout(300_000),
   ]);
   signal.throwIfAborted();
   auth.assertUsageAvailable();
   const token = await auth.accessToken();
-  request.signal?.throwIfAborted();
+  signal.throwIfAborted();
+  assertChatGPTSelected();
   const body = {
     model: request.model,
     store: false,

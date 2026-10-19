@@ -628,7 +628,11 @@ import {
 import { handleAudioCaptureJournalStart } from './captureJournalStart';
 import { ChatGPTAuth } from './chatgpt/auth';
 import { registerChatGPTHandlers } from './chatgpt/ipc';
-import { getChatGPTUsage, initializeChatGPTAuth } from './chatgpt/runtime';
+import {
+  cancelChatGPTInference,
+  getChatGPTUsage,
+  initializeChatGPTAuth,
+} from './chatgpt/runtime';
 import { createChatGPTStorage } from './chatgpt/storage';
 import { ChatGPTUsage } from './chatgpt/usage';
 import { resolveDatabaseStorageMode } from './database/storageSetup';
@@ -832,6 +836,7 @@ import type {
   AnalysisDocument,
   InternalSignalDocument,
 } from './llm/provider';
+import { CLOUD_CONSENT_VERSION } from './llm/providerCatalog';
 import { inferenceTransportErrorRationale } from './llm/transports/openAICompatible';
 import {
   UnifiedLLMProvider,
@@ -1319,7 +1324,9 @@ app.whenReady().then(async () => {
     },
     openBrowser: (url) => shell.openExternal(url),
   });
-  initializeChatGPTAuth(chatGPTAuth, new ChatGPTUsage(db));
+  initializeChatGPTAuth(chatGPTAuth, new ChatGPTUsage(db), (key) =>
+    db.getSetting(key),
+  );
   registerChatGPTHandlers(ipcMain, chatGPTAuth, db, (url) =>
     shell.openExternal(url),
   );
@@ -6473,6 +6480,12 @@ app.whenReady().then(async () => {
       throw new Error('secret_setting_requires_credential_ipc');
     }
     const result = db.setSetting(key, String(value));
+    if (
+      (key === 'llm_provider' && value !== 'chatgpt') ||
+      (key === 'cloud_consent_chatgpt' &&
+        String(value) !== CLOUD_CONSENT_VERSION)
+    )
+      cancelChatGPTInference();
     invalidateProviderCache();
     if (
       key === 'automaticCommitmentReminders' ||

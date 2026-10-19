@@ -435,7 +435,7 @@ describe('About you form and invitation', () => {
   it('lets an unfinished setup choose Ollama before the profile without requesting sign-in', async () => {
     intelligenceComplete = false;
     await act(async () => root.render(<SetupWizard onComplete={vi.fn()} />));
-    expect(container.textContent).toContain('How should Pluto think?');
+    expect(container.textContent).toContain('Choose your intelligence');
     await act(async () =>
       container
         .querySelector<HTMLInputElement>('input[value="ollama"]')!

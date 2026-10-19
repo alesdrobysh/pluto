@@ -2,7 +2,8 @@
 
 During first-run setup, choose **Ollama** or **ChatGPT** after recording permissions.
 For ChatGPT, review the text-context disclosure and choose **Continue with ChatGPT**.
-Complete sign-in and authorize plan usage in your browser. Pluto saves your choice
+Complete sign-in and authorize plan usage in your browser, then return to Pluto.
+A one-time confirmation explains plan usage and links to ChatGPT settings. Pluto saves your choice
 and protected connection, skips this question on future launches, and refreshes
 access automatically. An expired or revoked renewable session may require sign-in
 again; it does not reset your provider choice.
@@ -13,8 +14,9 @@ first-run setup. A one-time dashboard notice offers **Keep current setup** or
 opens settings without switching providers or granting cloud consent.
 
 Use **Settings → Intelligence** whenever you want to change providers or manage
-the connection. Pluto lists the models available to that account;
-choose one for its intelligence tasks. New connections default to GPT-5.6 Terra
+the connection. Choosing ChatGPT here previews setup without changing your active
+provider; successful connection and saved text-sharing consent activate it. Pluto lists the models available to that account;
+use the automatic default, or change it under **Advanced settings**. New connections default to GPT-5.6 Terra
 when available; an existing available model choice is preserved. GPT-6.1 Sol stays
 available as an option for more detailed output. If Terra is unavailable, initial
 selection prefers available Sol, then the first account model. Corrected saved
@@ -27,16 +29,23 @@ meeting questions), preparation, entity extraction, commitment reconciliation,
 knowledge documents, and background People/Project synthesis. Requests consume
 the connected account's plan allowance. **Manage usage** opens ChatGPT's usage
 settings. A usage-limit failure pauses new ChatGPT inference until you explicitly
-choose **Retry ChatGPT requests**. Pluto never silently changes providers or billing.
+choose **Try again**. Pluto never silently changes providers or billing.
 
 ### Usage protection
 
-Settings → Intelligence shows today's request count, reported input/output tokens
-by task and model, and avoided duplicates. These are local Pluto measurements,
+Settings → Intelligence shows today’s request count and a **Manage usage** link.
+**Advanced settings** contains model selection, daily request/token limits, reported
+input/output tokens by task and model, and avoided duplicates. These are local Pluto measurements,
 not the remaining ChatGPT quota or a conversion to plan credits. Counting begins
 with this version; prior requests cannot be reconstructed.
 
-The default daily limits are 50 requests and a 200,000-token admission budget.
+The default daily limits are 50 provider requests and a 200,000-token admission
+budget. These are not counts of meetings or answers: each may need several
+requests for extraction, scope resolution, or source checks. Saved representative
+usage approached the token budget before 50 requests, so raising the request cap
+to 100 would provide misleading headroom. Terra remains preferred from the saved
+quality/usage comparisons; this is a conservative starting policy, not a guarantee
+that every user’s workload fits.
 Before dispatch Pluto durably counts the attempt and reserves estimated input plus
 at least 8,192 output tokens. Completed responses replace that estimate with the
 provider's reported input/output usage. Failed, interrupted, or unmeasured requests
@@ -50,8 +59,14 @@ reservation, so this is a limit on admitting new requests, not a hard ceiling on
 tokens charged by OpenAI. Increase limits explicitly in Settings when needed.
 The UI links to ChatGPT's usage settings for the authoritative plan/app limits.
 
-Optional automatic background enrichment is **off by default**. Opting in allows
-up to 10 background requests per day within the same overall budget. Notes, meeting extraction, and explicit user requests still run under
+Automatic People and Project updates are **on for new connections**, limited to
+10 background requests and a 40,000-token admission budget within the default
+50-request/200,000-token daily totals. Background work is limited to 20% of both
+configured daily budgets (and at most 10 requests). Its reservation includes failed
+and interrupted calls; completed calls replace estimates with reported usage. One
+running response can exceed its reservation; later background requests then wait.
+Existing limits, pauses, and explicit background opt-outs are preserved. The toggle
+saves immediately; advanced limit changes require **Save usage protection**. Notes, meeting extraction, and explicit user requests still run under
 the overall limits. Explicit People/Project document refreshes are treated as user
 requests. Paused background work remains queued; no provider is silently substituted.
 An upstream usage-limit pause is durable and requires an explicit retry.

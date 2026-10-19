@@ -4,6 +4,18 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IntelligenceSetup } from '../../src/components/Setup/IntelligenceSetup';
 
+vi.mock('../../src/components/features/ChatGPTPlanWelcome', () => ({
+  ChatGPTPlanWelcome: ({
+    enabled,
+    onContinue,
+  }: { enabled: boolean; onContinue: () => void }) =>
+    enabled ? (
+      <button data-welcome onClick={onContinue}>
+        Got it
+      </button>
+    ) : null,
+}));
+
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => {
   document.body.innerHTML = '';
@@ -50,7 +62,11 @@ async function renderSetup(
     act(async () =>
       container.querySelector<HTMLButtonElement>('button')!.click(),
     );
-  return { container, root, complete, invoke, saved, choose, submit };
+  const welcome = async () =>
+    act(async () =>
+      container.querySelector<HTMLButtonElement>('[data-welcome]')!.click(),
+    );
+  return { container, root, complete, invoke, saved, choose, submit, welcome };
 }
 
 describe('First-run intelligence choice', () => {
@@ -76,12 +92,15 @@ describe('First-run intelligence choice', () => {
     const f = await renderSetup();
     await f.choose('chatgpt');
     expect(f.container.textContent).toContain(
-      'including for background People and Project updates',
+      'including for automatic People and Project updates',
     );
-    expect(f.container.textContent).toContain('Audio stays local');
+    expect(f.container.textContent).toContain('transcription stay on this Mac');
     expect(f.container.textContent).toContain('Continue with ChatGPT');
     await f.submit();
     expect(f.invoke).toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+    expect(f.saved.llm_provider).toBeUndefined();
+    expect(f.complete).not.toHaveBeenCalled();
+    await f.welcome();
     expect(f.saved).toMatchObject({
       llm_provider: 'chatgpt',
       cloud_consent_chatgpt: '1',
@@ -101,6 +120,7 @@ describe('First-run intelligence choice', () => {
     expect(f.container.textContent).toContain('Use ChatGPT');
     await f.submit();
     expect(f.invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+    await f.welcome();
     expect(f.complete).toHaveBeenCalledOnce();
     act(() => f.root.unmount());
   });
@@ -121,6 +141,56 @@ describe('First-run intelligence choice', () => {
     await f.choose('ollama');
     await f.submit();
     expect(f.saved.llm_provider).toBe('ollama');
+    act(() => f.root.unmount());
+  });
+
+  it('explains the browser step and ignores a late success after cancellation', async () => {
+    const f = await renderSetup();
+    let finishSignIn!: (status: unknown) => void;
+    const original = f.invoke.getMockImplementation()!;
+    f.invoke.mockImplementation(async (channel, input) => {
+      if (channel === 'CHATGPT_SIGN_IN')
+        return new Promise((resolve) => {
+          finishSignIn = resolve;
+        });
+      return original(channel, input);
+    });
+    await f.choose('chatgpt');
+    await f.submit();
+    expect(f.container.querySelector('[role="status"]')?.textContent).toContain(
+      'Finish signing in in your browser',
+    );
+    const cancel = [...f.container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Cancel sign-in',
+    )!;
+    await act(async () => cancel.click());
+    expect(f.invoke).toHaveBeenCalledWith('CHATGPT_CANCEL_SIGN_IN');
+    await act(async () => finishSignIn({ connected: true, planEnabled: true }));
+    expect(f.container.querySelector('[data-welcome]')).toBeNull();
+    expect(f.complete).not.toHaveBeenCalled();
+    await f.choose('ollama');
+    await f.submit();
+    expect(f.saved.llm_provider).toBe('ollama');
+    act(() => f.root.unmount());
+  });
+
+  it('does not activate ChatGPT when consent cannot be saved', async () => {
+    const f = await renderSetup({ chatgpt_model: 'account-model' }, true);
+    const original = f.invoke.getMockImplementation()!;
+    f.invoke.mockImplementation(async (channel, input) => {
+      if (channel === 'SET_SETTING' && input.key === 'cloud_consent_chatgpt')
+        throw new Error('Could not save consent');
+      return original(channel, input);
+    });
+    await f.choose('chatgpt');
+    await f.submit();
+    await f.welcome();
+    expect(f.saved.llm_provider).toBeUndefined();
+    expect(f.saved.intelligence_setup_complete).toBeUndefined();
+    expect(f.complete).not.toHaveBeenCalled();
+    expect(f.container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not save your choice',
+    );
     act(() => f.root.unmount());
   });
 

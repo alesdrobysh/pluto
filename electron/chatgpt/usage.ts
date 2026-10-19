@@ -6,12 +6,13 @@ import {
 } from '../llm/llmWorkClass';
 import { createSerializedTaskGate } from '../serializedTaskGate';
 import { ChatGPTError } from './auth';
-
-export interface ChatGPTUsagePolicy {
-  dailyRequests: number;
-  dailyTokens: number;
-  backgroundEnabled: boolean;
-}
+import {
+  CHATGPT_DEFAULT_USAGE_POLICY,
+  CHATGPT_MIN_REQUEST_TOKEN_RESERVATION,
+  type ChatGPTUsagePolicy,
+  chatGPTBackgroundBudget,
+} from './usagePolicy';
+export type { ChatGPTUsagePolicy } from './usagePolicy';
 type Counts = {
   requests: number;
   failed: number;
@@ -22,6 +23,7 @@ type Counts = {
 };
 type Day = Counts & {
   backgroundRequests: number;
+  backgroundTokens: number;
   duplicatesAvoided: number;
   tasks: Record<string, Counts>;
 };
@@ -46,11 +48,6 @@ export type ChatGPTCallbacks = {
   onStart?: () => void;
 };
 const KEY = 'chatgpt_usage_v1';
-const defaults: ChatGPTUsagePolicy = {
-  dailyRequests: 50,
-  dailyTokens: 200_000,
-  backgroundEnabled: false,
-};
 const counts = (): Counts => ({
   requests: 0,
   failed: 0,
@@ -62,6 +59,7 @@ const counts = (): Counts => ({
 const dayCounts = (): Day => ({
   ...counts(),
   backgroundRequests: 0,
+  backgroundTokens: 0,
   duplicatesAvoided: 0,
   tasks: {},
 });
@@ -109,7 +107,12 @@ export class ChatGPTUsage {
   private read(): State {
     const raw = this.storage.getSetting(KEY);
     if (raw == null || raw === '')
-      return { version: 1, policy: { ...defaults }, paused: false, days: {} };
+      return {
+        version: 1,
+        policy: { ...CHATGPT_DEFAULT_USAGE_POLICY },
+        paused: false,
+        days: {},
+      };
     try {
       const state = JSON.parse(String(raw)) as State;
       if (
@@ -131,6 +134,15 @@ export class ChatGPTUsage {
         for (const item of [day, ...Object.values(day.tasks)])
           for (const key of Object.keys(counts()) as Array<keyof Counts>)
             if (!number(item[key])) throw new Error();
+      }
+      // Old ledgers did not separate background tokens; never give them a fresh allowance.
+      for (const day of Object.values(state.days)) {
+        if (day.backgroundTokens === undefined)
+          day.backgroundTokens =
+            day.backgroundRequests > 0
+              ? day.inputTokens + day.outputTokens + day.estimatedTokens
+              : 0;
+        if (!number(day.backgroundTokens)) throw new Error();
       }
       return state;
     } catch {
@@ -178,7 +190,10 @@ export class ChatGPTUsage {
       return (
         this.requestsAvailable() &&
         summary.policy.backgroundEnabled &&
-        summary.backgroundRequests < 10
+        summary.backgroundRequests <
+          chatGPTBackgroundBudget(summary.policy).requests &&
+        summary.backgroundTokens + CHATGPT_MIN_REQUEST_TOKEN_RESERVATION <=
+          chatGPTBackgroundBudget(summary.policy).tokens
       );
     } catch {
       return false;
@@ -193,7 +208,7 @@ export class ChatGPTUsage {
         summary.inputTokens +
           summary.outputTokens +
           summary.estimatedTokens +
-          8192 <
+          CHATGPT_MIN_REQUEST_TOKEN_RESERVATION <=
           summary.policy.dailyTokens
       );
     } catch {
@@ -209,8 +224,6 @@ export class ChatGPTUsage {
     const day = state.days[key];
     if (background && !state.policy.backgroundEnabled)
       throw new ChatGPTError('chatgpt_background_paused');
-    if (background && day.backgroundRequests >= 10)
-      throw new ChatGPTError('chatgpt_background_limit');
     // SIWC cannot enforce max_output_tokens. Reserve a conservative allowance;
     // this is an admission estimate, never a claim about the upstream quota.
     const estimated =
@@ -219,7 +232,18 @@ export class ChatGPTUsage {
           messages: request.messages,
           schema: request.responseSchema,
         }).length / 3,
-      ) + Math.max(8192, request.maxOutputTokens ?? 0);
+      ) +
+      Math.max(
+        CHATGPT_MIN_REQUEST_TOKEN_RESERVATION,
+        request.maxOutputTokens ?? 0,
+      );
+    const backgroundBudget = chatGPTBackgroundBudget(state.policy);
+    if (
+      background &&
+      (day.backgroundRequests >= backgroundBudget.requests ||
+        day.backgroundTokens + estimated > backgroundBudget.tokens)
+    )
+      throw new ChatGPTError('chatgpt_background_limit');
     if (
       day.requests + (request.task === 'askPlutoScope' ? 2 : 1) >
         state.policy.dailyRequests ||
@@ -227,7 +251,9 @@ export class ChatGPTUsage {
         day.outputTokens +
         day.estimatedTokens +
         estimated +
-        (request.task === 'askPlutoScope' ? 8192 : 0) >
+        (request.task === 'askPlutoScope'
+          ? CHATGPT_MIN_REQUEST_TOKEN_RESERVATION
+          : 0) >
         state.policy.dailyTokens
     )
       throw new ChatGPTError('chatgpt_daily_limit');
@@ -239,7 +265,10 @@ export class ChatGPTUsage {
       item.unmeasuredRequests++;
       item.estimatedTokens += estimated;
     }
-    if (background) day.backgroundRequests++;
+    if (background) {
+      day.backgroundRequests++;
+      day.backgroundTokens += estimated;
+    }
     this.write(state); // Commit before egress, including when a previous process crashed.
     return (result?: InferenceResult) => {
       const latest = this.read();
@@ -257,6 +286,13 @@ export class ChatGPTUsage {
           item.outputTokens += result!.usage.outputTokens!;
         }
       }
+      if (
+        background &&
+        number(result?.usage.inputTokens) &&
+        number(result?.usage.outputTokens)
+      )
+        day.backgroundTokens +=
+          result!.usage.inputTokens! + result!.usage.outputTokens! - estimated;
       this.write(latest);
     };
   }

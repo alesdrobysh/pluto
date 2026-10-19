@@ -324,6 +324,9 @@ export const SettingsTab = ({
       setActiveSettingsTab(initialTab);
     }
   }, [initialTab]);
+  const providerSelection = useRef(0);
+  const [chatGPTSetupRequested, setChatGPTSetupRequested] = useState(false);
+  const displayedProvider = chatGPTSetupRequested ? 'chatgpt' : llmProvider;
   const [ollamaFastModel, setOllamaFastModel] = useState('');
   const [credentialDraft, setCredentialDraft] = useState('');
   const [credentialEditing, setCredentialEditing] = useState(false);
@@ -535,6 +538,11 @@ export const SettingsTab = ({
   };
 
   const requestProviderActivation = (provider: ProviderId) => {
+    ++providerSelection.current;
+    setChatGPTSetupRequested(
+      provider === 'chatgpt' && llmProvider !== 'chatgpt',
+    );
+    if (provider === 'chatgpt') return;
     if (provider === 'ollama') return activateProvider(provider);
     void window.ipcRenderer
       .invoke('GET_SETTING', cloudConsentSettingKey(provider))
@@ -1245,7 +1253,7 @@ export const SettingsTab = ({
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {providerOptions.map((provider) => {
-                  const active = llmProvider === provider.id;
+                  const active = displayedProvider === provider.id;
                   const Icon = provider.icon;
                   return (
                     <button
@@ -1271,7 +1279,7 @@ export const SettingsTab = ({
               </div>
             </SettingsRow>
 
-            {llmProvider === 'ollama' ? (
+            {displayedProvider === 'ollama' ? (
               <>
                 <SettingsRow
                   htmlFor="ollama-model"
@@ -1308,12 +1316,34 @@ export const SettingsTab = ({
                   />
                 </SettingsRow>
               </>
-            ) : llmProvider === 'chatgpt' ? (
+            ) : displayedProvider === 'chatgpt' ? (
               <div className="p-5">
                 <h4 className="mb-3 text-[14px] font-medium text-pro-text-main">
                   ChatGPT account
                 </h4>
-                <ChatGPTIntelligenceSettings />
+                <ChatGPTIntelligenceSettings
+                  activationPending={chatGPTSetupRequested}
+                  onConnected={async () => {
+                    const selection = providerSelection.current;
+                    await window.ipcRenderer.invoke('SET_SETTING', {
+                      key: 'cloud_consent_chatgpt',
+                      value: CLOUD_CONSENT_VERSION,
+                    });
+                    if (selection !== providerSelection.current) return;
+                    await window.ipcRenderer.invoke('SET_SETTING', {
+                      key: 'llm_provider',
+                      value: 'chatgpt',
+                    });
+                    if (selection !== providerSelection.current) return;
+                    await window.ipcRenderer.invoke('SET_SETTING', {
+                      key: 'intelligence_setup_complete',
+                      value: 'true',
+                    });
+                    if (selection !== providerSelection.current) return;
+                    setLlmProvider('chatgpt');
+                    setChatGPTSetupRequested(false);
+                  }}
+                />
               </div>
             ) : llmProvider === 'openrouter' ? (
               <>

@@ -4,6 +4,7 @@ import {
   getChatGPTUsage,
   initializeChatGPTAuth,
 } from '../../electron/chatgpt/runtime';
+import { createMemoryChatGPTUsage } from '../../electron/chatgpt/usage';
 import { resolveSemanticMeetingScope } from '../../electron/intelligence/askPlutoSemanticScope';
 import {
   getAllSettings,
@@ -28,7 +29,10 @@ function response(text: string) {
   );
 }
 
+let selection: Record<string, string>;
+
 beforeEach(() => {
+  selection = { llm_provider: 'chatgpt', cloud_consent_chatgpt: '1' };
   initializeChatGPTAuth(
     new ChatGPTAuth({
       load: () =>
@@ -45,6 +49,8 @@ beforeEach(() => {
       saveHostId: vi.fn(),
       openBrowser: vi.fn(),
     }),
+    createMemoryChatGPTUsage(),
+    (key) => selection[key],
   );
   getChatGPTUsage().setPolicy({
     dailyRequests: 50,
@@ -154,6 +160,31 @@ describe('ChatGPT intelligence routing', () => {
             ?.requests,
         ).toBe(1);
       }
+    },
+  );
+
+  it.each(['provider', 'consent'])(
+    'blocks a previously acquired ChatGPT provider after changing %s',
+    async (change) => {
+      const fetcher = vi.fn();
+      vi.stubGlobal('fetch', fetcher);
+      const provider = await getProvider({
+        llm_provider: 'chatgpt',
+        chatgpt_model: 'account-model',
+        cloud_consents: { chatgpt: '1' },
+      });
+      if (change === 'provider') selection.llm_provider = 'ollama';
+      else selection.cloud_consent_chatgpt = '';
+      await expect(
+        provider.answerAskPluto('Fictional question', { mode: 'fast' }),
+      ).rejects.toMatchObject({
+        code:
+          change === 'provider'
+            ? 'chatgpt_not_selected'
+            : 'chatgpt_cloud_consent_required',
+      });
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(getChatGPTUsage().summary().requests).toBe(0);
     },
   );
 

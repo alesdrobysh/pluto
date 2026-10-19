@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatGPTAuth } from '../../electron/chatgpt/auth';
 import {
+  cancelChatGPTInference,
   getChatGPTUsage,
   initializeChatGPTAuth,
 } from '../../electron/chatgpt/runtime';
+import { createMemoryChatGPTUsage } from '../../electron/chatgpt/usage';
 import type { InferenceRequest } from '../../electron/llm/inferenceTypes';
 import { executeChatGPT } from '../../electron/llm/transports/chatGPT';
 
@@ -38,6 +40,7 @@ const sse = (events: unknown[]) =>
     },
   );
 let auth: ChatGPTAuth;
+let settings: Map<string, string>;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -56,7 +59,13 @@ beforeEach(() => {
     saveHostId: vi.fn(),
     openBrowser: vi.fn(),
   });
-  initializeChatGPTAuth(auth);
+  settings = new Map([
+    ['llm_provider', 'chatgpt'],
+    ['cloud_consent_chatgpt', '1'],
+  ]);
+  initializeChatGPTAuth(auth, createMemoryChatGPTUsage(), (key) =>
+    settings.get(key),
+  );
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -196,6 +205,71 @@ describe('ChatGPT Responses transport', () => {
     });
     expect(String(error)).not.toContain('private diagnostic text');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['provider', 'consent'])(
+    'blocks stale provider work after changing %s without reserving usage',
+    async (setting) => {
+      if (setting === 'provider') settings.set('llm_provider', 'ollama');
+      else settings.set('cloud_consent_chatgpt', '');
+      await expect(executeChatGPT(request)).rejects.toMatchObject({
+        code:
+          setting === 'provider'
+            ? 'chatgpt_not_selected'
+            : 'chatgpt_cloud_consent_required',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(getChatGPTUsage().summary().requests).toBe(0);
+      expect(auth.status().planEnabled).toBe(true);
+    },
+  );
+
+  it('rechecks live consent after waiting for credentials and does not send meeting text', async () => {
+    vi.spyOn(auth, 'accessToken').mockImplementation(async () => {
+      settings.set('cloud_consent_chatgpt', '');
+      return 'test-access';
+    });
+    await expect(executeChatGPT(request)).rejects.toMatchObject({
+      code: 'chatgpt_cloud_consent_required',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels active and queued work when switching local, while retaining the connected account', async () => {
+    let started!: () => void;
+    const active = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          started();
+          init.signal.addEventListener(
+            'abort',
+            () => reject(init.signal.reason),
+            { once: true },
+          );
+        }),
+    );
+    const first = executeChatGPT(request).catch((error) => error);
+    await active;
+    const queued = executeChatGPT({
+      ...request,
+      model: 'different-model',
+    }).catch((error) => error);
+    settings.set('llm_provider', 'ollama');
+    cancelChatGPTInference();
+    expect((await first).name).toBe('AbortError');
+    expect((await queued).name).toBe('AbortError');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(getChatGPTUsage().summary().requests).toBe(1);
+    expect(auth.status().planEnabled).toBe(true);
+    settings.set('llm_provider', 'chatgpt');
+    fetchMock.mockResolvedValue(
+      sse([{ type: 'response.output_text.delta', delta: '{}' }, completed]),
+    );
+    expect((await executeChatGPT(request)).text).toBe('{}');
+    expect(getChatGPTUsage().summary().requests).toBe(2);
   });
 
   it('honors cancellation before sending meeting text', async () => {

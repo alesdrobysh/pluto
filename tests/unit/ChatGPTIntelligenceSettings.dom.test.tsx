@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
-import { act } from 'react';
+import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatGPTIntelligenceSettings } from '../../src/components/features/ChatGPTIntelligenceSettings';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -52,7 +54,13 @@ describe('ChatGPT intelligence settings', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    await act(async () => root.render(<ChatGPTIntelligenceSettings />));
+    await act(async () =>
+      root.render(
+        <StrictMode>
+          <ChatGPTIntelligenceSettings />
+        </StrictMode>,
+      ),
+    );
     expect(container.textContent).toContain(
       '4 requests · 5,000 reported tokens · 2 duplicate requests avoided',
     );
@@ -105,6 +113,24 @@ describe('ChatGPT intelligence settings', () => {
           { id: 'model-b', name: 'Model B' },
         ];
       if (channel === 'GET_SETTING') return 'model-a';
+      if (channel === 'CHATGPT_USAGE')
+        return {
+          requests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          estimatedTokens: 0,
+          unmeasuredRequests: 0,
+          duplicatesAvoided: 0,
+          backgroundRequests: 0,
+          backgroundTokens: 0,
+          tasks: {},
+          paused: false,
+          policy: {
+            dailyRequests: 50,
+            dailyTokens: 200000,
+            backgroundEnabled: true,
+          },
+        };
     });
     Object.defineProperty(window, 'ipcRenderer', {
       configurable: true,
@@ -113,7 +139,13 @@ describe('ChatGPT intelligence settings', () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    await act(async () => root.render(<ChatGPTIntelligenceSettings />));
+    await act(async () =>
+      root.render(
+        <StrictMode>
+          <ChatGPTIntelligenceSettings />
+        </StrictMode>,
+      ),
+    );
     const button = (text: string) =>
       [...container.querySelectorAll('button')].find(
         (element) => element.textContent === text,
@@ -143,9 +175,63 @@ describe('ChatGPT intelligence settings', () => {
     expect(container.textContent).toContain(
       'Remote revocation could not be confirmed',
     );
-    expect(container.textContent).toContain('No ChatGPT account connected');
+    expect(container.textContent).toContain('Let ChatGPT power Pluto');
     act(() => root.unmount());
   });
+
+  it.each(['browser', 'final status'])(
+    'does not activate ChatGPT after leaving settings while waiting for %s',
+    async (stage) => {
+      let connected = false;
+      let statusRequests = 0;
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const invoke = vi.fn(async (channel: string) => {
+        if (channel === 'CHATGPT_SIGN_IN') {
+          if (stage === 'browser') await pending;
+          connected = true;
+        }
+        if (channel === 'CHATGPT_STATUS') {
+          statusRequests++;
+          if (stage === 'final status' && statusRequests === 3) await pending;
+          return { connected, planEnabled: connected };
+        }
+        if (channel === 'CHATGPT_MODELS')
+          return [{ id: 'model-a', name: 'Model A' }];
+        if (channel === 'GET_SETTING') return 'model-a';
+      });
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: { invoke },
+      });
+      const onConnected = vi.fn(async () => {});
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () =>
+        root.render(
+          <ChatGPTIntelligenceSettings
+            activationPending
+            onConnected={onConnected}
+          />,
+        ),
+      );
+      await act(async () =>
+        [...container.querySelectorAll('button')]
+          .find((button) => button.textContent === 'Continue with ChatGPT')!
+          .click(),
+      );
+      if (stage === 'final status') expect(statusRequests).toBe(3);
+      act(() => root.unmount());
+      await act(async () => finish());
+      expect(onConnected).not.toHaveBeenCalled();
+      expect(
+        invoke.mock.calls.some(([channel]) => channel === 'SET_SETTING'),
+      ).toBe(false);
+    },
+  );
 
   it('offers cancellation while browser sign-in is pending', async () => {
     let rejectSignIn!: (error: Error) => void;
@@ -178,9 +264,10 @@ describe('ChatGPT intelligence settings', () => {
         .find((button) => button.textContent === 'Cancel sign-in')!
         .click(),
     );
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'cancelled',
+    expect(container.textContent).toContain(
+      'Sign-in cancelled. Your current provider is unchanged.',
     );
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     act(() => root.unmount());
   });
 });

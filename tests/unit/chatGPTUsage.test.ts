@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatGPTUsage } from '../../electron/chatgpt/usage';
+import { CHATGPT_DEFAULT_USAGE_POLICY } from '../../electron/chatgpt/usagePolicy';
 import { runAskPlutoWithDeadline } from '../../electron/intelligence/askPlutoDeadline';
 import type {
   InferenceRequest,
@@ -227,9 +228,15 @@ describe('ChatGPT usage protection', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it('defaults optional background work off, allows explicit reviews, and limits opted-in work to ten requests', async () => {
+  it('defaults bounded background work on, respects opting out, and limits it to ten requests', async () => {
     const { usage } = setup();
     const run = vi.fn(async () => result);
+    expect(usage.summary().policy).toEqual(CHATGPT_DEFAULT_USAGE_POLICY);
+    expect(usage.backgroundAvailable()).toBe(true);
+    usage.setPolicy({
+      ...CHATGPT_DEFAULT_USAGE_POLICY,
+      backgroundEnabled: false,
+    });
     await expect(
       usage.run({ ...request, task: 'knowledgeDoc' }, scope(), {}, run),
     ).rejects.toMatchObject({ code: 'chatgpt_background_paused' });
@@ -251,6 +258,122 @@ describe('ChatGPT usage protection', () => {
     ).rejects.toMatchObject({ code: 'chatgpt_background_limit' });
     expect(usage.summary().backgroundRequests).toBe(10);
     expect(usage.backgroundAvailable()).toBe(false);
+  });
+
+  it('keeps background request and token allowances inside the total budget and preserves interactive headroom', async () => {
+    const { usage, storage, clock } = setup();
+    const background = { ...request, task: 'dreaming' };
+    const expensive = vi.fn(async () => ({
+      ...result,
+      usage: { inputTokens: 30_000, outputTokens: 5000 },
+    }));
+    await usage.run(background, scope(), {}, expensive);
+    const reopened = new ChatGPTUsage(storage, clock);
+    expect(reopened.summary().backgroundTokens).toBe(35_000);
+    expect(reopened.backgroundAvailable()).toBe(false);
+    await expect(
+      reopened.run(background, scope(), {}, expensive),
+    ).rejects.toMatchObject({
+      code: 'chatgpt_background_limit',
+    });
+    const interactive = vi.fn(async () => result);
+    await reopened.run(
+      { ...request, task: 'askPluto' },
+      scope(),
+      {},
+      interactive,
+    );
+    expect(interactive).toHaveBeenCalledOnce();
+    expect(expensive).toHaveBeenCalledOnce();
+    usage.setPolicy({
+      dailyRequests: 5,
+      dailyTokens: 200_000,
+      backgroundEnabled: true,
+    });
+    await expect(
+      usage.run(background, scope(), {}, expensive),
+    ).rejects.toMatchObject({
+      code: 'chatgpt_background_limit',
+    });
+    expect(usage.requestsAvailable()).toBe(true);
+  });
+
+  it('records a background response above its estimate and stops further background work', async () => {
+    const { usage } = setup();
+    const background = { ...request, task: 'dreaming' };
+    const execute = vi.fn(async () => ({
+      ...result,
+      usage: { inputTokens: 25_000, outputTokens: 20_000 },
+    }));
+    await usage.run(background, scope(), {}, execute);
+    expect(usage.summary()).toMatchObject({
+      backgroundTokens: 45_000,
+      estimatedTokens: 0,
+    });
+    expect(usage.backgroundAvailable()).toBe(false);
+    await expect(
+      usage.run(background, scope(), {}, execute),
+    ).rejects.toMatchObject({ code: 'chatgpt_background_limit' });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(usage.requestsAvailable()).toBe(true);
+  });
+
+  it('retains failed background reservations after restarting and reuses exact duplicates without spending either allowance', async () => {
+    const { usage, storage, clock } = setup();
+    const account = scope();
+    const background = { ...request, task: 'dreaming' };
+    const execute = vi.fn(async () => result);
+    await usage.run(background, account, {}, execute);
+    await usage.run(background, account, {}, execute);
+    expect(usage.summary()).toMatchObject({
+      backgroundRequests: 1,
+      backgroundTokens: 120,
+      duplicatesAvoided: 1,
+    });
+    await expect(
+      usage.run(background, scope(), {}, async () => {
+        throw new Error('network');
+      }),
+    ).rejects.toThrow('network');
+    const reopened = new ChatGPTUsage(storage, clock);
+    expect(reopened.summary().backgroundTokens).toBeGreaterThan(8192);
+    expect(reopened.summary()).toMatchObject({
+      backgroundRequests: 2,
+      failed: 1,
+      unmeasuredRequests: 1,
+    });
+  });
+
+  it('preserves existing policies and conservatively carries old background usage forward without resetting pauses', async () => {
+    const { usage, storage, settings, clock } = setup();
+    usage.setPolicy({
+      dailyRequests: 17,
+      dailyTokens: 100_000,
+      backgroundEnabled: false,
+    });
+    await usage.run(request, scope(), {}, async () => result);
+    usage.pause(true);
+    const persisted = JSON.parse(settings.get('chatgpt_usage_v1')!);
+    const day = Object.values(persisted.days)[0] as Record<
+      string,
+      number | undefined
+    >;
+    day.backgroundRequests = 1;
+    day.backgroundTokens = undefined;
+    settings.set('chatgpt_usage_v1', JSON.stringify(persisted));
+    const reopened = new ChatGPTUsage(storage, clock);
+    expect(reopened.summary()).toMatchObject({
+      policy: {
+        dailyRequests: 17,
+        dailyTokens: 100_000,
+        backgroundEnabled: false,
+      },
+      paused: true,
+      backgroundTokens: 120,
+      requests: 1,
+    });
+    expect(reopened.backgroundAvailable()).toBe(false);
+    expect(reopened.requestsAvailable()).toBe(false);
   });
 
   it('persists upstream pauses, fails closed on a damaged ledger, and rejects invalid policies', async () => {

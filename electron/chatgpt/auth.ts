@@ -63,6 +63,10 @@ export const chatGPTErrorMessage = (error: unknown): string => {
       return 'ChatGPT sign-in was cancelled.';
     case 'chatgpt_sign_in_timeout':
       return 'ChatGPT sign-in timed out. Try again.';
+    case 'chatgpt_not_selected':
+      return 'ChatGPT requests stopped because another intelligence provider is selected.';
+    case 'chatgpt_cloud_consent_required':
+      return 'ChatGPT requests stopped because text sharing is not enabled. Review Settings → Intelligence.';
     case 'chatgpt_sign_in_required':
       return 'Connect your ChatGPT account in Settings → Intelligence.';
     case 'chatgpt_plan_permission_required':
@@ -231,7 +235,17 @@ export class ChatGPTAuth {
         return;
       }
       accepted = true;
-      res.end('Return to Pluto to finish connecting ChatGPT.');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+      );
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      const cancelled = url.searchParams.has('error');
+      res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Return to Pluto</title>
+        <style>:root{color-scheme:light dark}body{margin:0;background:light-dark(#f9fbfc,#191919);color:light-dark(#202c3c,#eee);font:16px/1.6 system-ui,sans-serif}main{max-width:30rem;margin:18vh auto;padding:2rem}h1{font:500 2rem/1.2 Georgia,serif}p{color:light-dark(#586475,#bbb)}</style>
+        <main><h1>${cancelled ? 'Sign-in wasn’t completed' : 'Continue in Pluto'}</h1><p>${cancelled ? 'Return to Pluto to try again or keep using your current setup.' : 'Return to Pluto to finish connecting ChatGPT. Pluto will confirm when your account is ready.'}</p><p>You can close this tab.</p></main></html>`);
+
       resolveCallback(url);
     });
     const onAbort = () => rejectCallback(attemptSignal.reason);
