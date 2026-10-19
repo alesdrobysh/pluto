@@ -56,6 +56,26 @@ const response = (values: Record<string, unknown> = {}) =>
   JSON.stringify({ resolutions: [resolution(values)] });
 
 describe('bounded source-bound semantic notes review', () => {
+  it('keeps a complete literal policy instead of broadening its privacy restriction', async () => {
+    const policy =
+      'Only aggregate counts may be published to protect participants.';
+    const { notes } = fixture(policy, policy);
+    notes.draft.sections[0]!.items[0] = {
+      ...notes.draft.sections[0]!.items[0]!,
+      kind: 'decision',
+      text: policy,
+      owner: null,
+      due: null,
+    };
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({
+        kind: 'decision',
+        text: 'Only aggregate results may be published to protect participants.',
+        owner: null,
+      }),
+    );
+    expect(projectAuditedNotes(reviewed).all_decisions[0]!.text).toBe(policy);
+  });
   it.each(['neutral', 'still-gendered', 'unavailable'])(
     'keeps unsupported personal references out of discussion: %s',
     async (mode) => {
