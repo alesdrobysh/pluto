@@ -68,6 +68,7 @@ suite(
             ollama_structured_thinking: false,
           });
           const transport = provider as unknown as {
+            generateText: (request: Record<string, unknown>) => Promise<string>;
             generateResumableAnalysisText: (
               request: Record<string, unknown>,
             ) => Promise<string>;
@@ -91,6 +92,23 @@ suite(
           let analysis: AnalysisDocumentV3 | undefined;
           let counts: Record<string, number> | undefined;
           let phase = 'generation';
+          if (productionPath) {
+            const generateText = transport.generateText.bind(provider);
+            transport.generateText = async (request) => {
+              const raw = await generateText(request);
+              console.log(
+                JSON.stringify({
+                  localGuardrailsAcceptance: {
+                    event: 'raw_attempt',
+                    ...config,
+                    task: request.task,
+                    raw,
+                  },
+                }),
+              );
+              return raw;
+            };
+          }
           console.log(
             JSON.stringify({
               localGuardrailsAcceptance: {

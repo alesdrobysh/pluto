@@ -4,6 +4,14 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-19 - Hold disputed commitments for bounded source review
+
+- **Status:** Accepted
+- **Supersedes:** “2026-09-15 - Recover deterministically from notes guardrail omissions without aborting publication” only for disputed actions when an existing source-review callback is available.
+- **Decision:** Keep an action rejected for a missing condition or cancellation conflict outside active commitments, retaining its exact source discussion and original claim for the existing bounded semantic review. A repaired action must pass the same condition and cancellation checks before promotion. Recompute guardrail diagnostics after review.
+- **Consequences:** Failed, unavailable or still-unsafe review leaves the source discussion intact without publishing the disputed commitment. Paths without source review retain the earlier filtering behavior. No new model request, larger context, or longer deadline is introduced.
+- **PR:** [#881](https://github.com/metagrover/pluto/pull/881)
+
 ## 2026-10-12 - Acknowledge audio release independently of recording finalization
 
 - **Status:** Accepted

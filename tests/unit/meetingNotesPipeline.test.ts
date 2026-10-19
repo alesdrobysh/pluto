@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest';
+import type { AuditedNotes } from '../../electron/llm/meetingNotesAudit';
 import { estimateNotesTokens } from '../../electron/llm/meetingNotesBudget';
 import { buildNotesEditorPrompt } from '../../electron/llm/meetingNotesEditor';
 import * as hierarchy from '../../electron/llm/meetingNotesHierarchy';
@@ -7,6 +8,7 @@ import {
   generateMeetingNotes,
 } from '../../electron/llm/meetingNotesPipeline';
 import { buildCompactNotesWriterPrompt } from '../../electron/llm/meetingNotesPrompts';
+import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
 import {
   MeetingNotesError,
   NOTES_PROMPT_VERSION,
@@ -35,6 +37,86 @@ const sourceDescriptors = (prompt: string): PromptDescriptor[] => {
     .filter(Boolean)
     .map((line) => JSON.parse(line) as PromptDescriptor);
 };
+
+it.each(['repair', 'missing-condition', 'cancelled', 'unavailable'])(
+  'holds an unsafe action for source review: %s',
+  async (mode) => {
+    const source = makeSyntheticNotesSource([
+      {
+        speaker: 'Milo',
+        text: 'If legal approves, I will publish the plan by Friday.',
+      },
+      ...(mode === 'cancelled'
+        ? [
+            {
+              speaker: 'Milo',
+              text: 'Actually, cancel the plan to publish the plan.',
+            },
+          ]
+        : []),
+    ]);
+    const sources = [
+      { segment: 0, start: 0, end: source.segments[0]!.text.length },
+    ];
+    const review = vi.fn(async (notes: AuditedNotes) => {
+      expect(notes.draft.sections[0].items[0].kind).toBe('point');
+      return reviewSourceBoundNotes(notes, async () => {
+        if (mode === 'unavailable') throw new Error('provider_unavailable');
+        return JSON.stringify({
+          resolutions: [
+            {
+              id: notes.draft.sections[0].items[0].id,
+              kind: 'accepted_action',
+              text:
+                mode === 'missing-condition'
+                  ? 'Publish the plan by Friday'
+                  : 'Publish the plan by Friday if legal approves',
+              owner: 'Milo',
+              due: 'Friday',
+              discussion: null,
+            },
+          ],
+        });
+      });
+    });
+    const result = await generateMeetingNotes({
+      source,
+      context: makeNotesContext(),
+      provider: 'ollama',
+      model: 'gemma4:12b',
+      contextTokens: 16384,
+      compactWriterContract: true,
+      hierarchyAuditStrategy: 'deterministic_only',
+      reviewSourceBoundNotes: review,
+      generate: async () =>
+        JSON.stringify({
+          title: null,
+          sections: [
+            {
+              title: 'Publication',
+              items: [
+                {
+                  kind: 'action',
+                  text: 'Publish the plan by Friday',
+                  owner: 'Milo',
+                  due: 'Friday',
+                  sources,
+                },
+              ],
+            },
+          ],
+        }),
+    });
+    expect(review).toHaveBeenCalledOnce();
+    expect(result.all_action_items).toHaveLength(mode === 'repair' ? 1 : 0);
+    if (mode === 'repair') {
+      expect(result.all_action_items[0]!.text).toContain('if legal approves');
+      expect(result.quality.issues).not.toContain(
+        'notes_guardrail:missing_condition',
+      );
+    } else expect(JSON.stringify(result.topics)).toContain('legal approves');
+  },
+);
 
 const spanFor = (prompt: string, marker: string) => {
   const descriptor = sourceDescriptors(prompt).find((entry) =>

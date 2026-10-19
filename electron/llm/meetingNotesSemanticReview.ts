@@ -7,6 +7,7 @@ import {
   completeCitedSourceWindow,
   groupCitedSourcePassages,
 } from './meetingNotesSource';
+import { findNotesGuardrailIssues } from './meetingNotesGuardrails';
 
 /** Review meaning from exact passages; structural checks cannot infer acceptance or scope. */
 export const reviewSourceBoundNotes = async (
@@ -261,6 +262,21 @@ export const reviewSourceBoundNotes = async (
         discussion: result.discussion,
       };
       if (
+        replacement.kind === 'action' &&
+        findNotesGuardrailIssues(
+          notes.source,
+          {
+            ...notes.draft,
+            sections: [{ ...notes.draft.sections[0]!, items: [replacement] }],
+          },
+          replacement.sources,
+          ['missing_condition', 'conflicting_action'],
+        ).length
+      ) {
+        held.push(result.id);
+        continue;
+      }
+      if (
         JSON.stringify(replacement.sources) === JSON.stringify(item.sources) &&
         replacement.kind === item.kind &&
         replacement.text === item.text &&
@@ -272,6 +288,18 @@ export const reviewSourceBoundNotes = async (
       replacements.push(replacement);
     }
     const reviewed = applySourceBoundSemanticReview(notes, replacements);
+    if (
+      reviewed.issues?.some((issue) => issue.startsWith('notes_guardrail:'))
+    ) {
+      reviewed.issues = [
+        ...reviewed.issues.filter(
+          (issue) => !issue.startsWith('notes_guardrail:'),
+        ),
+        ...findNotesGuardrailIssues(notes.source, reviewed.draft).map(
+          (issue) => `notes_guardrail:${issue.code}`,
+        ),
+      ];
+    }
     if (held.length)
       reviewed.issues = [
         ...new Set([
