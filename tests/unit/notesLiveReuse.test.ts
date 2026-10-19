@@ -27,9 +27,9 @@ describe('saved live source cache probe', () => {
     const fetch = vi
       .spyOn(globalThis, 'fetch')
       .mockRejectedValue(new Error('network_forbidden'));
-    const rows = Array.from({ length: 443 }, (_, i) => ({
+    const rows = Array.from({ length: 96 }, (_, i) => ({
       speaker: i % 2 ? 'Milo' : 'Nira',
-      text: `Detailed meeting context ${i}. Follow-up context.`,
+      text: `Detailed meeting context ${i}. Follow-up context. `.repeat(5),
     }));
     try {
       const source = createNotesSource(JSON.stringify(rows));

@@ -10,7 +10,9 @@ import levenshtein from 'fast-levenshtein';
 import {
   type ActionCommitmentMetadata,
   canonicalizeActionText,
+  parseActionMetadata,
 } from '../src/utils/actionCommitment';
+import { parseUserEditsJson } from '../src/utils/analysisDocument';
 import {
   isUsablePersonName,
   isUsablePersonRole,
@@ -35,6 +37,40 @@ export interface ProcessedEntities {
   updated: number;
   linked: number;
   entities: db.Entity[];
+}
+
+/** Legacy extraction handlers must not invent a second set of meeting tasks. */
+export function requireSavedMeetingActions(
+  meeting: db.PersistedMeeting | undefined,
+): ExtractedEntities['action_items'] {
+  const analysis = parseActionMetadata(meeting?.analysis_json ?? null);
+  if (
+    !meeting ||
+    (meeting.analysis_format_pass != null && !meeting.analysis_format_pass) ||
+    !Array.isArray(analysis.all_action_items)
+  ) {
+    throw new Error('meeting_action_classification_unavailable');
+  }
+  const edits = parseUserEditsJson(meeting.user_edits_json);
+  return analysis.all_action_items.flatMap((action, index) => {
+    const edit =
+      edits[`all_action_items:${index}`] ?? edits[`v2:action:${index}`];
+    if (edit && typeof edit.edited === 'string' && !edit.edited.trim())
+      return [];
+    const text = edit?.edited ?? action?.text;
+    return typeof text === 'string' && text.trim()
+      ? [
+          {
+            description: text,
+            assignee:
+              typeof action.assignee === 'string' ? action.assignee : undefined,
+            due_date: typeof action.due === 'string' ? action.due : undefined,
+            evidence:
+              typeof action.evidence === 'string' ? action.evidence : undefined,
+          },
+        ]
+      : [];
+  });
 }
 
 const clamp = (value: number, min: number, max: number): number => {
@@ -319,6 +355,7 @@ function persistExtractedEntities(
     canCommit?: () => boolean;
     actionIds?: Map<number, string>;
     actionMatches?: Map<string, string>;
+    existingActions?: db.Entity[];
   } = {},
 ): ProcessedEntities {
   const ensureCurrent = () => {
@@ -330,7 +367,7 @@ function persistExtractedEntities(
   let created = 0;
   let updated = 0;
   let linked = 0;
-  const entities: db.Entity[] = [];
+  const entities: db.Entity[] = [...(options.existingActions ?? [])];
 
   console.log(`[EntityPipeline] Processing entities for meeting ${meetingId}`);
   console.log(
@@ -866,6 +903,7 @@ export async function processExtractedEntities(
   context?: EntityExtractionContext,
   transcriptForGrounding?: string,
   options: {
+    preserveMeetingActions?: boolean;
     canCommit?: () => boolean;
     signal?: AbortSignal;
   } = {},
@@ -876,6 +914,24 @@ export async function processExtractedEntities(
       throw new Error('entity_extraction_superseded');
   };
   ensureCurrent();
+  if (options.preserveMeetingActions) {
+    return db.withCommitmentTransaction(() => {
+      ensureCurrent();
+      syncMeetingActionEntitiesFromUserEdits(db.db, meetingId);
+      return persistExtractedEntities(
+        { ...extracted, action_items: [] },
+        meetingId,
+        context,
+        transcriptForGrounding,
+        {
+          ...options,
+          existingActions: db
+            .getMeetingEntities(meetingId)
+            .filter((entity) => entity.type === 'action_item'),
+        },
+      );
+    });
+  }
   const publicationId = randomUUID();
   const actionIds = new Map<number, string>();
   const hasActions = extracted.action_items.some((item) =>
@@ -940,7 +996,11 @@ export async function extractAndProcessEntities(
   transcript: string,
   meetingId: string,
   context?: EntityExtractionContext,
-  options: { canCommit?: () => boolean; signal?: AbortSignal } = {},
+  options: {
+    preserveMeetingActions?: boolean;
+    canCommit?: () => boolean;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<ProcessedEntities> {
   console.log(`[EntityPipeline] Starting extraction for meeting ${meetingId}`);
 

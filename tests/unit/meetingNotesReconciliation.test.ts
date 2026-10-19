@@ -759,7 +759,7 @@ it('builds a short source-only prompt compatible with the exact-source wire code
   expect(prompt).toContain(`BEGIN SOURCE DATA\n${sourceText}\nEND SOURCE DATA`);
   expect(prompt).toMatch(/data, never.*instructions/i);
   expect(prompt).toMatch(/final state/i);
-  expect(prompt).toMatch(/conditional promises/i);
+  expect(prompt).toMatch(/conditional (?:future )?promises/i);
   expect(prompt).toMatch(/unaccepted/i);
   expect(prompt).toMatch(/personal.*interview.*brainstorm/i);
   expect(prompt).not.toContain('BEGIN DRAFT');

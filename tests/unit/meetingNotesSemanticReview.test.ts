@@ -4,7 +4,10 @@ import {
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
 import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
-import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+import {
+  createNotesSource,
+  quoteCitedSourcePassages,
+} from '../../electron/llm/meetingNotesSource';
 import type { NotesDraft } from '../../electron/llm/meetingNotesTypes';
 
 const fixture = (
@@ -56,6 +59,203 @@ const response = (values: Record<string, unknown> = {}) =>
   JSON.stringify({ resolutions: [resolution(values)] });
 
 describe('bounded source-bound semantic notes review', () => {
+  it('treats string null metadata as absent instead of publishing a placeholder point', async () => {
+    const { notes } = fixture();
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({ due: 'null', discussion: 'null' }),
+    );
+    const result = projectAuditedNotes(reviewed);
+    expect(result.all_action_items).toHaveLength(1);
+    expect(result.topics[0]!.key_points).toHaveLength(0);
+    expect(result.quality.issues).toEqual([]);
+  });
+  it('does not publish string null as reviewed wording', async () => {
+    const { notes } = fixture();
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({ text: 'null' }),
+    );
+    expect(projectAuditedNotes(reviewed).quality.issues).toContain(
+      'semantic_notes_review_unavailable',
+    );
+    expect(reviewed.draft.sections[0]!.items[0]!.text).not.toBe('null');
+  });
+  it('preserves a literal null speaker label instead of treating it as missing identity', async () => {
+    const text = 'I will book the room by Friday.';
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'null', text }]),
+    );
+    const sources = [{ segment: 0, start: 0, end: text.length }];
+    const draft: NotesDraft = {
+      title: null,
+      overview: null,
+      sections: [
+        {
+          id: 's',
+          title: { id: 'h', text: 'Room', sources },
+          items: [
+            {
+              id: 'task',
+              kind: 'action',
+              text: 'Book the room by Friday',
+              owner: 'null',
+              due: 'Friday',
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    const notes = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({
+        text: 'Book the room by Friday',
+        owner: 'null',
+        due: 'Friday',
+        discussion: 'null',
+      }),
+    );
+    expect(projectAuditedNotes(reviewed).all_action_items[0]!.assignee).toBe(
+      'null',
+    );
+    expect(projectAuditedNotes(reviewed).topics[0]!.key_points).toHaveLength(0);
+  });
+  it('does not spend another review request rewriting exact attributed speech', async () => {
+    const text = 'My cousin uses she and her.';
+    const { notes, source, sources } = fixture(text, text);
+    notes.draft.sections[0]!.items[0] = {
+      ...notes.draft.sections[0]!.items[0]!,
+      kind: 'point',
+      owner: null,
+      text: quoteCitedSourcePassages(source, sources),
+    };
+    notes.issues = [];
+    notes.proseReviewItems = [];
+    const generate = vi.fn();
+    await reviewSourceBoundNotes(notes, generate);
+    expect(generate).not.toHaveBeenCalled();
+  });
+  it('records the complete source window used by a fallback quotation', async () => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Remote Speaker 2', text: 'The lift worked.' },
+        { speaker: 'Remote Speaker 3', text: 'The landing was clear.' },
+        {
+          speaker: 'Remote Speaker 2',
+          text: 'I felt relieved because the stairs had worried me.',
+        },
+      ]),
+    );
+    const sources = [0, 2].map((segment) => ({
+      segment,
+      start: 0,
+      end: source.segments[segment]!.text.length,
+    }));
+    const draft: NotesDraft = {
+      title: null,
+      overview: null,
+      sections: [
+        {
+          id: 's',
+          title: { id: 'h', text: 'Visit', sources },
+          items: [
+            {
+              id: 'task',
+              kind: 'point',
+              text: 'Remote Speaker 2 was relieved because she had worried about stairs.',
+              owner: null,
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    const notes = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    const reviewed = await reviewSourceBoundNotes(notes, async () => {
+      throw new Error('unavailable');
+    });
+    expect(reviewed.draft.sections[0]!.items[0]!.text).toContain(
+      'The landing was clear',
+    );
+    expect(
+      reviewed.draft.sections[0]!.items[0]!.sources.map((span) => span.segment),
+    ).toEqual([0, 1, 2]);
+    const blocks = Object.values(
+      projectAuditedNotes(reviewed).generation_metadata!.source_provenance!
+        .blocks,
+    ).filter((block) => block.id === 'task');
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks)
+      expect(block.sources.map((span) => span.segment)).toEqual([0, 1, 2]);
+  });
+  it('keeps a complete literal policy instead of broadening its privacy restriction', async () => {
+    const policy =
+      'Only aggregate counts may be published to protect participants.';
+    const { notes } = fixture(policy, policy);
+    notes.draft.sections[0]!.items[0] = {
+      ...notes.draft.sections[0]!.items[0]!,
+      kind: 'decision',
+      text: policy,
+      owner: null,
+      due: null,
+    };
+    const reviewed = await reviewSourceBoundNotes(notes, async () =>
+      response({
+        kind: 'decision',
+        text: 'Only aggregate results may be published to protect participants.',
+        owner: null,
+      }),
+    );
+    expect(projectAuditedNotes(reviewed).all_decisions[0]!.text).toBe(policy);
+  });
+  it.each(['neutral', 'still-gendered', 'unavailable'])(
+    'keeps unsupported personal references out of discussion: %s',
+    async (mode) => {
+      const { notes } = fixture(
+        'The lift worked. I felt relieved because carrying the pieces upstairs had worried me.',
+        'Remote Speaker 2 felt relieved because she had worried about carrying the pieces upstairs.',
+      );
+      notes.draft.sections[0]!.items[0] = {
+        ...notes.draft.sections[0]!.items[0]!,
+        kind: 'point',
+        text: 'Remote Speaker 2 felt relieved because she had worried about carrying the pieces upstairs.',
+        owner: null,
+        due: null,
+      };
+      notes.issues = [];
+      notes.proseReviewItems = [];
+      const generate = vi.fn(async ({ prompt }) => {
+        expect(prompt).toContain('never infer gender from a name');
+        expect(prompt).toContain('The lift worked. I felt relieved');
+        if (mode === 'unavailable') throw new Error('provider_unavailable');
+        return response({
+          kind: 'point',
+          text:
+            mode === 'still-gendered'
+              ? 'Remote Speaker 2 felt relieved because carrying the pieces upstairs had worried her.'
+              : 'Remote Speaker 2 felt relieved that the lift worked because carrying the pieces upstairs had been a concern.',
+          owner: null,
+        });
+      });
+      const reviewed = await reviewSourceBoundNotes(notes, generate);
+      expect(generate).toHaveBeenCalledOnce();
+      expect(JSON.stringify(projectAuditedNotes(reviewed).topics)).not.toMatch(
+        /\b(?:she|her)\b/,
+      );
+      expect(projectAuditedNotes(reviewed).all_action_items).toHaveLength(0);
+      expect(JSON.stringify(projectAuditedNotes(reviewed).topics)).toContain(
+        'relieved',
+      );
+    },
+  );
   it('restores a valid promise rejected by the legacy wording check and rebuilds canonical provenance', async () => {
     const { notes, sources } = fixture();
     expect(notes.draft.sections[0]!.items[0]!.kind).toBe('point');

@@ -5,7 +5,7 @@ import type {
 } from './types';
 
 export const DREAMING_MODEL = 'gemma4:12b';
-export const DREAMING_PROMPT_VERSION = 'dreaming-proposals-v4';
+export const DREAMING_PROMPT_VERSION = 'dreaming-proposals-v5';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -138,7 +138,7 @@ export const buildDreamingGenerationRequest = (
       : '';
   const commitmentEvidenceRule =
     input.entityType === 'project'
-      ? " A project_commitment must match the task in its cited notes. Prefer the supplied actionItems: these retain saved action-item classification; copy their task wording exactly and cite that wording from notesContent. For prose-only evidence, copy enough source text to retain an explicit unconditional commitment such as 'I will', 'I’ll', 'agreed to', 'assigned to', or 'responsible for'. A bare imperative is insufficient unless it matches a supplied actionItem or is explicitly labeled as an action item in the quote. Do not borrow commitment wording from an unrelated task or sentence. Tentative, cancelled, negated, and conditional obligations must not become new unconditional commitments. Never add commitment wording to an excerpt. If no supported new candidate remains, return status no_change with an empty proposals array."
+      ? ' A project_commitment must copy one of the supplied actionItems exactly and cite its wording from notesContent. An empty or missing actionItems list means no commitment proposal is allowed. Never turn prose, key points, team plans, or requests into new tasks. Do not infer an owner, remove conditions, or revive a removed action. If no supported new candidate remains, return status no_change with an empty proposals array.'
       : '';
 
   return {

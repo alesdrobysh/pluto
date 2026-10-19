@@ -4,6 +4,14 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-19 - Hold disputed commitments for bounded source review
+
+- **Status:** Accepted
+- **Supersedes:** “2026-09-15 - Recover deterministically from notes guardrail omissions without aborting publication” only for disputed actions when an existing source-review callback is available.
+- **Decision:** Keep an action rejected for a missing condition or cancellation conflict outside active commitments, retaining its exact source discussion and original claim for the existing bounded semantic review. A repaired action must pass the same condition and cancellation checks before promotion. If the existing cancellation check identifies omitted withdrawal context, preserve the exact attributed passages as discussion, without reactivating the task. Conditional discussion also retains exact cited speech, preserving failure criteria and pending status without inferring a task or choice. Completed facts and status confirmations remain points. Recompute guardrail diagnostics after review.
+- **Consequences:** Failed, unavailable or still-unsafe review leaves the source discussion intact without publishing the disputed commitment. Paths without source review retain the earlier filtering behavior. The same bounded review also checks gendered prose against its own source; a prose-only document can therefore require review. Personal pronouns absent from the cited speech fall back to an attributed source quotation when review fails or repeats the unsupported wording. This checks word support without assigning identity. When a decision copies its complete cited speech and remains a decision after review, preserve its literal wording so a paraphrase cannot broaden a restriction. Normalize absent nullable metadata without publishing placeholder prose, while preserving literal source-backed speaker labels. Project exact duplicate generated commitments only once within the same section; distinct owner, date, source spans or section remain separate. Context, request limits and deadlines remain unchanged.
+- **PR:** [#881](https://github.com/metagrover/pluto/pull/881)
+
 ## 2026-10-12 - Acknowledge audio release independently of recording finalization
 
 - **Status:** Accepted

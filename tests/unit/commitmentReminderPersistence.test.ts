@@ -33,7 +33,10 @@ beforeEach(() => {
         )
         .get(id),
     resolvePersonIdentityId: (id) => id,
-    identityStore: { getSelfPersonId: () => 'self-person' },
+    identityStore: {
+      getSelfPersonId: () => 'self-person',
+      getProfile: () => ({ preferredName: 'Alex', aliases: ['Alex Morgan'] }),
+    },
   } as unknown as Parameters<typeof createReminderPersistence>[0];
 });
 afterEach(() => sql.close());
@@ -54,6 +57,29 @@ function insert(id = 'action-1', extra: Record<string, unknown> = {}) {
   );
 }
 describe('reminder persistence integration', () => {
+  it('recognizes self aliases from structured assignee metadata', () => {
+    insert('alias-owner', { assignee_name: 'Alex Morgan' });
+    const persistence = createReminderPersistence(api, () => 'UTC');
+    expect(persistence.getCandidate('alias-owner')?.id).toBe('alias-owner');
+  });
+  it('excludes canonical other owners even when review state or assignee text says mine', () => {
+    insert('other', { assignee_name: 'Me' });
+    sql
+      .prepare(
+        "UPDATE entities SET assigned_to = 'other-person' WHERE id = 'other'",
+      )
+      .run();
+    const persistence = createReminderPersistence(api, () => 'UTC');
+    expect(persistence.getCandidate('other')).toBeUndefined();
+    sql
+      .prepare(
+        "UPDATE entities SET assigned_to = 'self-alias' WHERE id = 'other'",
+      )
+      .run();
+    api.resolvePersonIdentityId = (id) =>
+      id === 'self-alias' ? 'self-person' : id;
+    expect(persistence.getCandidate('other')?.id).toBe('other');
+  });
   it('reuses suppression only while the authoritative mutation revision matches', async () => {
     insert();
     const persistence = createReminderPersistence(api, () => 'UTC');
@@ -128,10 +154,8 @@ describe('reminder persistence integration', () => {
     sql
       .prepare("UPDATE entities SET status = 'completed' WHERE id = 'action-1'")
       .run();
-    const completed = (await persistence.listCandidates(now))[0];
-    expect(
-      evaluateCommitmentReminder(completed, { now, timeZone: 'UTC' }).eligible,
-    ).toBe(false);
+    expect(await persistence.listCandidates(now)).toHaveLength(0);
+    expect(persistence.getCandidate('action-1')).toBeUndefined();
     sql
       .prepare(
         "UPDATE entities SET status = 'active', due_date = NULL WHERE id = 'action-1'",
@@ -174,7 +198,7 @@ describe('reminder persistence integration', () => {
       false,
     );
   });
-  it('uses only explicitly verified non-self owners for follow-up wording', () => {
+  it('excludes other owners even when their commitment was explicitly confirmed', () => {
     insert('action-1', { owner_source: 'user' });
     sql
       .prepare('INSERT INTO entities VALUES (?,?,?,?,?,?,?)')
@@ -185,9 +209,7 @@ describe('reminder persistence integration', () => {
       )
       .run();
     const persistence = createReminderPersistence(api, () => 'UTC');
-    expect(persistence.getCandidate('action-1')?.verifiedOtherOwnerName).toBe(
-      'Alex',
-    );
+    expect(persistence.getCandidate('action-1')).toBeUndefined();
     sql
       .prepare(
         "UPDATE entities SET assigned_to = 'self-person' WHERE id = 'action-1'",

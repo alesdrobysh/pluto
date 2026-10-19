@@ -77,20 +77,33 @@ const noteContent = (source: DreamingEntityNoteSource): string => {
 const savedActionItems = (
   source: DreamingEntityNoteSource,
   notes: string,
-): string[] => {
+): string[] | undefined => {
   if (
     !source.action_items_json ||
     source.action_items_json.length > MAX_NOTE_PROCESSING_CHARACTERS
   )
-    return [];
+    return undefined;
   try {
     const parsed: unknown = JSON.parse(source.action_items_json);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) return undefined;
     const normalizedNotes = normalizeEvidenceText(notes);
+    const edits = source.user_edits_json
+      ? JSON.parse(source.user_edits_json)
+      : {};
     return [
       ...new Set(
-        parsed.flatMap((item) => {
-          const text = item && typeof item === 'object' ? item.text : null;
+        parsed.flatMap((item, index) => {
+          const edit =
+            edits[`all_action_items:${index}`] ?? edits[`v2:action:${index}`];
+          const completion =
+            edits[`completion:all_action_items:${index}`] ??
+            edits[`completion:v2:action:${index}`];
+          if (completion?.edited === 'true') return [];
+          const text = edit
+            ? edit.edited
+            : item && typeof item === 'object'
+              ? item.text
+              : null;
           return typeof text === 'string' &&
             text.trim() &&
             text.length <= MAX_BASELINE_TEXT_CHARACTERS &&
@@ -101,7 +114,7 @@ const savedActionItems = (
       ),
     ].slice(0, 20);
   } catch {
-    return [];
+    return undefined;
   }
 };
 
@@ -285,7 +298,9 @@ export const packageEntityNotes = (
       startedAt:
         boundLabel(source.started_at ?? source.created_at ?? '') || null,
       notesContent: boundedContent,
-      ...(actionItems.length ? { actionItems } : {}),
+      ...(entity.type === 'project' && actionItems !== undefined
+        ? { actionItems }
+        : {}),
     });
     remainingWords -= wordCount;
     remainingNoteCharacters -= boundedContent.length;

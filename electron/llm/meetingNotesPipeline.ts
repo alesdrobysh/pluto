@@ -26,6 +26,7 @@ import { identifyEditedNotes } from './meetingNotesEditorIdentity';
 import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import { isTransientMeetingNotesLeafFailure } from './meetingNotesFailures';
 import {
+  CONDITION,
   createNotesGuardrailChecker,
   findNotesGuardrailIssues,
 } from './meetingNotesGuardrails';
@@ -42,6 +43,11 @@ import {
   buildNotesWriterPrompt,
   notesAuditCorrectionGuidance,
 } from './meetingNotesPrompts';
+import {
+  completeCitedSourceWindow,
+  groupCitedSourcePassages,
+  quoteCitedSourcePassages,
+} from './meetingNotesSource';
 import { resolveMeetingNotesTemplateInput } from './meetingNotesTemplates';
 import {
   type GenerateMeetingNotesInput,
@@ -626,14 +632,60 @@ const deterministicallyCheckedDraft = (
     evidenceSpans,
   );
   const issues = checkGuardrails(checkedDraft);
-  const auditedIssues: string[] = issues.map(
+  for (const [index, issue] of issues.entries()) {
+    if (issue.code !== 'missing_cancellation_context') continue;
+    const section = checkedDraft.sections.at(-1);
+    if (!section) continue;
+    let id = `source-cancellation:${index}`;
+    while (
+      checkedDraft.sections.some((entry) =>
+        entry.items.some((item) => item.id === id),
+      )
+    )
+      id += ':source';
+    const passages = groupCitedSourcePassages(
+      input.source,
+      issue.sources.flatMap((span) =>
+        completeCitedSourceWindow(input.source, [span]),
+      ),
+    );
+    const sources = passages.flatMap(({ spans }) => spans);
+    // A missing withdrawal stays visible as exact speech, never as revived work.
+    section.items.push({
+      id,
+      kind: 'point',
+      owner: null,
+      due: null,
+      sources,
+      text: quoteCitedSourcePassages(input.source, sources),
+    });
+  }
+  const auditedIssues: string[] = checkGuardrails(checkedDraft).map(
     (issue) => `notes_guardrail:${issue.code}`,
   );
+  const reviewOriginals = new Map<string, NotesItem>();
   // Check each action alone: sharing a source turn with a disputed task
   // must not remove unrelated, source-supported work from that turn.
   for (const section of checkedDraft.sections) {
-    section.items = section.items.filter((item) => {
-      if (item.kind !== 'action') return true;
+    section.items = section.items.flatMap((item) => {
+      // Preserve conditional discussion literally; classification stays unchanged.
+      if (item.kind === 'point' && CONDITION.test(item.text)) {
+        const passages = groupCitedSourcePassages(
+          input.source,
+          item.sources.flatMap((span) =>
+            completeCitedSourceWindow(input.source, [span]),
+          ),
+        );
+        const sources = passages.flatMap(({ spans }) => spans);
+        return [
+          {
+            ...item,
+            sources,
+            text: quoteCitedSourcePassages(input.source, sources),
+          },
+        ];
+      }
+      if (item.kind !== 'action') return [item];
       const unsafe = checkGuardrails(
         { ...checkedDraft, sections: [{ ...section, items: [item] }] },
         ['missing_condition', 'conflicting_action'],
@@ -641,7 +693,27 @@ const deterministicallyCheckedDraft = (
       auditedIssues.push(
         ...unsafe.map((issue) => `notes_guardrail:${issue.code}:${item.id}`),
       );
-      return unsafe.length === 0;
+      if (!unsafe.length) return [item];
+      if (!input.reviewSourceBoundNotes) return [];
+      // Hold disputed tasks as source discussion so review can repair them without publishing them as actions.
+      reviewOriginals.set(item.id, structuredClone(item));
+      auditedIssues.push(`deterministic_guardrail_review:${item.id}`);
+      const sources = completeCitedSourceWindow(input.source, [
+        ...item.sources,
+        ...unsafe.flatMap((issue) => issue.sources),
+      ]);
+      return [
+        {
+          ...item,
+          kind: 'point' as const,
+          owner: null,
+          due: null,
+          sources,
+          text: groupCitedSourcePassages(input.source, sources)
+            .map(({ speaker, text }) => `${speaker ?? 'Speaker'}: ${text}`)
+            .join('\n'),
+        },
+      ];
     });
   }
   try {
@@ -678,6 +750,7 @@ const deterministicallyCheckedDraft = (
       verdicts: new Map(),
       acceptedTerminology: [],
       issues: auditedIssues,
+      reviewOriginals,
     },
   };
 };
@@ -699,6 +772,10 @@ const deterministicallyAcceptedDraft = (
     draft: checked.draft,
     acceptancePolicy: 'conservative',
   });
+  audited.reviewOriginals = new Map([
+    ...(audited.reviewOriginals ?? []),
+    ...(checked.audited.reviewOriginals ?? []),
+  ]);
   audited.issues = [
     ...new Set([...(checked.audited.issues ?? []), ...(audited.issues ?? [])]),
   ];

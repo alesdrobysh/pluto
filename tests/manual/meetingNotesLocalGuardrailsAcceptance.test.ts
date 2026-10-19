@@ -23,6 +23,8 @@ const model = process.env.OLLAMA_BENCHMARK_MODEL || OLLAMA_GENERAL_MODEL;
 const seed = Number(process.env.MEETING_NOTES_ACCEPTANCE_SEED ?? 41);
 const reviewProtocol = process.env.MEETING_NOTES_REVIEW_PROTOCOL || 'audit';
 const caseSet = process.env.MEETING_NOTES_ACCEPTANCE_CASE_SET || 'fixed';
+const productionPath =
+  process.env.MEETING_NOTES_ACCEPTANCE_PATH === 'production';
 if (!['fixed', 'heldout', 'private'].includes(caseSet))
   throw new Error(
     'MEETING_NOTES_ACCEPTANCE_CASE_SET must be fixed, heldout or private',
@@ -66,11 +68,13 @@ suite(
             ollama_structured_thinking: false,
           });
           const transport = provider as unknown as {
+            generateText: (request: Record<string, unknown>) => Promise<string>;
             generateResumableAnalysisText: (
               request: Record<string, unknown>,
             ) => Promise<string>;
           };
           const config = {
+            path: productionPath ? 'production' : 'audit_harness',
             case: fixture.id,
             provider: 'ollama',
             model,
@@ -88,6 +92,23 @@ suite(
           let analysis: AnalysisDocumentV3 | undefined;
           let counts: Record<string, number> | undefined;
           let phase = 'generation';
+          if (productionPath) {
+            const generateText = transport.generateText.bind(provider);
+            transport.generateText = async (request) => {
+              const raw = await generateText(request);
+              console.log(
+                JSON.stringify({
+                  localGuardrailsAcceptance: {
+                    event: 'raw_attempt',
+                    ...config,
+                    task: request.task,
+                    raw,
+                  },
+                }),
+              );
+              return raw;
+            };
+          }
           console.log(
             JSON.stringify({
               localGuardrailsAcceptance: {
@@ -101,7 +122,18 @@ suite(
             }),
           );
           try {
-            analysis = await generateMeetingNotes({
+            const generateNotes: typeof generateMeetingNotes = productionPath
+              ? () =>
+                  provider.generateStructuredAnalysis('', '', 'auto', {
+                    source,
+                    signal: controller.signal,
+                    contextTokens: config.contextTokens,
+                    compactWriterContract: true,
+                    hierarchyAuditStrategy: 'deterministic_only',
+                    onStage: (task) => stages.push(task),
+                  })
+              : generateMeetingNotes;
+            analysis = await generateNotes({
               source,
               context: {
                 userNotes: '',

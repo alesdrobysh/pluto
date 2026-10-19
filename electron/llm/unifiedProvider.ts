@@ -1,8 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
-import {
-  OLLAMA_GENERAL_MODEL,
-  OLLAMA_QUICK_CHAT_MODEL,
-} from '../../src/utils/ollamaModels';
+import { resolveConfiguredOllamaModel } from '../../src/utils/ollamaModels';
 import { ChatGPTError } from '../chatgpt/auth';
 import { getChatGPTAuth } from '../chatgpt/runtime';
 import { askPlutoTimeoutMs } from '../intelligence/askPlutoDeadline';
@@ -42,7 +39,7 @@ import { reviewSourceBoundNotes } from './meetingNotesSemanticReview';
 import { createNotesSourceFromText } from './meetingNotesSource';
 import { createNotesStreamPreview } from './meetingNotesStreamPreview';
 import type { ResolvedMeetingNotesTemplate } from './meetingNotesTemplates';
-import { NOTES_OLLAMA_MODEL, NOTES_PROMPT_VERSION } from './meetingNotesTypes';
+import { NOTES_PROMPT_VERSION } from './meetingNotesTypes';
 import { createNotesWireRequest } from './meetingNotesWire';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
@@ -66,6 +63,10 @@ import type {
   LLMSettings,
   ProviderType,
 } from './provider';
+import {
+  getProviderDisplayName,
+  resolveGeminiModelName,
+} from './providerCatalog';
 import { ChatGPTInferenceError, executeChatGPT } from './transports/chatGPT';
 import {
   InferenceTransportError,
@@ -86,13 +87,6 @@ const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
 const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = NOTES_PROMPT_VERSION;
-
-const resolveGeminiModelName = (configured?: string): string => {
-  const model = (configured || '').trim();
-  return !model || model === 'gemini-1.5-flash' || model === 'gemini-2.0-flash'
-    ? 'gemini-3.8-flash'
-    : model;
-};
 
 const reportsNotesInputOverflow = (value: unknown): boolean =>
   /context_length_exceeded|context[_ ](?:window|length|size).*(?:exceed|overflow|too (?:large|long))|(?:exceed|overflow).*(?:context|input.*tokens)|(?:prompt|input) (?:is )?too long/i.test(
@@ -554,7 +548,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     private providerType: ProviderType,
     private settings: LLMSettings,
   ) {
-    this.name = this.getProviderName(providerType);
+    this.name = getProviderDisplayName(providerType);
     this.requiresApiKey =
       providerType !== 'ollama' && providerType !== 'chatgpt';
   }
@@ -864,11 +858,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private getConfiguredAnalysisModel(): string {
     switch (this.providerType) {
       case 'ollama':
-        return (
-          this.settings.ollama_model ||
-          this.settings.llm_model ||
-          NOTES_OLLAMA_MODEL
-        );
+        return resolveConfiguredOllamaModel(this.settings);
       case 'chatgpt': {
         const model = this.settings.chatgpt_model?.trim();
         if (!model) throw new ChatGPTError('chatgpt_model_required');
@@ -1205,25 +1195,6 @@ export class UnifiedLLMProvider implements LLMProvider {
         `[${this.name}] Failed to extract entities: entity_extraction_failed`,
       );
       throw new SecondaryExtractionError('entity_extraction_failed', e);
-    }
-  }
-
-  private getProviderName(provider: ProviderType): string {
-    switch (provider) {
-      case 'ollama':
-        return 'Ollama (Local)';
-      case 'gemini':
-        return 'Google Gemini';
-      case 'chatgpt':
-        return 'ChatGPT';
-      case 'openai':
-        return 'OpenAI';
-      case 'openrouter':
-        return 'OpenRouter';
-      case 'claude':
-        return 'Anthropic Claude';
-      default:
-        return 'LLM';
     }
   }
 
@@ -2118,26 +2089,12 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async resolveOllamaModel(task?: LLMTask): Promise<string> {
-    if (
+    return resolveConfiguredOllamaModel(
+      this.settings,
       task === 'askPlutoLive' ||
-      task === 'queryClassification' ||
-      task === 'askPlutoScope'
-    ) {
-      return (
-        (this.settings.ollama_fast_model || '').trim() ||
-        OLLAMA_QUICK_CHAT_MODEL
-      );
-    }
-    const configuredModel = (
-      this.settings.ollama_model ||
-      this.settings.llm_model ||
-      ''
-    ).trim();
-    if (configuredModel) {
-      return configuredModel;
-    }
-
-    return OLLAMA_GENERAL_MODEL;
+        task === 'queryClassification' ||
+        task === 'askPlutoScope',
+    );
   }
 
   private async ollamaFetch(

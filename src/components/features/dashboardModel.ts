@@ -10,8 +10,9 @@ import type { Meeting } from '../../types';
 import {
   type ThirdPartyAssigneeOptions,
   canonicalizeActionText,
+  getActionSourceMeetingId,
   getCommitmentState,
-  isThirdPartyAction,
+  isPersonalAction,
   parseActionMetadata,
 } from '../../utils/actionCommitment';
 import type { TrustStatus } from '../../utils/trustStatus';
@@ -889,10 +890,8 @@ const getPersistedSourceMeeting = (
   action: Entity,
   meetings: Meeting[],
 ): Meeting | null => {
-  const sourceMeetingId = parseActionMetadata(
-    action.metadata,
-  ).source_meeting_id;
-  if (typeof sourceMeetingId !== 'string' || !sourceMeetingId.trim()) {
+  const sourceMeetingId = getActionSourceMeetingId(action.metadata);
+  if (!sourceMeetingId) {
     return null;
   }
   return (
@@ -2001,12 +2000,11 @@ export const buildDashboardHomeModel = (
     selfPersonId: input.selfPersonId,
     selfNames: input.selfNames,
   };
-  const isPersonalAction = (action: Entity) =>
-    !isThirdPartyAction(action, selfOptions);
+  const isPersonal = (action: Entity) => isPersonalAction(action, selfOptions);
 
-  const rawOverdue = input.overdueActions.filter(isPersonalAction);
-  const rawStale = input.staleActions.filter(isPersonalAction);
-  const rawActive = input.activeActions.filter(isPersonalAction);
+  const rawOverdue = input.overdueActions.filter(isPersonal);
+  const rawStale = input.staleActions.filter(isPersonal);
+  const rawActive = input.activeActions.filter(isPersonal);
 
   const openOverdueActions = filterRejectedDashboardActions(rawOverdue);
   const openStaleActions = filterRejectedDashboardActions(rawStale);

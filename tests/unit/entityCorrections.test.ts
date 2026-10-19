@@ -16,6 +16,101 @@ describe('Entity Corrections Persistence', () => {
   const currentRevision = (entityId: string) =>
     packageEntityNotes(entityId)?.sourceRevision ?? null;
 
+  it.each([false, true, null])(
+    'revalidates stored proposals and scopes canonical task reuse to their source (classified=%s)',
+    (classified) => {
+      const suffix = String(classified);
+      const task = 'Send the review checklist';
+      const project = db.upsertEntity({
+        id: `scoped-project-${suffix}`,
+        type: 'project',
+        name: `Scoped project ${suffix}`,
+      });
+      const meetingId = `scoped-proposal-meeting-${suffix}`;
+      db.saveMeeting({
+        id: meetingId,
+        title: 'Review',
+        enhanced_notes: task,
+        analysis_format_pass: true,
+        analysis_json: JSON.stringify({
+          all_action_items:
+            classified !== false ? [{ text: task, assignee: 'Me' }] : [],
+        }),
+      });
+      const existingSourceAction =
+        classified === true
+          ? db.upsertEntity({
+              id: `source-action-${suffix}`,
+              type: 'action_item',
+              name: task,
+              status: 'active',
+              dedupe_by_name: false,
+              metadata: {
+                source_meeting_id: meetingId,
+                origin: 'extraction',
+                commitment_state: 'possible',
+                assignee_name: 'Me',
+              },
+            })
+          : null;
+      const unrelated = db.upsertEntity({
+        id: `unrelated-task-${suffix}`,
+        type: 'action_item',
+        name: task,
+        status: 'completed',
+        dedupe_by_name: false,
+        metadata: {
+          source_meeting_id: 'another-meeting',
+          commitment_state: 'confirmed',
+        },
+      });
+      const revision = currentRevision(project.id)!;
+      const started = db.dreamingProposalStore.startRun({
+        entityId: project.id,
+        entityType: 'project',
+        sourceRevision: revision,
+        model: 'gemma4:12b',
+        promptVersion: 'old-stored-prompt',
+      });
+      db.dreamingProposalStore.completeRun({
+        runId: started.run!.id,
+        leaseToken: started.run!.leaseToken,
+        status: 'proposed',
+        proposals: [
+          {
+            kind: 'project_commitment',
+            payload: { task },
+            evidence: [{ meetingId, excerpt: task }],
+            fingerprint: `scoped-task-${suffix}`,
+          },
+        ],
+      });
+      const proposal = db.dreamingProposalStore.listPendingProposals(
+        project.id,
+        'project',
+      )[0];
+      const result = db.acceptDreamingProposal({
+        proposalId: proposal.id,
+        getCurrentSourceRevision: currentRevision,
+      });
+      expect(result.status).toBe(classified ? 'accepted' : 'stale');
+      expect(db.getEntity(unrelated.id)?.status).toBe('completed');
+      const tasks = db.getProjectBrief(project.id)!.tasks;
+      expect(tasks).toHaveLength(classified ? 1 : 0);
+      if (classified) {
+        expect(tasks[0].id).toBe(existingSourceAction!.id);
+        expect(tasks[0].id).not.toBe(unrelated.id);
+        expect(tasks[0].status).toBe('active');
+        expect(JSON.parse(tasks[0].metadata!)).toMatchObject({
+          source_meeting_id: meetingId,
+          origin: 'extraction',
+          commitment_state: 'possible',
+          assignee_name: 'Me',
+        });
+      }
+    },
+  );
+
   it('records corrections and checks dismissed items idempotently', () => {
     const entityId = 'proj-alpha-123';
     const itemType = 'milestone';
@@ -310,12 +405,14 @@ describe('Entity Corrections Persistence', () => {
         name: task,
         status: 'active',
         assigned_to: null,
-        metadata: { origin, keep: 'metadata' },
+        metadata: { origin, keep: 'metadata', source_meeting_id: meetingId },
       });
       db.saveMeeting({
         id: meetingId,
         title: 'Commitment meeting',
         duration_seconds: 60,
+        analysis_format_pass: true,
+        analysis_json: JSON.stringify({ all_action_items: [{ text: task }] }),
       });
       const sourceRevision = currentRevision(project.id)!;
       const started = db.dreamingProposalStore.startRun({

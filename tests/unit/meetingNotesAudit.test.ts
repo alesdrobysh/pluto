@@ -17,6 +17,89 @@ import { getAnalysisEditBlocks } from '../../src/utils/analysisDocument';
 import { rebaseMeetingNotesEdits } from '../../src/utils/meetingNotesEditRebase';
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
 
+it.each(['same', 'owner', 'due', 'source', 'section'])(
+  'projects exact duplicate commitments once without merging a different %s',
+  async (variant) => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Rowan', text: 'I will send the report by Friday.' },
+        { speaker: 'Quinn', text: 'I will send the report by Friday.' },
+        { speaker: 'Rowan', text: 'I will send the report by Monday.' },
+      ]),
+    );
+    const sources = source.segments.map((segment) => ({
+      segment: segment.index,
+      start: 0,
+      end: segment.text.length,
+    }));
+    const first = {
+      id: 'first',
+      kind: 'action' as const,
+      text: 'Send the report',
+      owner: 'Rowan',
+      due: 'Friday',
+      sources,
+    };
+    const second = {
+      ...first,
+      id: 'second',
+      owner: variant === 'owner' ? 'Quinn' : first.owner,
+      due: variant === 'due' ? 'Monday' : first.due,
+      sources: variant === 'source' ? [sources[0]!] : sources,
+    };
+    const section = {
+      id: 's',
+      title: { id: 'h', text: 'Reports', sources },
+      items: variant === 'section' ? [first] : [first, second],
+    };
+    const draft: NotesDraft = {
+      title: null,
+      overview: null,
+      sections: [
+        section,
+        ...(variant === 'section'
+          ? [
+              {
+                ...section,
+                id: 's2',
+                title: { ...section.title, id: 'h2' },
+                items: [second],
+              },
+            ]
+          : []),
+      ],
+    };
+    const reviewed = await reviewSourceBoundNotes(
+      acceptEditedNotes({ source, draft, acceptancePolicy: 'conservative' }),
+      async () =>
+        JSON.stringify({
+          resolutions: [first, second].map((item) => ({
+            id: item.id,
+            kind: 'accepted_action',
+            text: item.text,
+            owner: item.owner,
+            due: item.due,
+            discussion: null,
+          })),
+        }),
+    );
+    const result = projectAuditedNotes(reviewed);
+    const expected = variant === 'same' ? 1 : 2;
+    expect(result.all_action_items).toHaveLength(expected);
+    expect(result.topics.flatMap((topic) => topic.action_items)).toHaveLength(
+      expected,
+    );
+    if (variant === 'same') {
+      expect(
+        Object.values(
+          result.generation_metadata!.source_provenance!.blocks,
+        ).some((block) => block.id === 'second'),
+      ).toBe(false);
+      expect(reviewed.draft.sections[0]!.items).toHaveLength(2);
+    }
+  },
+);
+
 it.each(['point', 'question'])(
   'defaults absent non-commitment metadata to unknown for %s only',
   (kind) => {

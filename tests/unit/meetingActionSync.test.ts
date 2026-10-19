@@ -35,6 +35,170 @@ afterAll(() => {
 });
 
 describe('meeting action entity and user edit synchronization', () => {
+  it.each(['entity', 'notes', 'reordered', 'shared-owner', 'ambiguous'])(
+    'preserves task identity for %s completion with identical task text',
+    (direction) => {
+      const meetingId = `duplicate-task-${direction}`;
+      const actions = [
+        {
+          text: 'Send the checklist',
+          assignee: 'Avery',
+          evidence: 'Avery will send the checklist to Design.',
+        },
+        {
+          text: 'Send the checklist',
+          assignee: direction === 'shared-owner' ? 'Avery' : 'Blake',
+          evidence: `${direction === 'shared-owner' ? 'Avery' : 'Blake'} will send the checklist to Finance.`,
+        },
+      ];
+      saveMeeting({
+        id: meetingId,
+        title: 'Checklist review',
+        analysis_json: JSON.stringify({ all_action_items: actions }),
+      });
+      const entities = actions.map((action, index) =>
+        upsertEntity({
+          id: `${meetingId}-${index}`,
+          type: 'action_item',
+          name: action.text,
+          status: 'active',
+          dedupe_by_name: false,
+          metadata: {
+            origin: 'extraction',
+            commitment_state: 'confirmed',
+            source_meeting_id: meetingId,
+            source_path: `all_action_items:${index}`,
+            source_index: index,
+            original_description: action.text,
+            source_evidence:
+              direction === 'ambiguous' ? undefined : action.evidence,
+            assignee_name:
+              direction === 'ambiguous' ? undefined : action.assignee,
+          },
+        }),
+      );
+      const index = direction === 'reordered' ? 0 : 1;
+      if (direction === 'reordered')
+        db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+          JSON.stringify({ all_action_items: [...actions].reverse() }),
+          meetingId,
+        );
+      if (direction === 'notes') {
+        db.prepare('UPDATE meetings SET user_edits_json = ? WHERE id = ?').run(
+          JSON.stringify({
+            [`completion:all_action_items:${index}`]: {
+              original: 'false',
+              edited: 'true',
+            },
+          }),
+          meetingId,
+        );
+        syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+      } else updateEntityStatus(entities[1].id, 'completed');
+      const edits = JSON.parse(getMeeting(meetingId)!.user_edits_json || '{}');
+      expect(edits[`completion:all_action_items:${index}`]?.edited).toBe(
+        direction === 'ambiguous' ? undefined : 'true',
+      );
+      expect(edits[`completion:all_action_items:${1 - index}`]).toBeUndefined();
+      expect(getEntity(entities[1].id)?.status).toBe('completed');
+      expect(getEntity(entities[0].id)?.status).toBe('active');
+    },
+  );
+  it('preserves completed actions when the saved edit document is unreadable', () => {
+    const meetingId = 'unreadable-edit-state';
+    saveMeeting({
+      id: meetingId,
+      title: 'Edit recovery',
+      analysis_json: JSON.stringify({
+        all_action_items: [{ text: 'Send the checklist' }],
+      }),
+    });
+    const task = upsertEntity({
+      id: 'completed-unreadable-edit',
+      type: 'action_item',
+      name: 'Send the checklist',
+      status: 'completed',
+      dedupe_by_name: false,
+      metadata: {
+        source_meeting_id: meetingId,
+        original_description: 'Send the checklist',
+        origin: 'extraction',
+        user_completed_edited: true,
+      },
+    });
+    db.prepare('UPDATE meetings SET user_edits_json = ? WHERE id = ?').run(
+      'not-json',
+      meetingId,
+    );
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(0);
+    expect(getEntity(task.id)?.status).toBe('completed');
+  });
+  it('does not transfer completion by position to a different regenerated task', () => {
+    const meetingId = 'regenerated-task-identity';
+    saveMeeting({
+      id: meetingId,
+      title: 'Task identity review',
+      analysis_json: JSON.stringify({
+        all_action_items: [{ text: 'Send the new report' }],
+      }),
+      user_edits_json: JSON.stringify({
+        'completion:all_action_items:0': { original: 'false', edited: 'true' },
+      }),
+    });
+    const old = upsertEntity({
+      id: 'old-task-identity',
+      type: 'action_item',
+      name: 'Prepare the old checklist',
+      status: 'active',
+      dedupe_by_name: false,
+      metadata: {
+        origin: 'extraction',
+        original_description: 'Prepare the old checklist',
+        source_meeting_id: meetingId,
+        source_path: 'all_action_items:0',
+        source_index: 0,
+      },
+    });
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(old.id)?.status).toBe('active');
+    expect(getEntity(old.id)?.name).toBe('Prepare the old checklist');
+  });
+  it('mirrors completion into the matching task after the note order changes', () => {
+    const meetingId = 'reordered-task-identity';
+    saveMeeting({
+      id: meetingId,
+      title: 'Task identity review',
+      analysis_json: JSON.stringify({
+        all_action_items: [
+          { text: 'Send the new report' },
+          { text: 'Prepare the checklist' },
+        ],
+      }),
+    });
+    const task = upsertEntity({
+      id: 'reordered-task',
+      type: 'action_item',
+      name: 'Prepare the checklist',
+      status: 'active',
+      dedupe_by_name: false,
+      metadata: {
+        origin: 'extraction',
+        original_description: 'Prepare the checklist',
+        source_meeting_id: meetingId,
+        source_path: 'all_action_items:0',
+        source_index: 0,
+      },
+    });
+    updateEntityStatus(task.id, 'completed');
+    const edits = JSON.parse(getMeeting(meetingId)!.user_edits_json!);
+    expect(edits['completion:all_action_items:0']).toBeUndefined();
+    expect(edits['completion:all_action_items:1'].edited).toBe('true');
+    expect(parseActionMetadata(getEntity(task.id)!.metadata).source_index).toBe(
+      1,
+    );
+  });
   it('synchronizes text edits (typos, product names) from user_edits_json to action entities', () => {
     const meetingId = 'meeting-typo-sync-1';
     const originalText =
@@ -584,7 +748,7 @@ describe('corrected saved evidence for pending dashboard suggestions', () => {
     expect(updated.due_date).toBeNull();
     expect(parseActionMetadata(updated.metadata)).toMatchObject({
       full_description: correctedText,
-      original_description: staleText,
+      original_description: correctedText,
       assignee_name: 'Me',
       source_evidence: evidence,
       commitment_state: 'possible',
@@ -593,6 +757,125 @@ describe('corrected saved evidence for pending dashboard suggestions', () => {
     expect(
       syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
     ).toBe(0);
+  });
+
+  it('refreshes an unchanged pending task when review expands its exact source quote', () => {
+    const { entity, meetingId } = seed('expanded-evidence', {
+      full_description: correctedText,
+      original_description: correctedText,
+    });
+    const expanded = `Earlier request: arrange the planning discussion. ${evidence}`;
+    db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        all_action_items: [
+          { text: correctedText, assignee: 'Me', evidence: expanded },
+        ],
+      }),
+      meetingId,
+    );
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    const updated = getEntity(entity.id)!;
+    expect(updated.due_date).toBeNull();
+    expect(parseActionMetadata(updated.metadata)).toMatchObject({
+      assignee_name: 'Me',
+      source_evidence: expanded,
+    });
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(0);
+  });
+  it('refreshes evidence even when task, owner and deadline already match', () => {
+    const { entity, meetingId } = seed('evidence-only');
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    const expanded = `Earlier request: arrange the planning discussion. ${evidence}`;
+    db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        all_action_items: [
+          { text: correctedText, assignee: 'Me', evidence: expanded },
+        ],
+      }),
+      meetingId,
+    );
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(1);
+    expect(
+      parseActionMetadata(getEntity(entity.id)!.metadata).source_evidence,
+    ).toBe(expanded);
+    expect(
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId).actionsUpdated,
+    ).toBe(0);
+  });
+  it.each([
+    ['confirmed', { commitment_state: 'confirmed' }],
+    ['rejected', { commitment_state: 'rejected' }],
+    ['edited', { user_edited: true }],
+    ['reviewed', { reviewed_at: '2026-10-16T10:00:00Z' }],
+  ])(
+    'preserves %s state when an unchanged task gains wider source context',
+    (suffix, metadata) => {
+      const { entity, meetingId } = seed(`expanded-${suffix}`, {
+        full_description: correctedText,
+        original_description: correctedText,
+        ...metadata,
+      });
+      const expanded = `Earlier request: arrange the planning discussion. ${evidence}`;
+      db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+        JSON.stringify({
+          all_action_items: [
+            { text: correctedText, assignee: 'Me', evidence: expanded },
+          ],
+        }),
+        meetingId,
+      );
+      syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+      const current = getEntity(entity.id)!;
+      expect(current.due_date).toBe('2026-10-16');
+      expect(parseActionMetadata(current.metadata)).toMatchObject({
+        assignee_name: 'Remote Speaker 2',
+        source_evidence: evidence,
+      });
+    },
+  );
+  it('does not rebind a different task merely because its expanded quote contains the old quote', () => {
+    const { entity, meetingId } = seed('expanded-different-task');
+    const expanded = `Earlier request: arrange the planning discussion. ${evidence}`;
+    db.prepare('UPDATE meetings SET analysis_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        all_action_items: [
+          { text: correctedText, assignee: 'Me', evidence: expanded },
+        ],
+      }),
+      meetingId,
+    );
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(entity.id)?.name).toBe(staleText);
+    expect(getEntity(entity.id)?.due_date).toBe('2026-10-16');
+  });
+  it('keeps a corrected suggestion anchored when the user later completes it', () => {
+    const { entity, meetingId } = seed('corrected-completion');
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    updateEntityStatus(entity.id, 'completed');
+    const edits = JSON.parse(getMeeting(meetingId)!.user_edits_json || '{}');
+    expect(edits['completion:all_action_items:0']?.edited).toBe('true');
+    expect(getEntity(entity.id)?.status).toBe('completed');
+    expect(
+      parseActionMetadata(getEntity(entity.id)?.metadata ?? null)
+        .original_description,
+    ).toBe(correctedText);
+  });
+
+  it('does not move a completion edit through an evidence-only wording match', () => {
+    const { entity, meetingId } = seed('completion-blocks-rebinding');
+    db.prepare('UPDATE meetings SET user_edits_json = ? WHERE id = ?').run(
+      JSON.stringify({
+        'completion:all_action_items:0': { original: 'false', edited: 'true' },
+      }),
+      meetingId,
+    );
+    syncMeetingActionEntitiesFromUserEdits(db, meetingId);
+    expect(getEntity(entity.id)?.name).toBe(staleText);
+    expect(getEntity(entity.id)?.status).toBe('active');
   });
 
   it('uses the existing deadline rules when a corrected due date is recorded', () => {

@@ -1430,8 +1430,31 @@ export const projectAuditedNotes = (
 ): AnalysisDocumentV3 => {
   if (!reviewedResults.has(audited))
     throw new MeetingNotesError('notes_unreviewed_projection');
-  const outcomes = hasOutcomes(audited.draft);
-  const topics = audited.draft.sections
+  const draft = {
+    ...audited.draft,
+    sections: audited.draft.sections.map((section) => {
+      const seen = new Set<string>();
+      return {
+        ...section,
+        items: section.items.filter((item) => {
+          if (item.kind !== 'action' && item.kind !== 'decision') return true;
+          // Reclassification can produce the same commitment twice within one scope.
+          const key = JSON.stringify([
+            item.kind,
+            item.text,
+            item.owner,
+            item.due,
+            item.sources,
+          ]);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }),
+      };
+    }),
+  };
+  const outcomes = hasOutcomes(draft);
+  const topics = draft.sections
     .filter((section) => section.items.length > 0)
     .map((section) => {
       const summary = topicSummary(section, outcomes);
@@ -1464,9 +1487,8 @@ export const projectAuditedNotes = (
           .map((item) => item.text),
       };
     });
-  const overview =
-    overviewForDraft(audited.draft)?.text ?? 'Conversation captured.';
-  const title = audited.draft.title?.text.trim() || undefined;
+  const overview = overviewForDraft(draft)?.text ?? 'Conversation captured.';
+  const title = draft.title?.text.trim() || undefined;
   const analysis: AnalysisDocumentV3 = {
     analysis_schema_version: 3,
     ...(title ? { title } : {}),
@@ -1476,25 +1498,23 @@ export const projectAuditedNotes = (
       topic.action_items.map((item) => ({ ...item, topic: topic.title })),
     ),
     all_decisions: topics.flatMap((topic) => topic.decisions),
-    ...(audited.draft.recentWin
+    ...(draft.recentWin
       ? {
           recent_win: {
-            win: audited.draft.recentWin.win.text,
-            why_it_counts: audited.draft.recentWin.impact.text,
+            win: draft.recentWin.win.text,
+            why_it_counts: draft.recentWin.impact.text,
             evidence: sourceText(audited.source, [
-              ...audited.draft.recentWin.win.sources,
-              ...audited.draft.recentWin.impact.sources,
+              ...draft.recentWin.win.sources,
+              ...draft.recentWin.impact.sources,
             ]),
-            ...(audited.draft.recentWin.ownership
-              ? { ownership: audited.draft.recentWin.ownership }
+            ...(draft.recentWin.ownership
+              ? { ownership: draft.recentWin.ownership }
               : {}),
-            ...(audited.draft.recentWin.owner
-              ? { owner: audited.draft.recentWin.owner }
-              : {}),
+            ...(draft.recentWin.owner ? { owner: draft.recentWin.owner } : {}),
           },
         }
       : {}),
-    meeting_type: audited.draft.meetingType,
+    meeting_type: draft.meetingType,
     quality: {
       format_pass: true,
       retry_count: 0,
@@ -1518,8 +1538,8 @@ export const projectAuditedNotes = (
         schema_version: 1,
         source_revision: audited.source.revision,
         blocks: sourceMetadata({
-          ...audited.draft,
-          sections: audited.draft.sections.filter(
+          ...draft,
+          sections: draft.sections.filter(
             (section) => section.items.length > 0,
           ),
         }),

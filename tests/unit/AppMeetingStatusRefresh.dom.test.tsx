@@ -2,7 +2,7 @@
 
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock('../../src/components/AudioManager', () => ({
@@ -34,6 +34,12 @@ const flush = async () => {
 };
 
 describe('App meeting status events', () => {
+  let App: typeof import('../../src/App').default;
+  beforeAll(async () => {
+    window.__PLUTO_BROWSER_PREVIEW__ = false;
+    // Module transformation is setup, not part of the event delivery assertion.
+    App = (await import('../../src/App')).default;
+  });
   it.each([true, false])(
     'consumes the Electron event separately from the optional meeting id (id supplied: %s)',
     async (hasMeetingId) => {
@@ -94,7 +100,6 @@ describe('App meeting status events', () => {
           ),
         },
       });
-      const { default: App } = await import('../../src/App');
       const container = document.createElement('div');
       document.body.append(container);
       const root = createRoot(container);

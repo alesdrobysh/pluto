@@ -42,6 +42,33 @@ export const getCommitmentState = (value: string | null): CommitmentState => {
   return state === 'confirmed' || state === 'rejected' ? state : 'possible';
 };
 
+/** Recover legacy consolidation provenance only when it names one source. */
+export const getActionSourceMeetingId = (
+  value: string | null,
+): string | null => {
+  const metadata = parseActionMetadata(value);
+  if (
+    typeof metadata.source_meeting_id === 'string' &&
+    metadata.source_meeting_id.trim()
+  ) {
+    return metadata.source_meeting_id;
+  }
+  const ids = new Set<string>();
+  for (const source of Array.isArray(metadata.dreamingSources)
+    ? metadata.dreamingSources
+    : []) {
+    if (
+      !source ||
+      typeof source !== 'object' ||
+      !Array.isArray(source.meetingIds)
+    )
+      continue;
+    for (const id of source.meetingIds)
+      if (typeof id === 'string' && id.trim()) ids.add(id);
+  }
+  return ids.size === 1 ? [...ids][0] : null;
+};
+
 export const mergeCommitmentReview = (
   value: string | null,
   commitmentState: 'confirmed' | 'rejected',
@@ -170,6 +197,65 @@ export const isThirdPartyAction = (
     assigneeName,
     description || action.name,
     options,
+  );
+};
+
+/** Ownership comes from structured evidence or explicit adoption, never prose. */
+export const hasPersonalActionOwner = (
+  action: {
+    metadata: string | null;
+    assigned_to?: string | null;
+  },
+  selfOptions: ThirdPartyAssigneeOptions,
+): boolean => {
+  const metadata = parseActionMetadata(action.metadata);
+  if (action.assigned_to)
+    return Boolean(
+      selfOptions.selfPersonId &&
+        action.assigned_to === selfOptions.selfPersonId,
+    );
+
+  const assignee =
+    typeof metadata.assignee_name === 'string'
+      ? metadata.assignee_name.trim().toLowerCase()
+      : '';
+  const selfAssignees = new Set([
+    ...SELF_ACTION_ASSIGNEES,
+    ...(selfOptions.selfNames ?? []).map((name) => name.trim().toLowerCase()),
+  ]);
+  if (assignee && !selfAssignees.has(assignee)) return false;
+
+  if (
+    metadata.origin === 'user' ||
+    getCommitmentState(action.metadata) === 'confirmed'
+  )
+    return true;
+
+  return Boolean(
+    assignee &&
+      getActionSourceMeetingId(action.metadata) &&
+      typeof metadata.source_evidence === 'string' &&
+      metadata.source_evidence.trim(),
+  );
+};
+
+export const isPersonalAction = (
+  action: {
+    name: string;
+    status: string | null;
+    metadata: string | null;
+    assigned_to?: string | null;
+  },
+  selfOptions: ThirdPartyAssigneeOptions,
+): boolean => {
+  const metadata = parseActionMetadata(action.metadata);
+  return Boolean(
+    ['active', 'overdue', 'stale'].includes(action.status || '') &&
+      !metadata.meeting_regeneration_retired_at &&
+      !metadata.cancelled_at &&
+      getCommitmentState(action.metadata) !== 'rejected' &&
+      action.name.trim() &&
+      hasPersonalActionOwner(action, selfOptions),
   );
 };
 

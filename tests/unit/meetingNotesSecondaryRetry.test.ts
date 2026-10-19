@@ -119,7 +119,7 @@ it.each(['secondary', 'automatic'] as const)(
               id: 'auto',
               revision: resolveMeetingNotesTemplateInput('auto').revision,
             },
-            provider: 'ollama',
+            provider: 'Ollama (Local)',
             model: 'gemma4:12b',
             thinking: null,
             seed: null,

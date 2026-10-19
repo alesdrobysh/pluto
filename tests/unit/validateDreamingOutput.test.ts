@@ -298,36 +298,42 @@ describe('validateDreamingOutput', () => {
     'The team decided to deliver the billing migration checklist.',
     'The team must deliver the billing migration checklist.',
     'Alice needs to deliver the billing migration checklist.',
-  ])('accepts explicit commitment language variant: %s', (notesContent) => {
-    const committedPackage: DreamingInputPackage = {
-      ...projectPackage,
-      recentMeetingNotes: [
-        {
-          meetingId: 'meeting-1',
-          title: 'Delivery review',
-          startedAt: '2026-08-01T10:00:00.000Z',
-          notesContent,
-        },
-      ],
-    };
-    expect(
-      validate(
-        {
-          status: 'proposed',
-          proposals: [
-            {
-              kind: 'project_commitment',
-              payload: { task: 'Deliver the billing migration checklist.' },
-              evidence: [{ meetingId: 'meeting-1', excerpt: notesContent }],
-            },
-          ],
-        },
-        committedPackage,
-      ),
-    ).toMatchObject({ valid: true, status: 'proposed' });
-  });
+  ])(
+    'rejects unclassified prose despite commitment language: %s',
+    (notesContent) => {
+      const committedPackage: DreamingInputPackage = {
+        ...projectPackage,
+        recentMeetingNotes: [
+          {
+            meetingId: 'meeting-1',
+            title: 'Delivery review',
+            startedAt: '2026-08-01T10:00:00.000Z',
+            notesContent,
+          },
+        ],
+      };
+      expect(
+        validate(
+          {
+            status: 'proposed',
+            proposals: [
+              {
+                kind: 'project_commitment',
+                payload: { task: 'Deliver the billing migration checklist.' },
+                evidence: [{ meetingId: 'meeting-1', excerpt: notesContent }],
+              },
+            ],
+          },
+          committedPackage,
+        ),
+      ).toMatchObject({
+        valid: false,
+        error: 'unsupported_project_commitment',
+      });
+    },
+  );
 
-  it('accepts a project commitment with explicit commitment language', () => {
+  it('requires saved action classification even for explicit commitment language', () => {
     const committedPackage: DreamingInputPackage = {
       ...projectPackage,
       recentMeetingNotes: [
@@ -360,7 +366,7 @@ describe('validateDreamingOutput', () => {
         },
         committedPackage,
       ),
-    ).toMatchObject({ valid: true, status: 'proposed' });
+    ).toMatchObject({ valid: false, error: 'unsupported_project_commitment' });
   });
 
   it('drops an ungrounded commitment proposal if another valid proposal exists in the batch', () => {
@@ -588,10 +594,10 @@ describe('project commitment source context', () => {
     'Alex agreed to prepare the launch checklist. The old deployment is not needed.',
     'Alex agreed to prepare the launch checklist. Another option is under consideration.',
   ])(
-    'accepts a source-supported promise without unrelated wording poisoning it: %s',
+    'does not infer a new classified task from a prose promise: %s',
     (excerpt) => {
       expect(check('Prepare the launch checklist', excerpt)).toMatchObject({
-        valid: true,
+        valid: false,
       });
     },
   );
@@ -610,6 +616,7 @@ describe('project commitment source context', () => {
       check(
         'Update the product options',
         'Alex agreed to update the product options.',
+        ['Update the product options'],
       ),
     ).toMatchObject({ valid: true });
   });
@@ -642,6 +649,29 @@ describe('project commitment source context', () => {
       check('Schedule a customer workshop', 'Schedule a customer workshop', [
         'Prepare the launch checklist',
       ]),
+    ).toMatchObject({ valid: false });
+  });
+  it.each([
+    { actionItems: [] },
+    { actionItems: ['Prepare the launch checklist'] },
+  ])(
+    'does not promote background prose when saved classification is %j',
+    ({ actionItems }) => {
+      const statement =
+        'Jordan noted that the group will transfer records into the report.';
+      expect(check(statement, statement, actionItems)).toMatchObject({
+        valid: false,
+        error: 'unsupported_project_commitment',
+      });
+    },
+  );
+  it('does not revive a removed classified action through promise wording', () => {
+    expect(
+      check(
+        'Prepare the launch checklist',
+        'Alex will prepare the launch checklist.',
+        [],
+      ),
     ).toMatchObject({ valid: false });
   });
 });

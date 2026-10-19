@@ -1,3 +1,7 @@
+import {
+  getCommitmentState,
+  parseActionMetadata,
+} from '../src/utils/actionCommitment';
 import { parseAnalysisDocumentV3Json } from '../src/utils/analysisDocument';
 import type {
   PersonBriefingCommitment,
@@ -350,7 +354,10 @@ const buildFromMeeting = (
     .filter(
       (entity) =>
         entity.type === 'action_item' &&
+        getCommitmentState(entity.metadata) === 'confirmed' &&
         !isRejectedAction(entity.metadata) &&
+        !parseActionMetadata(entity.metadata).meeting_regeneration_retired_at &&
+        !parseActionMetadata(entity.metadata).cancelled_at &&
         (entity.status === 'active' ||
           entity.status === 'overdue' ||
           entity.status === 'stale'),

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { getDownstreamProcessingPresentation } from '../../src/components/features/downstreamProcessingPresentation';
 import { makeDirectNotesFixture } from '../fixtures/meeting-notes-v10';
 
 import type { NotesStageEvent } from '../../electron/llm/meetingNotesRunMetrics';
@@ -1081,7 +1082,7 @@ describe('meeting analysis run coordinator', () => {
           ...revisions,
           terms: [],
           template: autoTemplateIdentity,
-          provider: 'ollama',
+          provider: 'Ollama (Local)',
           model: 'gemma4:12b',
           thinking: null,
           seed: null,
@@ -1388,7 +1389,7 @@ describe('meeting analysis run coordinator', () => {
             userNotesHash: 'notes-terms',
             terms: ['Ogletree'],
             template: autoTemplateIdentity,
-            provider: 'ollama',
+            provider: 'Ollama (Local)',
             model: 'gemma4:12b',
             thinking: null,
             seed: null,
@@ -1407,7 +1408,7 @@ describe('meeting analysis run coordinator', () => {
             userNotesHash: 'notes-terms',
             terms: ['Ogletree'],
             template: autoTemplateIdentity,
-            provider: 'ollama',
+            provider: 'Ollama (Local)',
             model: 'gemma4:12b',
             thinking: null,
             seed: null,
@@ -2205,6 +2206,10 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
     const secondary = vi.fn(async ({ canCommit }) => {
       expect(canCommit()).toBe(true);
     });
+    const getProvider = vi.fn(async () => ({
+      name: provider,
+      generateStructuredAnalysis: writer,
+    }));
     const coordinator = createMeetingAnalysisRunCoordinator({
       db: {
         getMeeting: () => meeting,
@@ -2225,14 +2230,12 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
         ],
       },
       getSettings: async () => settings,
-      getProvider: async () => ({
-        name: provider,
-        generateStructuredAnalysis: writer,
-      }),
+      getProvider,
       runSecondary: secondary,
     });
     return {
       coordinator,
+      getProvider,
       settings,
       revisions,
       run,
@@ -2251,9 +2254,25 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
 
   it('reuses an existing published run despite names added by secondary extraction', async () => {
     const f = setup();
+    f.getProvider.mockRejectedValue(new Error('chatgpt_sign_in_required'));
     expect(
       await f.coordinator.generateAndPublishMeetingNotes(request),
     ).toMatchObject({ runId: 'saved-run', status: 'published' });
+    expect(f.writer).not.toHaveBeenCalled();
+    expect(f.begin).not.toHaveBeenCalled();
+    expect(f.secondary).not.toHaveBeenCalled();
+    expect(f.getProvider).not.toHaveBeenCalled();
+  });
+
+  it('preserves published notes when resuming secondary work cannot initialize the provider', async () => {
+    const f = setup('pending');
+    f.getProvider.mockRejectedValue(new Error('chatgpt_sign_in_required'));
+    await expect(
+      f.coordinator.generateAndPublishMeetingNotes(request),
+    ).resolves.toMatchObject({ status: 'published' });
+    await vi.waitFor(() => expect(f.getProvider).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(f.run.secondary_status).toBe('failed'));
+    expect(f.run.notes_status).toBe('published');
     expect(f.writer).not.toHaveBeenCalled();
     expect(f.begin).not.toHaveBeenCalled();
     expect(f.secondary).not.toHaveBeenCalled();
@@ -2374,3 +2393,173 @@ describe('published notes do not regenerate from secondary vocabulary', () => {
     },
   );
 });
+
+describe('provider startup failures are durable notes failures', () => {
+  it.each([
+    [
+      'chatgpt',
+      new Error('chatgpt_sign_in_required'),
+      'chatgpt_sign_in_required',
+    ],
+    [
+      'ollama',
+      Object.assign(new Error('Local service unavailable'), {
+        code: 'provider_unavailable',
+      }),
+      'provider_unavailable',
+    ],
+    [
+      'chatgpt',
+      new Error('chatgpt_cloud_consent_required'),
+      'chatgpt_cloud_consent_required',
+    ],
+    ['chatgpt', new Error('chatgpt_model_required'), 'chatgpt_model_required'],
+  ] as const)(
+    'persists %s initialization failure and bounds automatic attempts',
+    async (provider, failure, code) => {
+      const meeting = {
+        id: 'startup-failure',
+        transcript_status: 'validated',
+        transcript_json: JSON.stringify({
+          segments: [{ speaker: 1, text: 'A fictional meeting.' }],
+        }),
+      };
+      const revisions = {
+        sourceRevision: 'source',
+        eligibilityRevision: 'eligible',
+        userNotesHash: 'notes',
+      };
+      let run: {
+        run_id: string;
+        input_revision: string;
+        notes_status: string;
+        automatic_attempt_count: number;
+        error_code?: string | null;
+      } | null = null;
+      const publish = vi.fn();
+      const getProvider = vi.fn(async () => {
+        expect(run?.notes_status).toBe('running');
+        throw failure;
+      });
+      const onUpdated = vi.fn();
+      const coordinator = createMeetingAnalysisRunCoordinator({
+        db: {
+          getMeeting: () => meeting,
+          getMeetingAnalysisPublicationRevisions: () => revisions,
+          getMeetingAnalysisRun: () => run,
+          beginMeetingAnalysisRun: (input) => {
+            run = {
+              run_id: input.runId,
+              input_revision: input.inputRevision,
+              notes_status: 'running',
+              automatic_attempt_count: (run?.automatic_attempt_count ?? 0) + 1,
+            };
+          },
+          updateMeetingAnalysisRunStatus: (input) => {
+            if (!run) throw new Error('missing_run');
+            run.notes_status = input.notesStatus;
+            run.error_code = input.errorCode;
+            return true;
+          },
+          updateMeetingAnalysisRunStatusIfCurrent: () => true,
+          isMeetingAnalysisRunCurrent: () => true,
+          publishMeetingNotesIfCurrent: publish,
+          getAllEntities: () => [],
+        },
+        getSettings: async () => ({ llm_provider: provider }),
+        getProvider,
+        onUpdated,
+      });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(
+          coordinator.generateAndPublishMeetingNotes({
+            meetingId: meeting.id,
+            requestId: `attempt-${attempt}`,
+            reason: 'automatic',
+          }),
+        ).rejects.toBe(failure);
+        expect(
+          getDownstreamProcessingPresentation({
+            ...meeting,
+            analysis_run_json: JSON.stringify(run),
+          }),
+        ).toMatchObject({ state: 'failed', failureCode: code });
+      }
+      await expect(
+        coordinator.generateAndPublishMeetingNotes({
+          meetingId: meeting.id,
+          requestId: 'exhausted',
+          reason: 'automatic',
+        }),
+      ).rejects.toThrow('meeting_notes_automatic_attempts_exhausted');
+      expect(getProvider).toHaveBeenCalledTimes(2);
+      expect(publish).not.toHaveBeenCalled();
+      expect(onUpdated).toHaveBeenCalledWith(meeting.id);
+    },
+  );
+});
+
+it.each(['cancel', 'source-change'] as const)(
+  'does not generate after %s during provider initialization',
+  async (change) => {
+    const generation = vi.fn();
+    const publish = vi.fn();
+    let current = true;
+    let release!: (provider: {
+      name: string;
+      generateStructuredAnalysis: typeof generation;
+    }) => void;
+    const provider = new Promise<{
+      name: string;
+      generateStructuredAnalysis: typeof generation;
+    }>((resolve) => {
+      release = resolve;
+    });
+    const getProvider = vi.fn(() => provider);
+    const coordinator = createMeetingAnalysisRunCoordinator({
+      db: {
+        getMeeting: () => ({
+          id: 'init-race',
+          transcript_status: 'validated',
+          transcript_json: JSON.stringify({
+            segments: [{ speaker: 1, text: 'A fictional meeting.' }],
+          }),
+        }),
+        getMeetingAnalysisPublicationRevisions: () => ({
+          sourceRevision: 'source',
+          eligibilityRevision: 'eligible',
+          userNotesHash: 'notes',
+        }),
+        getMeetingAnalysisRun: () => null,
+        beginMeetingAnalysisRun: vi.fn(),
+        updateMeetingAnalysisRunStatus: () => true,
+        updateMeetingAnalysisRunStatusIfCurrent: () => true,
+        isMeetingAnalysisRunCurrent: () => current,
+        publishMeetingNotesIfCurrent: publish,
+        getAllEntities: () => [],
+      },
+      getSettings: async () => ({ llm_provider: 'ollama' }),
+      getProvider,
+    });
+    const pending = coordinator.generateAndPublishMeetingNotes({
+      meetingId: 'init-race',
+      requestId: 'init-request',
+      reason: 'manual',
+    });
+    // Attach before cancellation rejects the subscriber.
+    const rejected = expect(pending).rejects.toThrow(
+      change === 'cancel' ? 'cancelled' : 'meeting_notes_superseded',
+    );
+    await vi.waitFor(() => expect(getProvider).toHaveBeenCalledTimes(1));
+    if (change === 'cancel')
+      await coordinator.cancelMeetingNotes({
+        meetingId: 'init-race',
+        requestId: 'init-request',
+      });
+    else current = false;
+    release({ name: 'Ollama (Local)', generateStructuredAnalysis: generation });
+    await rejected;
+    expect(generation).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  },
+);

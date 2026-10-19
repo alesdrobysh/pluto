@@ -33,7 +33,7 @@ interface PersistedEntityRow {
   id: string;
   type: string;
   name: string;
-  status: string;
+  status: string | null;
   due_date: string | null;
   assigned_to: string | null;
   metadata: string | null;
@@ -44,6 +44,29 @@ interface NativeContinuationItem {
   text: string;
   completed?: boolean;
 }
+
+const matchesActionSource = (
+  action: { assignee?: unknown; evidence?: unknown },
+  metadata: ReturnType<typeof parseActionMetadata>,
+): boolean => {
+  const evidence =
+    typeof metadata.source_evidence === 'string'
+      ? metadata.source_evidence.trim()
+      : '';
+  const owner =
+    typeof metadata.assignee_name === 'string'
+      ? metadata.assignee_name.trim()
+      : '';
+  return Boolean(
+    (evidence || owner) &&
+      (!evidence ||
+        (typeof action.evidence === 'string' &&
+          action.evidence.trim() === evidence)) &&
+      (!owner ||
+        (typeof action.assignee === 'string' &&
+          action.assignee.trim() === owner)),
+  );
+};
 
 /** Mirror an explicit entity completion into its exact source note block. */
 export const syncActionCompletionToMeetingNotes = (
@@ -84,9 +107,38 @@ export const syncActionCompletionToMeetingNotes = (
   } else {
     const match = path.match(/^(?:all_action_items|v2:action):(\d+)$/);
     if (!match) return;
+    const analysis = JSON.parse(meeting.analysis_json || '{}');
+    const actions = Array.isArray(analysis.all_action_items)
+      ? analysis.all_action_items
+      : Array.isArray(analysis.action_items)
+        ? analysis.action_items
+        : [];
+    const original =
+      typeof meta.original_description === 'string'
+        ? meta.original_description
+        : typeof meta.full_description === 'string'
+          ? meta.full_description
+          : entity.name;
+    let matches: number[] = actions.flatMap(
+      (action: { text?: unknown }, index: number) =>
+        [
+          action?.text,
+          edits[`all_action_items:${index}`]?.original,
+          edits[`v2:action:${index}`]?.original,
+        ].some(
+          (text) => typeof text === 'string' && text.trim() === original.trim(),
+        )
+          ? [index]
+          : [],
+    );
+    if (matches.length > 1)
+      matches = matches.filter((index) =>
+        matchesActionSource(actions[index], meta),
+      );
+    if (matches.length !== 1) return;
     // Both note formats read the same completion, including after format changes.
     for (const prefix of ['all_action_items', 'v2:action']) {
-      edits[`completion:${prefix}:${match[1]}`] = {
+      edits[`completion:${prefix}:${matches[0]}`] = {
         original: 'false',
         edited: String(completed),
         edited_at: editedAt,
@@ -129,8 +181,16 @@ export const syncMeetingActionEntitiesFromUserEdits = (
   if (meeting.user_edits_json) {
     try {
       editsMap = JSON.parse(meeting.user_edits_json);
+      if (!editsMap || typeof editsMap !== 'object' || Array.isArray(editsMap))
+        throw new Error('invalid_meeting_edits');
     } catch {
-      editsMap = {};
+      // An unreadable edit document cannot clear a user's completion decision.
+      return {
+        actionsUpdated: 0,
+        continuationsCreated: 0,
+        continuationsUpdated: 0,
+        continuationsRemoved: 0,
+      };
     }
   }
 
@@ -199,63 +259,106 @@ export const syncMeetingActionEntitiesFromUserEdits = (
   // 1. Synchronize generated / extracted action items
   for (const index of Array.from(actionIndices).sort((a, b) => a - b)) {
     const item = actionItems[index] as
-      | { text: string; assignee?: string | null; due?: string | null }
+      | {
+          text: string;
+          assignee?: string | null;
+          due?: string | null;
+          evidence?: string | null;
+        }
       | undefined;
     const v3Path = `all_action_items:${index}`;
     const v2Path = `v2:action:${index}`;
 
-    // Find the matching entity for this action item
-    let entity: PersistedEntityRow | undefined = existingEntities.find((e) => {
-      if (claimedEntityIds.has(e.id)) return false;
-      const meta = parseActionMetadata(e.metadata);
-      return meta.source_path === v3Path || meta.source_path === v2Path;
+    // Positions can change after regeneration; only task identity may carry state.
+    const originals = [
+      item?.text,
+      editsMap[v3Path]?.original,
+      editsMap[v2Path]?.original,
+    ].filter(
+      (text): text is string => typeof text === 'string' && !!text.trim(),
+    );
+    const evidence =
+      typeof item?.evidence === 'string' ? item.evidence.trim() : '';
+    const uniqueEvidence =
+      Boolean(evidence) &&
+      actionItems.filter(
+        (candidate) =>
+          typeof candidate.evidence === 'string' &&
+          candidate.evidence.trim() === evidence,
+      ).length === 1;
+    let matches = existingEntities.filter((entity) => {
+      if (claimedEntityIds.has(entity.id)) return false;
+      const metadata = parseActionMetadata(entity.metadata);
+      if (metadata.continuation_id || metadata.origin === 'user') return false;
+      const text =
+        typeof metadata.original_description === 'string'
+          ? metadata.original_description
+          : typeof metadata.full_description === 'string'
+            ? metadata.full_description
+            : entity.name;
+      if (originals.some((original) => text.trim() === original.trim()))
+        return true;
+      // Only an unreviewed suggestion may follow a wording correction. Saved
+      // evidence and its slot must both match; explicit task state never moves.
+      return (
+        uniqueEvidence &&
+        metadata.origin === 'extraction' &&
+        metadata.commitment_state === 'possible' &&
+        !metadata.reviewed_at &&
+        !metadata.user_edited &&
+        !metadata.user_completed_edited &&
+        (entity.status === null || entity.status === 'active') &&
+        !editsMap[`completion:${v3Path}`] &&
+        !editsMap[`completion:${v2Path}`] &&
+        (metadata.source_path === v3Path || metadata.source_path === v2Path) &&
+        typeof metadata.source_evidence === 'string' &&
+        metadata.source_evidence.trim() === evidence
+      );
     });
-
-    if (!entity) {
-      entity = existingEntities.find((e) => {
-        if (claimedEntityIds.has(e.id)) return false;
-        const meta = parseActionMetadata(e.metadata);
-        return (
-          meta.source_index === index &&
-          (meta.origin === 'extraction' || !meta.origin)
-        );
-      });
-    }
-
-    if (!entity) {
-      entity = existingEntities.find((e) => {
-        if (claimedEntityIds.has(e.id)) return false;
-        const meta = parseActionMetadata(e.metadata);
-        const origDesc = meta.original_description || meta.full_description;
-        return (
-          (item && origDesc === item.text) ||
-          origDesc === editsMap[v3Path]?.original ||
-          origDesc === editsMap[v2Path]?.original
-        );
-      });
-    }
-
-    if (!entity) {
-      // Positional fallback among unclaimed extraction entities
-      entity = existingEntities.find((e) => {
-        if (claimedEntityIds.has(e.id)) return false;
-        const meta = parseActionMetadata(e.metadata);
-        return meta.origin === 'extraction' || !meta.origin;
-      });
-    }
+    if (
+      matches.length > 1 ||
+      actionItems.filter(
+        (candidate) => candidate.text?.trim() === item?.text?.trim(),
+      ).length > 1
+    )
+      matches = matches.filter(
+        (entity) =>
+          item &&
+          matchesActionSource(item, parseActionMetadata(entity.metadata)),
+      );
+    // Ambiguous legacy duplicates must not inherit another action's completion.
+    const entity = matches.length === 1 ? matches[0] : undefined;
 
     if (!entity) continue;
     claimedEntityIds.add(entity.id);
 
     const meta = parseActionMetadata(entity.metadata);
-    // Require both the source slot and unique evidence before refreshing a suggestion.
+    const priorTask =
+      typeof meta.original_description === 'string'
+        ? meta.original_description
+        : typeof meta.full_description === 'string'
+          ? meta.full_description
+          : entity.name;
+    const uniqueTask =
+      actionItems.filter(
+        (candidate) =>
+          typeof candidate.text === 'string' &&
+          candidate.text.trim() === priorTask.trim(),
+      ).length === 1;
+    // Expanded citations may refresh an unchanged unique task; they cannot rebind different wording.
     const evidenceMatches =
       typeof meta.source_evidence === 'string' && meta.source_evidence.trim()
         ? actionItems.filter(
             (candidate) =>
               typeof candidate.evidence === 'string' &&
-              candidate.evidence.trim() ===
-                (meta.source_evidence as string).trim(),
+              (candidate.evidence.trim() ===
+                (meta.source_evidence as string).trim() ||
+                (uniqueTask &&
+                  typeof candidate.text === 'string' &&
+                  candidate.text.trim() === priorTask.trim() &&
+                  candidate.evidence.includes(
+                    (meta.source_evidence as string).trim(),
+                  ))),
           )
         : [];
     const correctedItem =
@@ -327,8 +430,10 @@ export const syncMeetingActionEntitiesFromUserEdits = (
       meta.source_path !== v3Path ||
       meta.source_index !== index ||
       (correctedItem &&
-        (meta.assignee_name !== assignee ||
+        (meta.original_description !== correctedItem.text ||
+          meta.assignee_name !== assignee ||
           meta.source_due_date !== correctedItem.due ||
+          meta.source_evidence !== correctedItem.evidence ||
           entity.due_date !== dueDate ||
           entity.assigned_to !== assignedTo)) ||
       Boolean(meta.user_edited) !== isUserEdited ||
@@ -346,9 +451,10 @@ export const syncMeetingActionEntitiesFromUserEdits = (
         source_meeting_id: meetingId,
         full_description: effectiveText,
         original_description:
-          typeof meta.original_description === 'string'
+          correctedItem?.text ||
+          (typeof meta.original_description === 'string'
             ? meta.original_description
-            : baseText,
+            : baseText),
         source_path: v3Path,
         source_index: index,
         ...(correctedItem
