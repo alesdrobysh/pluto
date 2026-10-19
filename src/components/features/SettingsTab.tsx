@@ -1098,7 +1098,7 @@ export const SettingsTab = ({
 
             <SettingsRow
               label="Auto-end recording"
-              helper="Stop on confirmed call departure. For a linked calendar meeting, two minutes after its end with both call audio paths quiet starts a 20-second cancellable warning. Ad-hoc calls and quiet breaks before the calendar end keep recording."
+              helper="Stop when a confirmed call app quits. If the call ends while its app stays open, you may need to end recording manually. For a linked calendar meeting, two minutes after its end with both call audio paths quiet starts a 20-second cancellable warning. Ad-hoc calls and quiet breaks before the calendar end keep recording."
               actionControl
             >
               <Toggle

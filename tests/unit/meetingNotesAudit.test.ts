@@ -100,6 +100,53 @@ it.each(['same', 'owner', 'due', 'source', 'section'])(
   },
 );
 
+it('retains the full cited passage once when reviewed points collapse to identical prose', () => {
+  const text =
+    'Do not deploy before staging tests pass, the meeting at 5 is only proposed.';
+  const source = createNotesSource(JSON.stringify([{ speaker: 'Sora', text }]));
+  const sources = [{ segment: 0, start: 0, end: text.length }];
+  const item = {
+    id: 'first',
+    kind: 'point' as const,
+    text: 'The meeting at 5 is only proposed.',
+    owner: null,
+    due: null,
+    sources,
+  };
+  const draft: NotesDraft = {
+    title: null,
+    overview: null,
+    sections: [
+      {
+        id: 's',
+        title: { id: 'h', text: 'Release', sources },
+        items: [item, { ...item, id: 'second' }],
+      },
+    ],
+  };
+  const audited = acceptEditedNotes({
+    source,
+    draft,
+    acceptancePolicy: 'conservative',
+  });
+  const result = projectAuditedNotes(audited);
+  const quote = `Sora: “${text}”`;
+  expect(result.topics[0]!.summary).toBe(quote);
+  expect(result.topics[0]!.key_points).toEqual([]);
+  expect(result.overview).toBe(quote);
+  expect(result.all_action_items).toEqual([]);
+  expect(result.all_decisions).toEqual([]);
+  expect(
+    Object.values(result.generation_metadata!.source_provenance!.blocks).some(
+      (block) => block.id === 'second',
+    ),
+  ).toBe(false);
+  expect(audited.draft.sections[0]!.items).toEqual([
+    item,
+    { ...item, id: 'second' },
+  ]);
+});
+
 it.each(['point', 'question'])(
   'defaults absent non-commitment metadata to unknown for %s only',
   (kind) => {

@@ -37,8 +37,8 @@ export function assertChatGPTSelected() {
     throw new ChatGPTError('chatgpt_cloud_consent_required');
 }
 
-export function cancelChatGPTInference() {
-  controller.abort();
+export function cancelChatGPTInference(reason?: Error) {
+  controller.abort(reason);
   controller = new AbortController();
   inferenceSignal = undefined;
 }

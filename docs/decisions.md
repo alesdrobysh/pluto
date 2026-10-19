@@ -4,6 +4,13 @@ This is the default home for durable product, design, process, and architecture 
 
 Use concise chronological entries. Link the source issue and PR whenever they exist. Create a full ADR under `docs/adr/` only when a decision has long-lived technical consequences, meaningful alternatives, and tradeoffs worth preserving in depth.
 
+## 2026-10-19 - Preserve source clauses when reviewed points collapse
+
+- **Status:** Accepted
+- **Extends:** “2026-10-19 - Hold disputed commitments for bounded source review.”
+- **Decision:** When reviewed points in one section have identical prose, owner, due date and source spans, publish one exact attributed quotation of those spans. A repeated paraphrase can omit another clause in the same cited utterance; preserving that evidence once avoids silently losing a prerequisite. Keep distinct sections and evidence separate, preserve the audited draft, and derive overview and provenance from the same projected items.
+- **Consequences:** This shared Ollama/ChatGPT projection adds no provider request or semantic heuristic. Version new output as notes-v55; retain historical notes and user edits under the existing reuse policy.
+
 ## 2026-10-19 - Hold disputed commitments for bounded source review
 
 - **Status:** Accepted
