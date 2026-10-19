@@ -38,6 +38,63 @@ const sourceDescriptors = (prompt: string): PromptDescriptor[] => {
     .map((line) => JSON.parse(line) as PromptDescriptor);
 };
 
+it('retains an omitted withdrawal and its reason as cited discussion without reviving the task', async () => {
+  const source = makeSyntheticNotesSource([
+    { speaker: 'Milo', text: 'I will replace the camera list today.' },
+    {
+      speaker: 'Milo',
+      text: 'I am withdrawing my promise to replace the camera list. The corrected list already exists.',
+    },
+    { speaker: 'Nora', text: 'The gallery inspection is complete.' },
+  ]);
+  const result = await generateMeetingNotes({
+    source,
+    context: makeNotesContext(),
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16384,
+    compactWriterContract: true,
+    hierarchyAuditStrategy: 'deterministic_only',
+    generate: async () =>
+      JSON.stringify({
+        title: null,
+        sections: [
+          {
+            title: 'Gallery',
+            items: [
+              {
+                kind: 'point',
+                text: 'The gallery inspection is complete.',
+                owner: null,
+                due: null,
+                sources: [
+                  {
+                    segment: 2,
+                    start: 0,
+                    end: source.segments[2]!.text.length,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+  });
+  expect(result.all_action_items).toHaveLength(0);
+  expect(JSON.stringify(result.topics)).toContain('withdrawing my promise');
+  expect(JSON.stringify(result.topics)).toContain(
+    'The corrected list already exists',
+  );
+  expect(result.quality.issues).not.toContain(
+    'notes_guardrail:missing_cancellation_context',
+  );
+  expect(
+    Object.values(result.generation_metadata!.source_provenance!.blocks).some(
+      (block) => block.sources.some((span) => span.segment === 1),
+    ),
+  ).toBe(true);
+});
+
 it.each(['repair', 'missing-condition', 'cancelled', 'unavailable'])(
   'holds an unsafe action for source review: %s',
   async (mode) => {

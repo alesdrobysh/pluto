@@ -630,7 +630,36 @@ const deterministicallyCheckedDraft = (
     evidenceSpans,
   );
   const issues = checkGuardrails(checkedDraft);
-  const auditedIssues: string[] = issues.map(
+  for (const [index, issue] of issues.entries()) {
+    if (issue.code !== 'missing_cancellation_context') continue;
+    const section = checkedDraft.sections.at(-1);
+    if (!section) continue;
+    let id = `source-cancellation:${index}`;
+    while (
+      checkedDraft.sections.some((entry) =>
+        entry.items.some((item) => item.id === id),
+      )
+    )
+      id += ':source';
+    const passages = groupCitedSourcePassages(
+      input.source,
+      issue.sources.flatMap((span) =>
+        completeCitedSourceWindow(input.source, [span]),
+      ),
+    );
+    // A missing withdrawal stays visible as exact speech, never as revived work.
+    section.items.push({
+      id,
+      kind: 'point',
+      owner: null,
+      due: null,
+      sources: passages.flatMap(({ spans }) => spans),
+      text: passages
+        .map(({ speaker, text }) => `${speaker ?? 'Speaker'}: “${text}”`)
+        .join('\n'),
+    });
+  }
+  const auditedIssues: string[] = checkGuardrails(checkedDraft).map(
     (issue) => `notes_guardrail:${issue.code}`,
   );
   const reviewOriginals = new Map<string, NotesItem>();
