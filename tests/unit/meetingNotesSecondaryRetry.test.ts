@@ -64,7 +64,7 @@ it('retries failed secondary work for a published revision without regenerating 
   const coordinator = createMeetingAnalysisRunCoordinator({
     db,
     getSettings: async () => ({}),
-    getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
+    getProvider: async () => ({ name: 'Ollama (Local)', generateStructuredAnalysis }),
     runSecondary,
     onUpdated,
   });
@@ -119,7 +119,7 @@ it.each(['secondary', 'automatic'] as const)(
               id: 'auto',
               revision: resolveMeetingNotesTemplateInput('auto').revision,
             },
-            provider: 'ollama',
+            provider: 'Ollama (Local)',
             model: 'gemma4:12b',
             thinking: null,
             seed: null,
@@ -163,7 +163,7 @@ it.each(['secondary', 'automatic'] as const)(
         await initialization;
         return { ollama_model: 'gemma4:12b' };
       },
-      getProvider: async () => ({ name: 'ollama', generateStructuredAnalysis }),
+      getProvider: async () => ({ name: 'Ollama (Local)', generateStructuredAnalysis }),
       runSecondary,
     });
     const retry = coordinator.generateAndPublishMeetingNotes({
