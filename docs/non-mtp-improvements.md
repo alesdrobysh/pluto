@@ -30,6 +30,12 @@ start of a task. The extracted ownership filter uses saved owner fields, explici
 user-created or adopted tasks, and source-linked assignee metadata. Ambiguous
 ownership stays out of personal reminders.
 
+Release acceptance additionally disambiguates identically worded tasks by recorded
+owner and evidence. Existing source review can repair disputed conditions before
+promotion; missing withdrawal context and unsupported personal references retain
+attributed source speech. Complete literal policies keep their source wording.
+These changes retain the existing model, context, request and deadline limits.
+
 ## Already preserved in PR #880
 
 The ChatGPT integration already includes its earlier owner/deadline corrections,
@@ -42,8 +48,8 @@ need to be reintroduced from the integration branch.
 - MTP model defaults, setup/version gates, automatic model migrations, residency
   tuning, native runners, or performance promotion. The memory and quality gates
   were not met.
-- The later experimental notes-review protocol, larger review budgets, and prompt
-  changes. Those need an independent provider-specific quality and usage review;
+- The later experimental notes-review protocol, larger review budgets, and MTP prompt
+  variants. Those need an independent provider-specific quality and usage review;
   passing schema or unit tests does not establish note quality.
 - New prose-pattern completion, decision, or ownership classifiers. These do not
   meet the requested structured-evidence approach.
