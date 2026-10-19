@@ -239,32 +239,33 @@ export const resolveMeetingFailurePresentation = (
   if (input.downstreamFailed) {
     if (input.downstreamFailureCode === 'chatgpt_sign_in_required') {
       return {
-        title: 'Connect ChatGPT to generate notes',
+        title: 'ChatGPT wasn’t connected',
         detail:
-          'Your transcript is saved. Sign in and enable ChatGPT in Settings → Intelligence, then retry.',
+          'Your transcript is saved. To use ChatGPT, connect it in Settings → Intelligence, then retry.',
         actionLabel: 'Retry analysis',
       };
     }
     if (input.downstreamFailureCode === 'chatgpt_model_required') {
       return {
-        title: 'Choose a ChatGPT model',
+        title: 'No ChatGPT model was selected',
         detail:
-          'Your transcript is saved. Choose a model in Settings → Intelligence, then retry.',
+          'Your transcript is saved. To use ChatGPT, choose a model in Settings → Intelligence, then retry.',
         actionLabel: 'Retry analysis',
       };
     }
     if (input.downstreamFailureCode === 'chatgpt_cloud_consent_required') {
       return {
-        title: 'Enable ChatGPT for intelligence',
+        title: 'ChatGPT sharing wasn’t enabled',
         detail:
-          'Your transcript is saved. Review sharing in Settings → Intelligence, then retry.',
+          'Your transcript is saved. To use ChatGPT, review sharing in Settings → Intelligence, then retry.',
         actionLabel: 'Retry analysis',
       };
     }
     if (input.downstreamFailureCode === 'provider_unavailable') {
       return {
-        title: 'Start Ollama to generate notes',
-        detail: 'Your transcript is saved. Open Ollama, then retry analysis.',
+        title: 'Ollama wasn’t available',
+        detail:
+          'Your transcript is saved. If you use Ollama, open it, then retry analysis.',
         actionLabel: 'Retry analysis',
       };
     }

@@ -180,23 +180,23 @@ describe('meeting failure presentation', () => {
   it.each([
     [
       'chatgpt_sign_in_required',
-      'Connect ChatGPT to generate notes',
-      'Your transcript is saved. Sign in and enable ChatGPT in Settings → Intelligence, then retry.',
+      'ChatGPT wasn’t connected',
+      'Your transcript is saved. To use ChatGPT, connect it in Settings → Intelligence, then retry.',
     ],
     [
       'chatgpt_model_required',
-      'Choose a ChatGPT model',
-      'Your transcript is saved. Choose a model in Settings → Intelligence, then retry.',
+      'No ChatGPT model was selected',
+      'Your transcript is saved. To use ChatGPT, choose a model in Settings → Intelligence, then retry.',
     ],
     [
       'chatgpt_cloud_consent_required',
-      'Enable ChatGPT for intelligence',
-      'Your transcript is saved. Review sharing in Settings → Intelligence, then retry.',
+      'ChatGPT sharing wasn’t enabled',
+      'Your transcript is saved. To use ChatGPT, review sharing in Settings → Intelligence, then retry.',
     ],
     [
       'provider_unavailable',
-      'Start Ollama to generate notes',
-      'Your transcript is saved. Open Ollama, then retry analysis.',
+      'Ollama wasn’t available',
+      'Your transcript is saved. If you use Ollama, open it, then retry analysis.',
     ],
   ])(
     'explains recovery for %s without hiding the saved transcript',
