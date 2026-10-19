@@ -39,19 +39,17 @@ it('asks the compact writer for complete items and bounded evidence', () => {
   expect(prompt).toContain('owner: string | null');
   expect(prompt).toContain('due: string | null');
   expect(
-    prompt.startsWith('Start the notes with accepted current responsibilities and future commitments'),
+    prompt.startsWith(
+      'Start the notes with accepted current responsibilities and future commitments',
+    ),
   ).toBe(true);
   expect(prompt).toContain('Do not substitute an earlier tentative plan');
   expect(prompt).toContain('Routine farewells');
   expect(prompt).toContain('A promised call about a specific task');
   expect(prompt).toContain('account for every source turn');
-  expect(prompt).toContain(
-    'Retain every explicit settled choice as kind decision',
-  );
+  expect(prompt).toContain('Only explicit settled choices are decisions');
   expect(prompt).toContain('conditional possible refusal');
-  expect(prompt).toContain(
-    "each speaker's explicit experience, feeling and reason",
-  );
+  expect(prompt).toContain("each speaker's own experience, feeling and reason");
   expect(prompt).toContain(
     'retain every accepted future commitment as an action',
   );

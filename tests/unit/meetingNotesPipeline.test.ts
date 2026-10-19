@@ -38,6 +38,45 @@ const sourceDescriptors = (prompt: string): PromptDescriptor[] => {
     .map((line) => JSON.parse(line) as PromptDescriptor);
 };
 
+it('preserves the exact failure criterion and pending state of conditional discussion without creating a decision', async () => {
+  const text =
+    'If the accessibility test fails, we will decline the map offer. The test has not happened, so no decision on that offer has been made.';
+  const source = makeSyntheticNotesSource([{ speaker: 'Milo', text }]);
+  const generate = vi.fn(async () =>
+    JSON.stringify({
+      title: null,
+      sections: [
+        {
+          title: 'Map',
+          items: [
+            {
+              kind: 'point',
+              text: 'The decision to decline the map offer is contingent on the test outcome.',
+              owner: null,
+              due: null,
+              sources: [{ segment: 0, start: 0, end: text.length }],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const result = await generateMeetingNotes({
+    source,
+    context: makeNotesContext(),
+    provider: 'ollama',
+    model: 'gemma4:12b',
+    contextTokens: 16384,
+    compactWriterContract: true,
+    hierarchyAuditStrategy: 'deterministic_only',
+    generate,
+  });
+  expect(generate).toHaveBeenCalledOnce();
+  expect(result.all_action_items).toHaveLength(0);
+  expect(result.all_decisions).toHaveLength(0);
+  expect(JSON.stringify(result.topics)).toContain(text);
+});
+
 it('retains an omitted withdrawal and its reason as cited discussion without reviving the task', async () => {
   const source = makeSyntheticNotesSource([
     { speaker: 'Milo', text: 'I will replace the camera list today.' },

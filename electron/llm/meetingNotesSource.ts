@@ -204,3 +204,12 @@ export const groupCitedSourcePassages = (
   }
   return passages;
 };
+
+/** Render exact attributed speech without inferring scope or identity. */
+export const quoteCitedSourcePassages = (
+  source: NotesSource,
+  spans: SourceSpan[],
+): string =>
+  groupCitedSourcePassages(source, spans)
+    .map(({ speaker, text }) => `${speaker ?? 'Speaker'}: “${text}”`)
+    .join('\n');

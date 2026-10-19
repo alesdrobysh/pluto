@@ -19,7 +19,7 @@ const TASK_BOUNDARY = new RegExp(
 );
 const PROMISE =
   /^(?:yes[, ]+|okay[, ]+|sure[, ]+)?(?:i['’]ll|i will|i commit to)\s+(.+)$/i;
-const CONDITION =
+export const CONDITION =
   /\b(?:only if|if|unless|until|once|after|when|provided(?: that)?|pending|subject to|conditional on|contingent (?:on|upon))\b/i;
 // Recognizable trailing due phrases are metadata, not task identity. Do not
 // strip arbitrary "by ..." text, which could name the task's recipient/author.

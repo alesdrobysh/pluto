@@ -4,7 +4,10 @@ import {
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
 import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
-import { createNotesSource } from '../../electron/llm/meetingNotesSource';
+import {
+  createNotesSource,
+  quoteCitedSourcePassages,
+} from '../../electron/llm/meetingNotesSource';
 import type { NotesDraft } from '../../electron/llm/meetingNotesTypes';
 
 const fixture = (
@@ -56,6 +59,79 @@ const response = (values: Record<string, unknown> = {}) =>
   JSON.stringify({ resolutions: [resolution(values)] });
 
 describe('bounded source-bound semantic notes review', () => {
+  it('does not spend another review request rewriting exact attributed speech', async () => {
+    const text = 'My cousin uses she and her.';
+    const { notes, source, sources } = fixture(text, text);
+    notes.draft.sections[0]!.items[0] = {
+      ...notes.draft.sections[0]!.items[0]!,
+      kind: 'point',
+      owner: null,
+      text: quoteCitedSourcePassages(source, sources),
+    };
+    notes.issues = [];
+    notes.proseReviewItems = [];
+    const generate = vi.fn();
+    await reviewSourceBoundNotes(notes, generate);
+    expect(generate).not.toHaveBeenCalled();
+  });
+  it('records the complete source window used by a fallback quotation', async () => {
+    const source = createNotesSource(
+      JSON.stringify([
+        { speaker: 'Remote Speaker 2', text: 'The lift worked.' },
+        { speaker: 'Remote Speaker 3', text: 'The landing was clear.' },
+        {
+          speaker: 'Remote Speaker 2',
+          text: 'I felt relieved because the stairs had worried me.',
+        },
+      ]),
+    );
+    const sources = [0, 2].map((segment) => ({
+      segment,
+      start: 0,
+      end: source.segments[segment]!.text.length,
+    }));
+    const draft: NotesDraft = {
+      title: null,
+      overview: null,
+      sections: [
+        {
+          id: 's',
+          title: { id: 'h', text: 'Visit', sources },
+          items: [
+            {
+              id: 'task',
+              kind: 'point',
+              text: 'Remote Speaker 2 was relieved because she had worried about stairs.',
+              owner: null,
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    };
+    const notes = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    const reviewed = await reviewSourceBoundNotes(notes, async () => {
+      throw new Error('unavailable');
+    });
+    expect(reviewed.draft.sections[0]!.items[0]!.text).toContain(
+      'The landing was clear',
+    );
+    expect(
+      reviewed.draft.sections[0]!.items[0]!.sources.map((span) => span.segment),
+    ).toEqual([0, 1, 2]);
+    const blocks = Object.values(
+      projectAuditedNotes(reviewed).generation_metadata!.source_provenance!
+        .blocks,
+    ).filter((block) => block.id === 'task');
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks)
+      expect(block.sources.map((span) => span.segment)).toEqual([0, 1, 2]);
+  });
   it('keeps a complete literal policy instead of broadening its privacy restriction', async () => {
     const policy =
       'Only aggregate counts may be published to protect participants.';

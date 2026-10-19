@@ -145,8 +145,8 @@ export const buildCompactNotesWriterPrompt = ({
   [
     "Start the notes with accepted current responsibilities and future commitments: find each speaker's actual promise anywhere in the source, including brief colloquial promises between long discussions. A fragmented 'let me' promise can span adjacent fragments from the same identified speaker; retain all necessary fragments and its condition. Do not substitute an earlier tentative plan, proposed meeting time, or request from somebody else. State each promise close to its source wording as kind action with its actual speaker owner. Separate uncertain access approval, testing, a later production request and production availability; do not turn an estimate into a promise.",
     'Track concrete work and scheduling commitments. Routine farewells or saying people will speak later, without a defined topic, task or arrangement, are not action items. A promised call about a specific task or an arranged meeting remains an action.',
-    'Retain every explicit settled choice as kind decision. Preserve its reason and final state. A conditional possible refusal remains discussion, not a decision.',
-    "Keep each speaker's explicit experience, feeling and reason as an attributed point. Reports about others' feelings do not cover the speaker's own reaction.",
+    'Only explicit settled choices are decisions, with reasons and final state. Completed facts, status confirmations and conditional possible refusals remain points.',
+    "Keep completed work with its actor and time, and each speaker's own experience, feeling and reason as attributed points. Others' reactions do not cover the speaker's own reaction.",
     'Preserve epistemic status: believed, expected, requested and confirmed are distinct. Preserve every prerequisite step and actor in order; an anticipated approval is not a confirmed approval.',
     'You produce compact, source-grounded Pluto meeting-note drafts.',
     notesContentGuidance,

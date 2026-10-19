@@ -26,6 +26,7 @@ import { identifyEditedNotes } from './meetingNotesEditorIdentity';
 import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import { isTransientMeetingNotesLeafFailure } from './meetingNotesFailures';
 import {
+  CONDITION,
   createNotesGuardrailChecker,
   findNotesGuardrailIssues,
 } from './meetingNotesGuardrails';
@@ -45,6 +46,7 @@ import {
 import {
   completeCitedSourceWindow,
   groupCitedSourcePassages,
+  quoteCitedSourcePassages,
 } from './meetingNotesSource';
 import { resolveMeetingNotesTemplateInput } from './meetingNotesTemplates';
 import {
@@ -647,16 +649,15 @@ const deterministicallyCheckedDraft = (
         completeCitedSourceWindow(input.source, [span]),
       ),
     );
+    const sources = passages.flatMap(({ spans }) => spans);
     // A missing withdrawal stays visible as exact speech, never as revived work.
     section.items.push({
       id,
       kind: 'point',
       owner: null,
       due: null,
-      sources: passages.flatMap(({ spans }) => spans),
-      text: passages
-        .map(({ speaker, text }) => `${speaker ?? 'Speaker'}: “${text}”`)
-        .join('\n'),
+      sources,
+      text: quoteCitedSourcePassages(input.source, sources),
     });
   }
   const auditedIssues: string[] = checkGuardrails(checkedDraft).map(
@@ -667,6 +668,23 @@ const deterministicallyCheckedDraft = (
   // must not remove unrelated, source-supported work from that turn.
   for (const section of checkedDraft.sections) {
     section.items = section.items.flatMap((item) => {
+      // Preserve conditional discussion literally; classification stays unchanged.
+      if (item.kind === 'point' && CONDITION.test(item.text)) {
+        const passages = groupCitedSourcePassages(
+          input.source,
+          item.sources.flatMap((span) =>
+            completeCitedSourceWindow(input.source, [span]),
+          ),
+        );
+        const sources = passages.flatMap(({ spans }) => spans);
+        return [
+          {
+            ...item,
+            sources,
+            text: quoteCitedSourcePassages(input.source, sources),
+          },
+        ];
+      }
       if (item.kind !== 'action') return [item];
       const unsafe = checkGuardrails(
         { ...checkedDraft, sections: [{ ...section, items: [item] }] },
