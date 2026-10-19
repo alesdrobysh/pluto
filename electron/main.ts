@@ -7747,7 +7747,6 @@ app.whenReady().then(async () => {
                 signal: controller.signal,
                 onStart: () => {
                   recordProgress?.('started');
-                  providerStartedAt ??= Date.now();
                 },
                 onProgress: () => recordProgress?.('token'),
               })

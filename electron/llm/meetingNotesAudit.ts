@@ -15,6 +15,7 @@ import { classifySuspectNotesProse } from './meetingNotesProseQuality';
 import {
   completeCitedSourceWindow,
   groupCitedSourcePassages,
+  quoteCitedSourcePassages,
   resolveSourceSpan,
 } from './meetingNotesSource';
 import {
@@ -1433,23 +1434,37 @@ export const projectAuditedNotes = (
   const draft = {
     ...audited.draft,
     sections: audited.draft.sections.map((section) => {
-      const seen = new Set<string>();
+      const seen = new Map<string, number>();
+      const items: NotesItem[] = [];
+      for (const item of section.items) {
+        if (item.kind === 'question') {
+          items.push(item);
+          continue;
+        }
+        const key = JSON.stringify([
+          item.kind,
+          item.text,
+          item.owner,
+          item.due,
+          item.sources,
+        ]);
+        const duplicate = seen.get(key);
+        if (duplicate !== undefined) {
+          if (item.kind === 'point') {
+            // Collapsed prose can omit a source clause; retain the exact evidence once.
+            items[duplicate] = {
+              ...items[duplicate]!,
+              text: quoteCitedSourcePassages(audited.source, item.sources),
+            };
+          }
+          continue;
+        }
+        seen.set(key, items.length);
+        items.push(item);
+      }
       return {
         ...section,
-        items: section.items.filter((item) => {
-          if (item.kind !== 'action' && item.kind !== 'decision') return true;
-          // Reclassification can produce the same commitment twice within one scope.
-          const key = JSON.stringify([
-            item.kind,
-            item.text,
-            item.owner,
-            item.due,
-            item.sources,
-          ]);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        }),
+        items,
       };
     }),
   };
