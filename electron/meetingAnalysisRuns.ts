@@ -26,6 +26,7 @@ import {
 } from './llm/meetingNotesTypes';
 import type { MeetingNotesTemplate } from './llm/prompts';
 import type { LLMProvider } from './llm/provider';
+import { getProviderDisplayName } from './llm/providerCatalog';
 import { createMeetingNotesPreviewStore } from './meetingNotesPreview';
 import { createMeetingNotesScheduler } from './meetingNotesScheduler';
 
@@ -378,6 +379,22 @@ const stringSetting = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 
 const errorCode = (error: unknown): string => {
+  const initializationCodes = [
+    'chatgpt_sign_in_required',
+    'chatgpt_model_required',
+    'chatgpt_cloud_consent_required',
+    'openai_cloud_consent_required',
+    'openrouter_cloud_consent_required',
+    'gemini_cloud_consent_required',
+    'claude_cloud_consent_required',
+    'provider_unavailable',
+  ];
+  if (error instanceof Error) {
+    const code = (error as Error & { code?: unknown }).code;
+    if (typeof code === 'string' && initializationCodes.includes(code))
+      return code;
+    if (initializationCodes.includes(error.message)) return error.message;
+  }
   if (
     error instanceof Error &&
     /^chatgpt_(daily_limit|background_paused|background_limit|usage_storage_error)$/.test(
@@ -468,7 +485,10 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     }
   });
   const startSecondary = (
-    input: Parameters<NonNullable<typeof dependencies.runSecondary>>[0],
+    input: Omit<
+      Parameters<NonNullable<typeof dependencies.runSecondary>>[0],
+      'provider'
+    > & { provider: NotesProvider | (() => Promise<NotesProvider>) },
     controller: AbortController,
   ): Promise<void> => {
     if (
@@ -495,19 +515,26 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
     };
     return Promise.resolve()
       .then(async () => {
+        if (!input.canCommit()) return;
+        const provider =
+          typeof input.provider === 'function'
+            ? await input.provider()
+            : input.provider;
+        if (!input.canCommit()) return;
+        const resolvedInput = { ...input, provider };
         const meeting = dependencies.db.getMeeting(input.meetingId);
         if (
           input.canCommit() &&
           !input.analysis.title &&
           meeting &&
           meetingTitleNeedsGeneration(meeting.title) &&
-          input.provider.generateTitle &&
+          provider.generateTitle &&
           dependencies.db.saveMeetingAnalysisSecondaryFieldsIfCurrent
         ) {
           update('running', 'title');
           try {
             const title = (
-              await input.provider.generateTitle(
+              await provider.generateTitle(
                 [
                   input.analysis.overview,
                   ...input.analysis.topics.map((topic) => topic.title),
@@ -529,7 +556,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         }
         if (input.canCommit() && dependencies.runSecondary) {
           update('running', 'value_signals');
-          await dependencies.runSecondary(input);
+          await dependencies.runSecondary(resolvedInput);
         }
       })
       .then(() => update('complete', 'complete'))
@@ -648,7 +675,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       userNotesHash,
       terms,
       template: { id: template.id, revision: template.revision },
-      provider: provider.name,
+      provider: getProviderDisplayName(settings.llm_provider || 'ollama'),
       model: configuredModel(settings),
       thinking: settings.ollama_structured_thinking ?? null,
       seed: settings.ollama_seed ?? null,
@@ -726,7 +753,6 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
       settings,
       input.reason === 'manual' ? input.template : undefined,
     );
-    const provider = await dependencies.getProvider(settings);
     // All paths, including an automatic retry of secondary work, must pair
     // the current document with its run after asynchronous initialization.
     meeting = dependencies.db.getMeeting(meetingId);
@@ -769,7 +795,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             ...identity,
             transcript: analysisTranscript(meeting),
             analysis: JSON.parse(meeting.analysis_json) as AnalysisDocumentV3,
-            provider,
+            provider: () => dependencies.getProvider(settings),
             signal: controller.signal,
             canCommit: () =>
               !controller.signal.aborted &&
@@ -797,7 +823,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
         ? { trustedUserTerms: projection.trustedUserTerms }
         : {}),
       template: { id: template.id, revision: template.revision },
-      provider: provider.name,
+      provider: getProviderDisplayName(settings.llm_provider || 'ollama'),
       model: configuredModel(settings),
       thinking: settings.ollama_structured_thinking ?? null,
       seed: settings.ollama_seed ?? null,
@@ -901,7 +927,7 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
             ...identity,
             transcript: analysisTranscript(meeting),
             analysis,
-            provider,
+            provider: () => dependencies.getProvider(settings),
             signal: controller.signal,
             canCommit: () =>
               !controller.signal.aborted &&
@@ -1000,6 +1026,17 @@ export const createMeetingAnalysisRunCoordinator = (dependencies: {
           ) {
             throw new Error('meeting_notes_superseded');
           }
+          const provider = await dependencies.getProvider(settings);
+          if (controller.signal.aborted) throw controller.signal.reason;
+          if (
+            !dependencies.db.isMeetingAnalysisRunCurrent({
+              meetingId,
+              runId,
+              inputRevision: fingerprint,
+              ...revisions,
+            })
+          )
+            throw new Error('meeting_notes_superseded');
           const admittedNotesInput = notesSource(admittedMeeting);
           source = admittedNotesInput.source;
           dependencies.db.updateMeetingAnalysisRunStatusIfCurrent({

@@ -237,6 +237,37 @@ export const resolveMeetingFailurePresentation = (
     };
   }
   if (input.downstreamFailed) {
+    if (input.downstreamFailureCode === 'chatgpt_sign_in_required') {
+      return {
+        title: 'Connect ChatGPT to generate notes',
+        detail:
+          'Your transcript is saved. Sign in and enable ChatGPT in Settings → Intelligence, then retry.',
+        actionLabel: 'Retry analysis',
+      };
+    }
+    if (input.downstreamFailureCode === 'chatgpt_model_required') {
+      return {
+        title: 'Choose a ChatGPT model',
+        detail:
+          'Your transcript is saved. Choose a model in Settings → Intelligence, then retry.',
+        actionLabel: 'Retry analysis',
+      };
+    }
+    if (input.downstreamFailureCode === 'chatgpt_cloud_consent_required') {
+      return {
+        title: 'Enable ChatGPT for intelligence',
+        detail:
+          'Your transcript is saved. Review sharing in Settings → Intelligence, then retry.',
+        actionLabel: 'Retry analysis',
+      };
+    }
+    if (input.downstreamFailureCode === 'provider_unavailable') {
+      return {
+        title: 'Start Ollama to generate notes',
+        detail: 'Your transcript is saved. Open Ollama, then retry analysis.',
+        actionLabel: 'Retry analysis',
+      };
+    }
     if (input.downstreamFailureCode === 'notes_bounded_plan_exceeded') {
       // A saved failure describes the previous run, whose planner or model may
       // differ from the current one. It cannot establish present capacity.

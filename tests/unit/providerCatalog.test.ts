@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PROVIDER_DEFAULT_MODELS,
+  getProviderDisplayName,
   resolveConfiguredProviderModel,
 } from '../../electron/llm/providerCatalog';
 import { OLLAMA_GENERAL_MODEL } from '../../src/utils/ollamaModels';
@@ -130,3 +131,17 @@ describe('configured provider model diagnostics', () => {
     },
   );
 });
+
+it.each([
+  ['ollama', 'Ollama (Local)'],
+  ['chatgpt', 'ChatGPT'],
+  ['gemini', 'Google Gemini'],
+  ['openai', 'OpenAI'],
+  ['openrouter', 'OpenRouter'],
+  ['claude', 'Anthropic Claude'],
+] as const)(
+  'preserves the production fingerprint label for %s',
+  (provider, label) => {
+    expect(getProviderDisplayName(provider)).toBe(label);
+  },
+);

@@ -67,7 +67,10 @@ import type {
   LLMSettings,
   ProviderType,
 } from './provider';
-import { resolveGeminiModelName } from './providerCatalog';
+import {
+  getProviderDisplayName,
+  resolveGeminiModelName,
+} from './providerCatalog';
 import { ChatGPTInferenceError, executeChatGPT } from './transports/chatGPT';
 import {
   InferenceTransportError,
@@ -549,7 +552,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     private providerType: ProviderType,
     private settings: LLMSettings,
   ) {
-    this.name = this.getProviderName(providerType);
+    this.name = getProviderDisplayName(providerType);
     this.requiresApiKey =
       providerType !== 'ollama' && providerType !== 'chatgpt';
   }
@@ -1210,25 +1213,6 @@ export class UnifiedLLMProvider implements LLMProvider {
         `[${this.name}] Failed to extract entities: entity_extraction_failed`,
       );
       throw new SecondaryExtractionError('entity_extraction_failed', e);
-    }
-  }
-
-  private getProviderName(provider: ProviderType): string {
-    switch (provider) {
-      case 'ollama':
-        return 'Ollama (Local)';
-      case 'gemini':
-        return 'Google Gemini';
-      case 'chatgpt':
-        return 'ChatGPT';
-      case 'openai':
-        return 'OpenAI';
-      case 'openrouter':
-        return 'OpenRouter';
-      case 'claude':
-        return 'Anthropic Claude';
-      default:
-        return 'LLM';
     }
   }
 

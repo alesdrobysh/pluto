@@ -177,6 +177,45 @@ describe('meeting failure presentation', () => {
     });
   });
 
+  it.each([
+    [
+      'chatgpt_sign_in_required',
+      'Connect ChatGPT to generate notes',
+      'Your transcript is saved. Sign in and enable ChatGPT in Settings → Intelligence, then retry.',
+    ],
+    [
+      'chatgpt_model_required',
+      'Choose a ChatGPT model',
+      'Your transcript is saved. Choose a model in Settings → Intelligence, then retry.',
+    ],
+    [
+      'chatgpt_cloud_consent_required',
+      'Enable ChatGPT for intelligence',
+      'Your transcript is saved. Review sharing in Settings → Intelligence, then retry.',
+    ],
+    [
+      'provider_unavailable',
+      'Start Ollama to generate notes',
+      'Your transcript is saved. Open Ollama, then retry analysis.',
+    ],
+  ])(
+    'explains recovery for %s without hiding the saved transcript',
+    (code, title, detail) => {
+      expect(
+        resolveMeetingFailurePresentation({
+          retryableFinalTranscription: false,
+          speakerAttributionFailure: false,
+          resourcePolicyDenied: false,
+          captureRecoveryRequired: false,
+          captureGap: false,
+          hasExistingAnalysis: false,
+          downstreamFailed: true,
+          downstreamFailureCode: code,
+        }),
+      ).toEqual({ title, detail, actionLabel: 'Retry analysis' });
+    },
+  );
+
   it('allows manual retry because a saved capacity failure describes a previous run', () => {
     expect(
       resolveMeetingFailurePresentation({

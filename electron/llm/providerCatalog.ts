@@ -9,6 +9,25 @@ import type {
 } from './inferenceTypes';
 import type { LLMSettings } from './provider';
 
+export const getProviderDisplayName = (provider: unknown): string => {
+  switch (provider) {
+    case 'ollama':
+      return 'Ollama (Local)';
+    case 'gemini':
+      return 'Google Gemini';
+    case 'chatgpt':
+      return 'ChatGPT';
+    case 'openai':
+      return 'OpenAI';
+    case 'openrouter':
+      return 'OpenRouter';
+    case 'claude':
+      return 'Anthropic Claude';
+    default:
+      return 'LLM';
+  }
+};
+
 export const CLOUD_CONSENT_VERSION = '1';
 
 export const PROVIDER_DEFAULT_MODELS: Record<ProviderId, string> = {
