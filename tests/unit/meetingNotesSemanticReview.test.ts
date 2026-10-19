@@ -56,36 +56,46 @@ const response = (values: Record<string, unknown> = {}) =>
   JSON.stringify({ resolutions: [resolution(values)] });
 
 describe('bounded source-bound semantic notes review', () => {
-  it('reviews gendered discussion against its own source without inferring identity from a name', async () => {
-    const { notes } = fixture(
-      'The lift worked. I felt relieved because carrying the pieces upstairs had worried me.',
-      'Remote Speaker 2 felt relieved because she had worried about carrying the pieces upstairs.',
-    );
-    notes.draft.sections[0]!.items[0] = {
-      ...notes.draft.sections[0]!.items[0]!,
-      kind: 'point',
-      text: 'Remote Speaker 2 felt relieved because she had worried about carrying the pieces upstairs.',
-      owner: null,
-      due: null,
-    };
-    notes.issues = [];
-    notes.proseReviewItems = [];
-    const generate = vi.fn(async ({ prompt }) => {
-      expect(prompt).toContain('never infer gender from a name');
-      expect(prompt).toContain('The lift worked. I felt relieved');
-      return response({
+  it.each(['neutral', 'still-gendered', 'unavailable'])(
+    'keeps unsupported personal references out of discussion: %s',
+    async (mode) => {
+      const { notes } = fixture(
+        'The lift worked. I felt relieved because carrying the pieces upstairs had worried me.',
+        'Remote Speaker 2 felt relieved because she had worried about carrying the pieces upstairs.',
+      );
+      notes.draft.sections[0]!.items[0] = {
+        ...notes.draft.sections[0]!.items[0]!,
         kind: 'point',
-        text: 'Remote Speaker 2 felt relieved that the lift worked because carrying the pieces upstairs had been a concern.',
+        text: 'Remote Speaker 2 felt relieved because she had worried about carrying the pieces upstairs.',
         owner: null,
+        due: null,
+      };
+      notes.issues = [];
+      notes.proseReviewItems = [];
+      const generate = vi.fn(async ({ prompt }) => {
+        expect(prompt).toContain('never infer gender from a name');
+        expect(prompt).toContain('The lift worked. I felt relieved');
+        if (mode === 'unavailable') throw new Error('provider_unavailable');
+        return response({
+          kind: 'point',
+          text:
+            mode === 'still-gendered'
+              ? 'Remote Speaker 2 felt relieved because carrying the pieces upstairs had worried her.'
+              : 'Remote Speaker 2 felt relieved that the lift worked because carrying the pieces upstairs had been a concern.',
+          owner: null,
+        });
       });
-    });
-    const reviewed = await reviewSourceBoundNotes(notes, generate);
-    expect(generate).toHaveBeenCalledOnce();
-    expect(JSON.stringify(projectAuditedNotes(reviewed).topics)).not.toMatch(
-      /\bshe\b/,
-    );
-    expect(projectAuditedNotes(reviewed).all_action_items).toHaveLength(0);
-  });
+      const reviewed = await reviewSourceBoundNotes(notes, generate);
+      expect(generate).toHaveBeenCalledOnce();
+      expect(JSON.stringify(projectAuditedNotes(reviewed).topics)).not.toMatch(
+        /\b(?:she|her)\b/,
+      );
+      expect(projectAuditedNotes(reviewed).all_action_items).toHaveLength(0);
+      expect(JSON.stringify(projectAuditedNotes(reviewed).topics)).toContain(
+        'relieved',
+      );
+    },
+  );
   it('restores a valid promise rejected by the legacy wording check and rebuilds canonical provenance', async () => {
     const { notes, sources } = fixture();
     expect(notes.draft.sections[0]!.items[0]!.kind).toBe('point');

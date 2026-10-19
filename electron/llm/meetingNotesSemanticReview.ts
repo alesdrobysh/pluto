@@ -11,7 +11,7 @@ import {
 
 /** Review meaning from exact passages; structural checks cannot infer acceptance or scope. */
 export const reviewSourceBoundNotes = async (
-  notes: AuditedNotes,
+  inputNotes: AuditedNotes,
   generate: (request: {
     prompt: string;
     responseSchema: Record<string, unknown>;
@@ -20,12 +20,21 @@ export const reviewSourceBoundNotes = async (
   maxSourceCharacters = 12_000,
 ): Promise<AuditedNotes> => {
   signal?.throwIfAborted();
+  let notes = inputNotes;
+  const genderedPronouns = (text: string): string[] =>
+    text
+      .toLowerCase()
+      .match(/\b(?:he|she|his|her|hers|him|himself|herself)\b/g) ?? [];
+  const introducesPronouns = (text: string, source: string) =>
+    genderedPronouns(text).some(
+      (word) => !genderedPronouns(source).includes(word),
+    );
   const candidates = notes.draft.sections.flatMap((section) =>
     section.items.filter(
       (item) =>
         item.kind === 'action' ||
         item.kind === 'decision' ||
-        /\b(?:he|she|his|her|hers|him|himself|herself)\b/i.test(item.text) ||
+        genderedPronouns(item.text).length > 0 ||
         notes.issues?.some(
           (issue) =>
             issue.startsWith('deterministic_') && issue.endsWith(`:${item.id}`),
@@ -39,10 +48,38 @@ export const reviewSourceBoundNotes = async (
     return notes;
   };
   try {
-    if (candidates.length > 16)
-      return unavailable('semantic_notes_review_capacity');
     if (new Set(candidates.map((item) => item.id)).size !== candidates.length)
       return unavailable('semantic_notes_review_unavailable');
+    // Keep exact attributed speech when a draft invents a personal reference, even if review fails.
+    notes = applySourceBoundSemanticReview(
+      notes,
+      candidates.flatMap((item) => {
+        const passages = groupCitedSourcePassages(
+          notes.source,
+          completeCitedSourceWindow(notes.source, item.sources),
+        );
+        if (
+          !introducesPronouns(
+            item.text,
+            passages.map(({ text }) => text).join(' '),
+          )
+        )
+          return [];
+        return [
+          {
+            ...item,
+            kind: 'point' as const,
+            owner: null,
+            due: null,
+            text: passages
+              .map(({ speaker, text }) => `${speaker ?? 'Speaker'}: “${text}”`)
+              .join('\n'),
+          },
+        ];
+      }),
+    );
+    if (candidates.length > 16)
+      return unavailable('semantic_notes_review_capacity');
     const proposedCases = candidates.map((item) => {
       const original = notes.reviewOriginals?.get(item.id) ?? item;
       return {
@@ -243,6 +280,15 @@ export const reviewSourceBoundNotes = async (
         accepted.due !== null &&
         !entry.source.some(({ text }) =>
           dueForms(accepted.due).some((date) => contains(text, date)),
+        )
+      ) {
+        held.push(result.id);
+        continue;
+      }
+      if (
+        introducesPronouns(
+          `${accepted.text} ${result.discussion ?? ''}`,
+          entry.source.map(({ text }) => text).join(' '),
         )
       ) {
         held.push(result.id);
