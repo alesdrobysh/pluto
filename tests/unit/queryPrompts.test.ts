@@ -7,6 +7,16 @@ import {
 import { calculateOllamaContextBudget } from '../../electron/llm/unifiedProvider';
 
 describe('getAskPlutoPrompt', () => {
+  it('distinguishes a recorded speaker owner from an unknown real name', () => {
+    const prompt = getAskPlutoPrompt('Who agreed to send it?', [], 'factual');
+    expect(prompt).toContain(
+      'A recorded speaker label establishes the recorded owner',
+    );
+    expect(prompt).toContain(
+      'do not describe that ownership as unknown merely because no real name is available',
+    );
+  });
+
   it('treats an older person profile as a dated picture for coaching', () => {
     const prompt = getAskPlutoPrompt(
       'How should I coach him?',
@@ -1049,4 +1059,92 @@ it('does not ask for self identity when the question names another person', () =
   expect(prompt).not.toContain("The user's identity is not yet confirmed");
   expect(prompt).toContain('Include every distinct explicit assignment');
   expect(prompt).toContain('Use names rather than guessing gender');
+});
+
+it('asks for canonical owner labels without inventing participant identities', () => {
+  const prompt = getAskPlutoPrompt(
+    'Who owns the follow-ups?',
+    [
+      {
+        meeting_id: 'fictional',
+        meeting_title: 'Review',
+        mid: null,
+        evidence_text:
+          '[Owner: Me] Schedule time with Riley.\n[Owner: Remote Speaker 2] Tell Casey about allocation.',
+        score: 1,
+        score_breakdown: {
+          fts_rank: 1,
+          graph_proximity: 0,
+          recency_decay: 1,
+          mention_weight: 0,
+        },
+      },
+    ],
+    'factual',
+    [],
+    'None',
+    'analysis',
+  );
+  expect(prompt).toContain('[Owner: Me] Schedule time');
+  expect(prompt).toContain('[Owner: Remote Speaker 2] Tell Casey');
+  expect(prompt).toContain('Me means the user');
+  expect(prompt).toContain('name unconfirmed');
+});
+
+it('does not reintroduce stale secondary action dates alongside canonical saved-note evidence', () => {
+  const prompt = getAskPlutoPrompt(
+    'Who owns the checklist?',
+    [
+      {
+        meeting_id: 'fictional',
+        meeting_title: 'Review',
+        evidence_kind: 'note',
+        mid: {
+          action_items: [{ description: 'Send the checklist tomorrow.' }],
+          decisions: [{ description: 'Production is already approved.' }],
+        } as never,
+        evidence_text: '[Owner: Me] Send the checklist; timing was not stated.',
+        score: 1,
+        score_breakdown: {
+          fts_rank: 1,
+          graph_proximity: 0,
+          recency_decay: 1,
+          mention_weight: 0,
+        },
+      },
+    ],
+    'factual',
+    [],
+    'None',
+    'analysis',
+  );
+  expect(prompt).toContain(
+    '[Owner: Me] Send the checklist; timing was not stated.',
+  );
+  expect(prompt).not.toContain('Send the checklist tomorrow.');
+  expect(prompt).not.toContain('Production is already approved.');
+});
+
+describe('Ask answer and citation presentation contract', () => {
+  it('keeps natural owner wording in the answer and source attribution in Pluto UI', () => {
+    const prompt = getAskPlutoPrompt(
+      'List the follow-ups and cite the meeting.',
+      [],
+      'factual',
+      [],
+      'None',
+      'analysis',
+    );
+    expect(prompt).toContain('Express recorded ownership naturally');
+    expect(prompt).toContain(
+      'Give a reason or causal link only when the notes explicitly connect those facts',
+    );
+    expect(prompt).toContain(
+      'without copying [Owner: ...] or [Due: ...] evidence labels',
+    );
+    expect(prompt).toContain(
+      'Provenance is attached by Pluto in a separate source control',
+    );
+    expect(prompt).toContain('do not append a source sentence or source list');
+  });
 });

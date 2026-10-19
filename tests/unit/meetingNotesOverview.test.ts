@@ -87,12 +87,12 @@ const projectSections = (
   return { result, draft };
 };
 
-it('derives an action-only overview from the reviewed action with matching provenance', () => {
+it('summarizes action-only follow-ups with matching provenance', () => {
   const fixture = makeDirectNotesFixture();
   const action = fixture.draft.sections[0]!.items[0]!;
   const result = projectAuditedNotes(applyNotesAudit(fixture));
   expect(result.all_action_items[0]!.text).toBe('Send the outline');
-  expect(result.overview).toBe('Milo: Send the outline.');
+  expect(result.overview).toBe('The meeting recorded 1 follow-up.');
   expect(
     result.generation_metadata?.source_provenance?.blocks.overview?.sources,
   ).toEqual(action.sources);
@@ -108,7 +108,7 @@ it.each([
     { kind: 'action' as const, text: 'I will send the outline.' },
   ],
 ])(
-  'keeps the first outcome kind in source order and fills without reselecting it',
+  'keeps discussion and decisions in the recap without repeating action commands',
   (first, second) => {
     const { result, draft } = projectSections([
       [
@@ -119,15 +119,15 @@ it.each([
       ],
     ]);
     expect(result.all_action_items[0]!.text).toBe('Send the outline');
-    const outcomeText = (item: typeof first) =>
-      item.kind === 'action' ? 'Milo: Send the outline.' : item.text;
     expect(result.overview).toBe(
-      [outcomeText(first), outcomeText(second)].join(' '),
+      'The discussion covered the report. We decided to keep the report plain. The report includes a diagram.',
     );
     expect(
       result.generation_metadata?.source_provenance?.blocks.overview?.sources,
     ).toEqual(
-      [1, 2].flatMap((index) => draft.sections[0]!.items[index]!.sources),
+      [0, first.kind === 'decision' ? 1 : 2, 3].flatMap(
+        (index) => draft.sections[0]!.items[index]!.sources,
+      ),
     );
   },
 );
@@ -205,21 +205,32 @@ it.each(['decision-first', 'offer-first'])(
       contextTokens: 16384,
     });
     expect(generate).toHaveBeenCalledTimes(2);
+    const decision = result.all_decisions[0]!.text;
+    const offer = result.topics[0]!.key_points[0]!.text;
+    const withdrawal = result.topics[1]!.key_points[0]!.text;
     expect(result.overview).toBe(
-      [
-        result.all_decisions[0]!.text,
-        `${result.all_action_items[0]!.text}.`,
-      ].join(' '),
+      (order === 'decision-first'
+        ? [decision, withdrawal, offer]
+        : [offer, withdrawal, decision]
+      ).join(' '),
     );
     const metadata = result.generation_metadata!.source_provenance!.blocks;
-    expect(metadata.overview?.sources).toEqual([
-      ...metadata['all_decisions:0']!.sources,
-      ...metadata['all_action_items:0']!.sources,
-    ]);
+    const recapPaths =
+      order === 'decision-first'
+        ? ['all_decisions:0', 'topic:1:point:0', 'topic:0:point:0']
+        : ['topic:0:point:0', 'topic:1:point:0', 'all_decisions:0'];
+    expect(metadata.overview?.sources).toEqual(
+      recapPaths.flatMap((path) => metadata[path]!.sources),
+    );
+    expect(result.all_action_items).toHaveLength(1);
+    expect(result.all_action_items[0]!.text).toContain(
+      'once the accessibility review passes',
+    );
+    expect(result.all_action_items[0]!.due).toBe('Wednesday');
   },
 );
 
-it('keeps early opinions in the body while the overview leads with a later outcome', () => {
+it('retains discussion as body points without duplicate topic summaries', () => {
   const { result, draft } = projectSections([
     [
       { kind: 'point', text: 'Cedar seemed promising.' },
@@ -241,7 +252,7 @@ it('keeps early opinions in the body while the overview leads with a later outco
     });
 });
 
-it('leads with a conditional owned action after a narrative-only topic without dropping discussion', () => {
+it('keeps a conditional owned action separate from the narrative recap', () => {
   const { result, draft } = projectSections([
     [
       { kind: 'point', text: 'Cedar seemed promising.' },
@@ -260,7 +271,7 @@ it('leads with a conditional owned action after a narrative-only topic without d
     draft.sections[0]!.items.map((item) => item.text),
   );
   expect(result.overview).toBe(
-    'Milo: If approval arrives, Milo will send the outline by Thursday.',
+    'Cedar seemed promising. The estimate remains uncertain.',
   );
   expect(result.topics[1]!.summary).toBe('');
   expect(result.all_action_items[0]!.assignee).toBe('Milo');
@@ -269,7 +280,7 @@ it('leads with a conditional owned action after a narrative-only topic without d
   );
   const blocks = result.generation_metadata!.source_provenance!.blocks;
   expect(blocks.overview!.sources).toEqual(
-    draft.sections[1]!.items[0]!.sources,
+    draft.sections[0]!.items.flatMap((item) => item.sources),
   );
   expect(blocks['topic:1:summary']).toBeUndefined();
   expect(blocks['topic:0:point:0']).toEqual({
@@ -291,7 +302,7 @@ it('keeps an unnamed speaker action separate from the reader', () => {
   const result = projectAuditedNotes(applyNotesAudit(fixture));
   expect(result.all_action_items[0]!.assignee).toBe('Speaker');
   expect(result.all_action_items[0]!.text).toBe('Send the outline');
-  expect(result.overview).toBe('Speaker: Send the outline.');
+  expect(result.overview).toBe('The meeting recorded 1 follow-up.');
   expect(result.topics[0]!.summary).toBe('');
 });
 
@@ -328,14 +339,19 @@ it.each(['action', 'decision'] as const)(
     const previousBlocks = getAnalysisEditBlocks(previous);
     const nextBlocks = getAnalysisEditBlocks(next);
     if (kind === 'decision') {
-      expect(previous.overview).toBe(outcome.text);
+      expect(previous.overview).toBe(
+        `The quote remains uncertain. ${outcome.text}`,
+      );
       expect(
         previous.generation_metadata!.source_provenance!.blocks.overview!
           .sources,
-      ).toEqual(
-        previous.generation_metadata!.source_provenance!.blocks[outcomePath]!
+      ).toEqual([
+        ...previous.generation_metadata!.source_provenance!.blocks[
+          'topic:0:point:0'
+        ]!.sources,
+        ...previous.generation_metadata!.source_provenance!.blocks[outcomePath]!
           .sources,
-      );
+      ]);
     }
     const overviewEdit = applyMeetingNotesUserEdit(
       {},

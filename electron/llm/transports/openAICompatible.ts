@@ -1,3 +1,4 @@
+import { ChatGPTError, chatGPTErrorMessage } from '../../chatgpt/auth';
 import type {
   InferenceRequest,
   InferenceResult,
@@ -87,6 +88,7 @@ export class InferenceTransportError extends Error {
 }
 
 export const inferenceTransportErrorRationale = (error: unknown): string => {
+  if (error instanceof ChatGPTError) return chatGPTErrorMessage(error);
   if (!(error instanceof InferenceTransportError))
     return 'Pluto could not answer right now.';
   switch (error.code) {

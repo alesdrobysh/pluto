@@ -15,9 +15,10 @@ export const askPlutoTimeoutMs = (
 
 export interface RunAskPlutoWithDeadlineOptions {
   onProgressSetup?: (
-    recordProgress: (phase?: 'started' | 'token') => void,
+    recordProgress: (phase?: 'queued' | 'started' | 'token') => void,
   ) => void;
   idleTimeoutMs?: number;
+  queueTimeoutMs?: number;
 }
 
 export const runAskPlutoWithDeadline = async <Result>(
@@ -58,11 +59,22 @@ export const runAskPlutoWithDeadline = async <Result>(
 
   scheduleDeadline(timeoutMs);
 
-  const recordProgress = (phase: 'started' | 'token' = 'token') => {
+  let queued = false;
+  const recordProgress = (phase: 'queued' | 'started' | 'token' = 'token') => {
     // Starting the provider is not evidence of streaming progress. Keep the
     // initial allowance while a local model loads and evaluates the prompt.
-    if (phase === 'started') return;
     if (controller.signal.aborted) return;
+    if (phase === 'queued') {
+      queued = true;
+      scheduleDeadline(options?.queueTimeoutMs ?? 300_000);
+      return;
+    }
+    if (phase === 'started') {
+      if (queued) scheduleDeadline(timeoutMs);
+      queued = false;
+      return;
+    }
+    queued = false;
     scheduleDeadline(idleTimeoutMs);
   };
 

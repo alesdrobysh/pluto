@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const mainSource = readFileSync(
   new URL('../../electron/main.ts', import.meta.url),
@@ -44,9 +44,56 @@ describe('idle dreaming production wiring', () => {
     );
   });
 
-  it('awaits coordinator close during guarded application shutdown', () => {
+  it('awaits both bounded model cleanups within five seconds instead of adding their waits', async () => {
     expect(mainSource).toContain('event.preventDefault()');
-    expect(mainSource).toContain('await idleDreamingCoordinator?.close()');
+    const start = mainSource.indexOf(
+      "  plutoLog.info('Shutdown phase: dreaming');",
+    );
+    const end = mainSource.indexOf(
+      "  plutoLog.info('Shutting down...');",
+      start,
+    );
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    // Execute the production cleanup block with controlled service deadlines.
+    const cleanup = new Function(
+      'idleDreamingCoordinator',
+      'scheduleDreamingRun',
+      'dreamingEntityQueue',
+      'stopIdentityReconciliation',
+      'calendarService',
+      'releaseIdleOllamaModel',
+      'plutoLog',
+      `return (async () => { ${mainSource.slice(start, end)} })();`,
+    );
+    vi.useFakeTimers();
+    try {
+      const wait = () =>
+        new Promise<void>((resolve) => setTimeout(resolve, 5000));
+      const close = vi.fn(wait);
+      const release = vi.fn(wait);
+      let completed = false;
+      const pending = cleanup(
+        { close },
+        null,
+        null,
+        vi.fn(),
+        { stop: vi.fn() },
+        release,
+        { info: vi.fn(), warn: vi.fn() },
+      ).then(() => {
+        completed = true;
+      });
+      expect(close).toHaveBeenCalledOnce();
+      expect(release).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(completed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(completed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('validates a required entity id at the manual IPC boundary', () => {

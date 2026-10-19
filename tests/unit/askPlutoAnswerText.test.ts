@@ -31,6 +31,21 @@ describe('Ask Pluto answer repetition', () => {
     expect(result.citations.map((item) => item.claim)).toEqual([first, second]);
   });
 
+  it('preserves Markdown structure while removing repeated claims', () => {
+    const table = [
+      '| Owner | Follow-up | Timing |',
+      '| --- | --- | --- |',
+      '| Riley | Send the checklist | Monday |',
+      '| Avery | Update the runbook after the checklist | Not stated |',
+    ].join('\n');
+    const repeated = 'Staging tests must pass before production.';
+    const result = removeRepeatedAskPlutoClaims(
+      `${table}\n\n${repeated}\n${repeated}`,
+      [citation(repeated)],
+    );
+    expect(result.answer).toBe(`${table}\n\n${repeated}`);
+  });
+
   it('drops prior answer claims while retaining new supported claims and sources', () => {
     const previous =
       'The calendar integration can suggest meeting participants.';

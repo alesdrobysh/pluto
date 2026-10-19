@@ -16,7 +16,12 @@ export const LLM_WORK_CLASS_PRIORITY = {
 } as const satisfies Record<LLMWorkClass, number>;
 
 export const defaultLLMWorkClass = (task: string): LLMWorkClass => {
-  if (task === 'askPluto' || task === 'askPlutoDeep' || task === 'askPlutoLive')
+  if (
+    task === 'askPluto' ||
+    task === 'askPlutoDeep' ||
+    task === 'askPlutoLive' ||
+    task === 'askPlutoScope'
+  )
     return 'ask_pluto';
   if (task === 'projectScopeReview') return 'project_review';
   if (task === 'valueSignals' || task === 'entities')

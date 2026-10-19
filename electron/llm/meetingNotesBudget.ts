@@ -1,3 +1,8 @@
+// Application request budgets, separate from a model's advertised context window.
+// Cloud notes use one full-source request; the local model retains bounded leaves.
+export const notesContextTokens = (provider: unknown): number =>
+  provider === 'chatgpt' ? 131_072 : 16_384;
+
 import {
   MeetingNotesError,
   type NotesSource,
@@ -243,3 +248,7 @@ export const partitionNotesSource = (
       : window;
   });
 };
+
+// Real cloud transcripts can fragment a single claim across many short turns.
+export const notesSourceSpanLimit = (provider: unknown): number =>
+  provider === 'chatgpt' ? 36 : 3;

@@ -35,7 +35,8 @@ export const removeRepeatedAskPlutoClaims = (
       splitSentences(line)
         .filter((sentence) => {
           const key = claimKey(sentence);
-          if (!key || seen.has(key)) {
+          if (!key) return true;
+          if (seen.has(key)) {
             if (key) removed.add(key);
             return false;
           }

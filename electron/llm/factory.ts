@@ -1,3 +1,5 @@
+import { ChatGPTError } from '../chatgpt/auth';
+import { getChatGPTAuth } from '../chatgpt/runtime';
 import type { LLMProvider, LLMSettings, ProviderType } from './provider';
 import { CLOUD_CONSENT_VERSION, isCloudProvider } from './providerCatalog';
 import { UnifiedLLMProvider } from './unifiedProvider';
@@ -17,6 +19,7 @@ function getSettingsHash(settings: LLMSettings): string {
     llm: settings.llm_model,
     gemini: settings.gemini_model,
     openai: settings.openai_model,
+    chatgpt: settings.chatgpt_model,
     openrouter: settings.openrouter_model,
     claude: settings.claude_model,
     hasGemini: !!settings.gemini_api_key,
@@ -84,6 +87,14 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
             throw new Error('Gemini API key not configured');
           }
           providerInstance = new UnifiedLLMProvider('gemini', settings);
+          break;
+        }
+
+        case 'chatgpt': {
+          if (!getChatGPTAuth().status().planEnabled) {
+            throw new ChatGPTError('chatgpt_sign_in_required');
+          }
+          providerInstance = new UnifiedLLMProvider('chatgpt', settings);
           break;
         }
 
@@ -166,6 +177,7 @@ export async function getAllSettings(db: {
     'ollama',
     'gemini',
     'openai',
+    'chatgpt',
     'openrouter',
     'claude',
   ];
@@ -188,11 +200,13 @@ export async function getAllSettings(db: {
     ollama_seed: getIntegerSetting('ollama_seed'),
     gemini_model: getStringSetting('gemini_model'),
     openai_model: getStringSetting('openai_model'),
+    chatgpt_model: getStringSetting('chatgpt_model'),
     openrouter_model: getStringSetting('openrouter_model'),
     claude_model: getStringSetting('claude_model'),
     cloud_consents: {
       gemini: getStringSetting('cloud_consent_gemini'),
       openai: getStringSetting('cloud_consent_openai'),
+      chatgpt: getStringSetting('cloud_consent_chatgpt'),
       openrouter: getStringSetting('cloud_consent_openrouter'),
       claude: getStringSetting('cloud_consent_claude'),
     },

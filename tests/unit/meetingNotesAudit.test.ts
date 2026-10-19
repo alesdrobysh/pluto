@@ -1,10 +1,13 @@
 import { expect, it } from 'vitest';
 import {
+  acceptEditedNotes,
   applyNotesAudit,
   parseNotesAudit,
   parseNotesDraft,
   projectAuditedNotes,
 } from '../../electron/llm/meetingNotesAudit';
+import { reviewSourceBoundNotes } from '../../electron/llm/meetingNotesSemanticReview';
+import { groupCitedSourcePassages } from '../../electron/llm/meetingNotesSource';
 import { createNotesSource } from '../../electron/llm/meetingNotesSource';
 import type {
   NotesAudit,
@@ -151,6 +154,89 @@ it.each([
       projected.generation_metadata?.source_provenance?.blocks.overview
         ?.sources,
     ).toEqual([...original.sections[0]!.items[0]!.sources, span]);
+  },
+);
+
+it('uses discussion for the overview while keeping actions and ownership separate', () => {
+  const fixture = makeDirectNotesFixture();
+  const text = 'Staging tests must pass before production.';
+  const source = createNotesSource(
+    JSON.stringify({
+      segments: [
+        { speaker: 'Milo', text: 'I will send the outline.' },
+        { speaker: 'Nira', text },
+      ],
+    }),
+  );
+  const span = { segment: 1, start: 0, end: text.length };
+  fixture.draft.sections[0]!.items.push({
+    id: 's0:item:1',
+    kind: 'point',
+    text,
+    sources: [span],
+    owner: null,
+    due: null,
+  });
+  fixture.audit.verdicts.push({
+    target: 's0:item:1',
+    status: 'supported',
+    sources: [span],
+  });
+  const projected = projectAuditedNotes(
+    applyNotesAudit({ ...fixture, source }),
+  );
+  expect(projected.overview).toBe(text);
+  expect(projected.all_action_items[0]).toMatchObject({
+    text: 'Send the outline',
+    assignee: 'Milo',
+  });
+  expect(
+    projected.generation_metadata?.source_provenance?.blocks.overview?.sources,
+  ).toEqual([span]);
+});
+
+it.each([1, 2])(
+  'summarizes %i action-only follow-ups without owner-prefixed commands',
+  (count) => {
+    const fixture = makeDirectNotesFixture();
+    if (count === 2) {
+      const text = 'I will update the runbook.';
+      fixture.source = createNotesSource(
+        JSON.stringify({
+          segments: [
+            { speaker: 'Milo', text: 'I will send the outline.' },
+            { speaker: 'Nira', text },
+          ],
+        }),
+      );
+      const sources = [{ segment: 1, start: 0, end: text.length }];
+      fixture.draft.sections[0]!.items.push({
+        id: 's0:item:1',
+        kind: 'action',
+        text: 'Update the runbook',
+        sources,
+        owner: 'Nira',
+        due: null,
+      });
+      fixture.audit.verdicts.push({
+        target: 's0:item:1',
+        status: 'supported',
+        sources,
+      });
+    }
+    const projected = projectAuditedNotes(applyNotesAudit(fixture));
+    expect(projected.overview).toBe(
+      `The meeting recorded ${count} follow-up${count === 1 ? '' : 's'}.`,
+    );
+    expect(projected.all_action_items).toHaveLength(count);
+    expect(projected.all_action_items[0]).toMatchObject({
+      text: 'Send the outline',
+      assignee: 'Milo',
+    });
+    expect(
+      projected.generation_metadata?.source_provenance?.blocks.overview
+        ?.sources,
+    ).toEqual(fixture.draft.sections[0]!.items.flatMap((item) => item.sources));
   },
 );
 
@@ -1004,4 +1090,274 @@ it('normalizes an explicitly absent nested recent win from the real local writer
     expect(draft.recentWin).toBeUndefined();
     expect(draft.sections).toHaveLength(writer.sections.length);
   }
+});
+
+it('preserves rejected decision and action classifications as exact discussion, without invented commitment fields', () => {
+  const source = createNotesSource(
+    JSON.stringify([
+      {
+        speaker: 'Morgan',
+        text: 'Should we launch to partners? It is employees only, not partners. We have not approved a launch.',
+      },
+    ]),
+  );
+  const span = { segment: 0, start: 0, end: source.segments[0]!.text.length };
+  for (const kind of ['decision', 'action'] as const) {
+    const draft = parseNotesDraft(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Scope', sources: [span] },
+            items: [
+              {
+                kind,
+                text: 'Morgan approved launching to partners.',
+                owner: 'Morgan',
+                due: 'Friday',
+                sources: [span],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const accepted = acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+    const retained = accepted.draft.sections[0].items[0];
+    expect(retained).toMatchObject({
+      kind: 'point',
+      text: `Morgan: ${source.segments[0].text}`,
+      owner: null,
+      due: null,
+      sources: [span],
+    });
+    const projected = projectAuditedNotes(accepted);
+    expect(projected.all_action_items).toEqual([]);
+    expect(projected.all_decisions).toEqual([]);
+    expect(projected.generation_metadata?.source_provenance).toBeDefined();
+    expect(() => acceptEditedNotes({ source, draft })).toThrow(
+      'notes_editor_invalid_commitment',
+    );
+  }
+});
+
+it('groups adjacent cited fragments without bridging omitted words, different speakers, or ambiguous recording labels', () => {
+  const make = (speakers: string[]) =>
+    createNotesSource(
+      JSON.stringify([
+        { speaker: speakers[0], text: 'Let me put' },
+        { speaker: speakers[1], text: 'the review' },
+        { speaker: speakers[2], text: 'time on the calendar.' },
+      ]),
+    );
+  const source = make(['Me', 'Me', 'Me']);
+  const spans = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  expect(groupCitedSourcePassages(source, spans)).toEqual([
+    {
+      speaker: 'Me',
+      text: 'Let me put the review time on the calendar.',
+      spans,
+    },
+  ]);
+  expect(groupCitedSourcePassages(source, [spans[0]!, spans[2]!])).toHaveLength(
+    2,
+  );
+  expect(
+    groupCitedSourcePassages(make(['Me', 'Nora', 'Me']), spans),
+  ).toHaveLength(3);
+  expect(
+    groupCitedSourcePassages(make(['Them', 'Them', 'Them']), spans),
+  ).toHaveLength(3);
+  const name = createNotesSource(
+    JSON.stringify([{ speaker: 'Them', text: 'Riley' }]),
+  );
+  expect(
+    groupCitedSourcePassages(name, [
+      { segment: 0, start: 0, end: 2 },
+      { segment: 0, start: 2, end: 5 },
+    ])[0]?.text,
+  ).toBe('Riley');
+});
+
+it('does not leave an unaccepted imperative in the action list merely because its wording lacks a question mark', () => {
+  const source = createNotesSource(
+    JSON.stringify([
+      {
+        speaker: 'Nora',
+        text: 'Please review the draft and give feedback. You need to speak to Morgan.',
+      },
+    ]),
+  );
+  const span = { segment: 0, start: 0, end: source.segments[0].text.length };
+  const draft = parseNotesDraft(
+    JSON.stringify({
+      meetingType: 'general',
+      overview: null,
+      sections: [
+        {
+          title: { text: 'Review', sources: [span] },
+          items: [
+            {
+              kind: 'action',
+              text: 'Review the draft and speak to Morgan',
+              owner: 'Me',
+              due: null,
+              sources: [span],
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const result = projectAuditedNotes(
+    acceptEditedNotes({ source, draft, acceptancePolicy: 'conservative' }),
+  );
+  expect(result.all_action_items).toEqual([]);
+  expect(JSON.stringify(result.topics)).toContain('Please review the draft');
+});
+
+it('does not borrow settlement from an unrelated task and retains an explicitly settled unowned action', async () => {
+  const make = (text: string) => {
+    const source = createNotesSource(
+      JSON.stringify([{ speaker: 'Morgan', text }]),
+    );
+    const span = { segment: 0, start: 0, end: text.length };
+    const draft = parseNotesDraft(
+      JSON.stringify({
+        meetingType: 'general',
+        overview: null,
+        sections: [
+          {
+            title: { text: 'Outline', sources: [span] },
+            items: [
+              {
+                kind: 'action',
+                text: 'Send the outline',
+                owner: null,
+                due: null,
+                sources: [span],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    return acceptEditedNotes({
+      source,
+      draft,
+      acceptancePolicy: 'conservative',
+    });
+  };
+  const request = make('We accepted the migration. Please send the outline.');
+  expect(projectAuditedNotes(request).all_action_items).toEqual([]);
+  const accepted = make(
+    'The group accepted sending the outline, but no owner has been assigned.',
+  );
+  expect(projectAuditedNotes(accepted).all_action_items).toEqual([]);
+  const id = accepted.draft.sections[0]!.items[0]!.id;
+  const reviewed = await reviewSourceBoundNotes(accepted, async () =>
+    JSON.stringify({
+      resolutions: [
+        {
+          id,
+          kind: 'accepted_action',
+          text: 'Send the outline',
+          owner: null,
+          due: null,
+          discussion: null,
+        },
+      ],
+    }),
+  );
+  expect(projectAuditedNotes(reviewed).all_action_items).toHaveLength(1);
+  expect(
+    projectAuditedNotes(reviewed).all_action_items[0]?.assignee,
+  ).toBeUndefined();
+});
+
+it('keeps only the promised action and preserves the tentative plan as source discussion', async () => {
+  const source = createNotesSource(
+    JSON.stringify([
+      {
+        speaker: 'Me',
+        text: 'Maybe we meet with Riley to review the onboarding flow and have Riley design it.',
+      },
+      { speaker: 'Them', text: 'I think you need to speak to Riley.' },
+      {
+        speaker: 'Me',
+        text: 'I will schedule calendar time with Riley. Only after legal approves.',
+      },
+    ]),
+  );
+  const sources = source.segments.map((segment) => ({
+    segment: segment.index,
+    start: 0,
+    end: segment.text.length,
+  }));
+  const draft = parseNotesDraft(
+    JSON.stringify({
+      meetingType: 'general',
+      overview: null,
+      sections: [
+        {
+          title: { text: 'Review planning', sources },
+          items: [
+            {
+              kind: 'action',
+              text: 'Meet with Riley to review onboarding, have Riley design it, and schedule calendar time.',
+              owner: 'Me',
+              due: null,
+              sources,
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const accepted = acceptEditedNotes({
+    source,
+    draft,
+    acceptancePolicy: 'conservative',
+  });
+  const id = accepted.draft.sections[0]!.items[0]!.id;
+  const result = projectAuditedNotes(
+    await reviewSourceBoundNotes(accepted, async () =>
+      JSON.stringify({
+        resolutions: [
+          {
+            id,
+            kind: 'accepted_action',
+            text: 'Schedule calendar time with Riley. Only after legal approves.',
+            owner: 'Me',
+            due: null,
+            discussion:
+              'A possible meeting with Riley to review onboarding and have Riley design it was discussed, not agreed.',
+          },
+        ],
+      }),
+    ),
+  );
+
+  expect(result.all_action_items).toHaveLength(1);
+  expect(result.all_action_items[0].assignee).toBe('Me');
+  expect(result.all_action_items[0].text).toContain(
+    'Only after legal approves',
+  );
+  expect(result.all_action_items[0].text).not.toContain('design');
+  expect(
+    JSON.stringify(result.topics.flatMap((topic) => topic.key_points)),
+  ).toContain('A possible meeting with Riley');
+  expect(result.generation_metadata?.source_provenance).toBeDefined();
+  expect(() => acceptEditedNotes({ source, draft })).toThrow(
+    'notes_editor_invalid_commitment',
+  );
 });

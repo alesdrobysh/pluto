@@ -1798,3 +1798,474 @@ Recovered mic/System transcripts retain their source speaker through canonical r
 ### 2026-10-15 — Confirm the call source before inferred stops
 - **Supersedes:** Automatic source binding as sufficient authority for app-instance termination in “2026-10-14 - Stop recordings only on confirmed call departure” and the calendar fallback's use of an audio-only bound source above.
 - **Decision:** App-wide input/output activity suggests a source but never confirms that it is the recorded call. Exact application termination and the calendar-end quiet fallback require explicit source confirmation; an accepted, previously joined UI session can also establish identity for exact termination. A provisional source that quits leaves recording active. The calendar fallback reads the current cached occurrence by its explicitly linked key, abstains if it was cancelled or removed, and cancels an unclaimed timeout when audio resumes or monitoring continuity is lost.
+
+
+## 2026-10-15 - Allow ChatGPT plan usage for all intelligence with local capture and transcription
+
+- **Status:** Accepted by direct owner request; live-account acceptance pending.
+- **Supersedes:** The provider-setup restriction in “2026-10-07 - Limit provider setup to Ollama and OpenRouter pending acceptance testing” for the new ChatGPT provider; the local-only background execution boundary in “2026-09-16 - Keep Pluto memory local while allowing explicit cloud inference”; and the fixed-local model-routing clause in “2026-09-02 - Keep idle dreaming proposal-only and evidence-bound” when ChatGPT is explicitly selected. Existing evidence, correction, provenance, and persistence policies remain in force.
+- **Decision:** Add an opt-in ChatGPT provider using official Sign in with ChatGPT and the user's eligible plan. After versioned text-egress consent, route notes, chat, preparation, extraction, commitments, knowledge documents, and background People/Project synthesis through the account's selected model. Retain existing providers and never switch providers or billing automatically.
+- **Privacy and identity:** Keep capture, transcription, audio, retrieval, canonical storage, and source validation local. Send bounded text context for inference. Verify OAuth state, PKCE, signed identity and nonce; keep account-bound credentials in protected main-process storage. Use stateless Responses requests and serialize rotating refreshes.
+- **Limits:** Pause ChatGPT inference after a usage-limit failure until explicit retry. Sign-out revokes the renewable session, clears tokens, and cancels in-flight inference. This initial integration supports one connected account/workspace per profile.
+- **Verification boundary:** Focused tests and renderer/Electron bundling establish the implementation contract. They do not establish live OAuth eligibility, plan charging, or real-model quality. Complete an interactive account sign-in and fictional-data intelligence acceptance run before release. See [ChatGPT intelligence](chatgpt-intelligence.md).
+
+
+## 2026-10-15 - Choose intelligence once during first-run setup
+
+- **Status:** Accepted by direct owner request.
+- **Extends:** “2026-10-15 - Allow ChatGPT plan usage for all intelligence with local capture and transcription.”
+- **Decision:** After recording permissions and before the optional profile, ask whether Ollama or ChatGPT should power intelligence. Put the ChatGPT text-egress disclosure and browser sign-in in that step. Persist the provider, versioned consent, connection, and choice-completion marker. Resume past a completed choice if setup is interrupted; completed profiles never repeat onboarding.
+- **Returning use:** Restore the selected provider and protected ChatGPT session on startup, renew tokens automatically, and request reauthorization only when necessary. Keep provider changes and account management in Settings. Completing onboarding refreshes the shell's provider state before opening the workspace.
+
+- **Upgrades:** Preserve existing providers and skip first-run setup for completed profiles. Show a one-time dashboard notice with “Keep current setup” and “Review ChatGPT.” Both actions persist dismissal; review opens Intelligence settings without changing the provider or cloud consent. A choice made in Settings also completes the provider-choice marker.
+
+
+## 2026-10-15 - Bound ChatGPT plan consumption and reuse identical work
+
+- **Status:** Accepted by direct owner request.
+- **Supersedes:** Automatic ChatGPT background synthesis after provider consent in “2026-10-15 - Allow ChatGPT plan usage for all intelligence with local capture and transcription.” ChatGPT remains available for all intelligence, but optional automatic enrichment requires a separate opt-in.
+- **Decision:** Default to 50 requests and a 200,000-token admission budget per local day. Count attempts durably before egress, replace reservations with reported usage on completion, and retain unmeasured reservations after interruption/restart. Keep 30 days of content-free task/model aggregates. Persist upstream usage-limit pauses until explicit retry. Limits apply to one Pluto profile and do not represent the account's remaining quota.
+- **Background:** Default optional enrichment off; after opt-in, admit at most ten background requests per day within the shared budget. Keep explicit refreshes and ordinary meeting processing eligible under the overall budget. Never silently switch providers.
+- **Reuse:** Serialize upstream calls without paid-work preemption, share identical in-flight requests with independent caller cancellation, and reuse exact completed extraction/background responses in bounded memory for ten minutes. Include account session, model, source input, task and schema in reuse identity. Preserve existing source-revision publication checks and explicit rewrite semantics.
+- **Boundary:** SIWC does not support a server output-token cap. Reservation estimates limit admission, but an in-flight response can exceed its estimate. The authoritative plan/app allowance remains in ChatGPT usage settings.
+
+
+## 2026-10-15 — Full-source cloud intelligence and provisional Luna default
+
+ChatGPT notes supersede the inherited Ollama 16K context/chunk policy: use a
+131,072-token application budget, skip live leaf precomputation, and do not turn
+context failures into paid hierarchy retries. Knowledge synthesis sends selected
+meeting evidence together (existing 80-meeting source cap), without paid split
+retries. Local Ollama planning remains unchanged. Daily admission protections
+remain independent of context capacity.
+
+New ChatGPT connections prefer available GPT-6 Luna; preserve valid saved choices
+and keep Sol selectable. Sixteen paired fictional-meeting requests found the same
+core commitment coverage after correcting local grounding false negatives; Luna
+used 15,593 reported tokens versus Sol's 16,083. This small sample supports a
+provisional default, not a general accuracy or plan-credit equivalence claim.
+Raw responses and reports remain ignored/local. No production data was used.
+
+
+## 2026-10-15 — Prefer Sol pending broader source-quality acceptance
+
+Supersedes the model preference in “Full-source cloud intelligence and provisional
+Luna default” above. New ChatGPT connections prefer available GPT-6.1 Sol, preserve
+valid saved model choices, and keep Luna selectable. Source-reviewed private
+comparisons exposed material omissions in Luna that the fictional fixtures did not
+reveal. Faster output and lower token counts alone do not meet the quality gate.
+Neither model selection resolves remaining local commitment/scope projection gaps;
+private comparison evidence stays outside Git.
+
+ChatGPT compact notes allow up to 36 exact canonical source fragments per item and
+title, with matching prompt, wire schema and parser budgets. This accommodates
+fragmented real speech without truncating citations or relaxing source validation.
+The default local-model cap stays three. Invalid cloud drafts do not receive an
+automatic paid format repair; they fail visibly after the writer attempt.
+
+
+## 2026-10-15 — Preserve source discussion when commitment classification fails
+
+Extends “2026-10-06 - Temporarily disable model reviews for meeting notes.” The
+conservative notes path no longer erases cited information merely because a writer
+classifies it as an action or decision that cannot be settled. It retains exact
+source excerpts as discussion, with speaker boundaries and original provenance,
+and clears commitment owner/due fields. It never republishes the rejected model
+assertion as fact. Strict model-audited acceptance still rejects invalid claims;
+unclear-prose review remains active.
+
+Canonical adjacent fragments from one identifiable speaker can be joined for
+local checks; omitted fragments and ambiguous remote speakers are never bridged.
+Concrete colloquial first-person commitments retain their source speaker. Negative
+contractions are normalized before polarity comparison, and a corrected owner
+cannot leave a conflicting model-supplied leading name in the action text. Unowned
+requests remain discussion unless a task-specific explicit settlement is supported.
+
+Verification uses saved responses with network disabled, plus fictional regression
+cases. No new inference, automatic regeneration, provider switch, usage-limit reset,
+or source-data mutation is part of this fix. Private meeting evidence stays ignored.
+
+
+## 2026-10-15 — Confirm Sol after corrected-response comparison
+
+Confirms the model choice in “Prefer Sol pending broader source-quality acceptance”
+after replaying the saved outputs through the corrected local checks. GPT-6.1 Sol
+is the default for new ChatGPT connections when available; retain valid saved
+choices and keep Luna selectable. The corrected comparison still favors Sol for
+material recall. Luna's speed and modest reduction in total request tokens do not
+justify omitting source-backed follow-ups and dependencies.
+
+This decision adds no model escalation, dual-model requests, regeneration, or usage
+policy changes. The comparison uses only saved responses and private ignored
+artifacts. The limited notes sample does not establish accuracy across every
+intelligence workflow; preserve current grounding and admission safeguards.
+
+
+## 2026-10-15 — Preserve narrow promises beside tentative plans
+
+Extends “Preserve source discussion when commitment classification fails.” When a
+writer combines a tentative plan with a task-matched explicit promise, conservative
+acceptance retains the promise in exact source wording and preserves the proposed
+context as cited discussion. The canonical self speaker can participate in task
+scoping. Strict acceptance still requires corrected wording rather than silently
+rewriting a reviewed commitment. Conditions and subsequent withdrawals remain gates.
+
+An imperative action can retain a future pronoun-based promise after a not-yet
+statement when the promised verb matches the action. A different task, hypothetical
+promise, condition omission, or later negation cannot provide this exception.
+
+Saved responses are replayed offline; this change introduces no new inference,
+retry, model escalation, or usage-policy change. Terra now retains the same two
+reviewed follow-ups as Sol in the limited private sample, with less polished wording
+on one action. Sol remains the default pending broader quality evidence; existing
+saved choices remain untouched. Private meeting details remain outside Git.
+
+
+## 2026-10-15 — Prefer Terra with local recovered-action cleanup
+
+Supersedes the default-model choice in “Confirm Sol after corrected-response
+comparison” and “Preserve narrow promises beside tentative plans.” New ChatGPT
+connections prefer available GPT-5.6 Terra, then available GPT-6.1 Sol, then the
+first account model. Preserve valid saved choices and expose all account models,
+including Sol. This is initial selection, not automatic inference fallback.
+
+Apply bounded local wording cleanup to a source promise recovered from a combined
+tentative action: remove first-person “let me” framing and normalize disfluent
+“put … time” scheduling. Preserve recipients, quantities, conditions, source
+quotes and provenance; retain the proposed context as discussion. Other model
+paraphrases are untouched. No paid rewrite, additional inference, usage-limit
+change, or persisted production-note migration accompanies this change.
+
+Saved-response replay remains the verification path. Terra retained the two
+reviewed follow-ups after validation fixes and used fewer tokens in the limited
+private sample; this does not establish universal model accuracy or plan-credit
+cost. Raw private evidence remains outside Git.
+
+
+## 2026-10-15 — Guard action timing, carry owner labels, and separate queue waiting
+
+Extends “Prefer Terra with local recovered-action cleanup.” Unsupported calendar
+or relative timing in action prose is checked against the task-matched source,
+not merely the presence of a number elsewhere in a turn. Recover a concrete
+source promise with its qualifiers when possible; otherwise retain discussion.
+Removing an invalid due field cannot leave the same invented timing in prose.
+Original source quotes and provenance stay intact; strict acceptance still
+requires corrected wording. No production-note migration is performed.
+
+Saved-note retrieval carries explicit canonical owner labels in action evidence
+and indexed sections. Me denotes the user; numbered remote speakers remain
+identified by their recorded label with their name unconfirmed. Display-name
+mappings are respected without guessing from participants. An evidence-format
+revision invalidates stale retrieval projections. The Ask prompt preserves those
+labels without treating them as verified real-person names.
+
+ChatGPT Ask Pluto has a bounded five-minute queue wait, followed by its existing
+response allowance once usage admission starts the request. Streaming progress
+retains the existing idle deadline. Non-ChatGPT response policies are unchanged.
+Queued cancellation/expiry does not reserve tokens or dispatch inference. Paid
+work remains non-preemptible; request budgets, reservations, duplicate sharing,
+and explicit retry policy stay in place. Saved response replay and simulated
+queue/transport tests verify the change without new model calls.
+
+
+## 2026-10-16 — Reuse published notes after enrichment and retain action deadlines
+
+Extends “Guard action timing, carry owner labels, and separate queue waiting.”
+Saved-note evidence carries the structured action due field alongside its owner
+and prose. Keep the recorded wording (including relative or qualified timing)
+without inventing a calendar date. Increment the evidence-format revision so
+existing retrieval projections are refreshed.
+
+Refines “Bound ChatGPT plan consumption and reuse identical work.” Ambient
+person/project vocabulary added by enrichment is a hint for future writing,
+not a reason to regenerate published notes. Automatic reuse verifies the saved
+source, eligibility, user-note revisions and recorded provider/model, prompt,
+template and generation options. Secondary retries keep the original published
+run revision; manual regeneration and changed source/configuration still run.
+In-flight and stage-cache fingerprints retain vocabulary for exact-input reuse.
+Usage admission, reservations, background opt-in, and daily caps are unchanged.
+
+
+## 2026-10-16 — Resolve explicit meeting references and present owners naturally
+
+Refines “Guard action timing, carry owner labels, and separate queue waiting.”
+Canonical owner and due labels remain internal retrieval evidence. Ask answers
+express ownership in natural prose; saved answers render owner prefixes as names
+without rewriting stored content, deadlines, conditions, quotes, or provenance.
+Unknown remote speakers retain their unconfirmed identity.
+
+An explicit quoted meeting title is a scope constraint, including generic titles
+such as “Meeting.” A supplied recording date and time disambiguates matches in
+the local timezone used by the UI. Duplicate matches request clarification; an
+unmatched explicit reference returns no evidence rather than widening retrieval.
+Source counts continue to reflect actual context. Historical answers retain their
+original source lists; offline replay does not claim fresh model verification.
+
+
+## 2026-10-16 — Preserve answer text and keep citation presentation separate
+
+Supersedes “Resolve explicit meeting references and present owners naturally.”
+Remove the renderer's owner-label and source-footer pattern rewriting, and the
+new quoted-title/timestamp regex parser. Do not reinterpret model prose with a
+hand-written parser. Answer generation requests natural ownership wording and
+leaves source attribution to Pluto's structured citation control, including when
+the user asks for a citation. Saved answer text is preserved verbatim.
+
+The collapsed control shows the number of sources, with reference details inside.
+The removed timestamp parser does not provide precise free-text meeting scoping;
+meeting-specific questions should use the existing meeting chat with its explicit
+meeting ID. Natural-language scope resolution needs a separate semantic contract,
+not another collection of text patterns. No history migration or new model call
+is performed by this change.
+
+
+## 2026-10-16 — Resolve Ask Pluto meeting scope semantically before retrieval
+
+Extends “Preserve answer text and keep citation presentation separate,” replacing
+its meeting-chat-only workaround for free-text single-meeting references. Ask
+Pluto obtains one structured scope and intent result before retrieval for new or
+fresh factual turns and clarification replies. The scope can select one or up to
+eight meetings, use the current recording state, remain workspace-wide, or
+request clarification. No regex or prose-parser fallback resolves meeting scope.
+The existing intent classification is replaced, not added as a third call.
+
+Only complete, bounded meeting-title and recording-time catalogs are sent for
+scope selection; transcripts and notes are excluded. UTC and user-timezone dates
+are supplied so recording times remain distinct from deadlines inside meetings.
+Catalogs over 24,000 characters and question context over 8,000 characters stop
+locally rather than truncate candidates and claim a unique match. Model output
+is JSON-schema constrained and independently checked for known unique IDs,
+selection cardinality, and field bounds. Invalid, ambiguous, or unmatched scope
+stops before answer generation. Valid IDs constrain retrieval and final evidence.
+Existing explicit scope can be reused for reuse turns; a fresh reference or
+clarification is resolved against the current catalog. Historical chat is intact.
+
+Scope uses a distinct foreground askPlutoScope task under the existing provider
+and usage gate. Its local/provider output allowance is 512 tokens where enforced;
+SIWC retains its conservative reservation because it cannot enforce that cap.
+Exact scope inputs share in-flight work and the existing ten-minute, bounded,
+account/model/catalog-specific completed cache. Consent, pause, persisted quotas,
+cancellation, queue limits and no automatic interactive retries remain in force.
+A fresh scope is refused before egress if fewer than two daily requests or the
+minimum scope-plus-answer allowance remain. The answer still receives its own
+admission check; concurrent work can change availability between stages. A new
+scope may consume one admitted request before the answer request. Offline
+fixtures and mocked transport validate the contract; live semantic accuracy and
+packaged acceptance still require a separate smoke test.
+
+
+## 2026-10-17 — Preserve Ollama routing and production citation limits
+
+Refines “Resolve Ask Pluto meeting scope semantically before retrieval.” Semantic
+scope selection is enabled only for ChatGPT. Ollama and the existing API-key
+providers retain their prior intent-classification policy and current, named,
+and recent meeting routing. They do not acquire the new scope call or its
+complete-catalog limit. ChatGPT keeps validated semantic IDs, clarification,
+caching, cancellation, request/token admission and answer-headroom safeguards.
+
+Refines the cloud source-span allowance: the production compact-note parser
+requires an explicit ChatGPT provider to allow up to 36 spans. Local experimental
+flags or a larger numeric argument cannot widen Ollama's production three-span
+limit. Existing non-production experiments remain available. Pipeline calls pass
+the actual provider into the parser; the existing Ollama stream preview retains
+the local limit. Tests cover production provider separation and the onboarding
+provider-choice marker while preserving the profile and failure-path assertions.
+
+
+## 2026-10-17 — Bound scope catalogs without duplicate metadata
+
+Refines “Resolve Ask Pluto meeting scope semantically before retrieval.” Encode
+complete meeting headers as compact rows containing the original meeting ID,
+title, and local recording time with its UTC offset. This retains daylight-saving
+ambiguity information without duplicating the same timestamp in two formats.
+The catalog stops locally above 800 headers or 64,000 characters; question context
+still stops above 8,000 characters. Never truncate candidates to claim uniqueness.
+The known-ID schema, independent validation, cached exact-input reuse, and paid
+scope-plus-answer admission checks remain authoritative.
+
+## 2026-10-17 — Package compiled production code and bound idle cleanup
+
+The production Electron output mapping requires an explicit recursive file filter.
+A packaged test must compare its bundled JavaScript with the compiled production
+output; a successful renderer build does not prove which backend was packaged.
+Isolated acceptance packages use a private entry point that fixes their test
+profile before normal bootstrap and refuses overrides to another profile.
+
+Refines “Bound shutdown across background services.” An unused dreaming
+coordinator does not unload a model it never requested, and completed batch
+cleanup is not repeated at close. Idle model release has a five-second deadline
+covering queue admission as well as its HTTP request. The existing ten-second
+application shutdown watchdog remains the final bound. Dreaming close and idle
+model release run concurrently during shutdown so their individual five-second
+cleanup bounds cannot add up to the ten-second watchdog.
+
+## 2026-10-17 — Keep cloud writing and saved-note evidence authoritative
+
+ChatGPT structured-note generation always uses one writer with local validation,
+including callers that omit or request a model-review strategy. Do not silently
+add paid audit or repair calls. Ollama retains its existing review policy.
+
+Normalize structured action owners before deterministic action grounding so
+numbered speaker labels are not mistaken for unsupported quantities in the task.
+Saved action owners and deadlines remain visible in the notes document. Ask
+Pluto uses saved-note decisions rather than stale extraction decisions when its
+evidence kind is a note, and must distinguish scope, access, prerequisites,
+estimates, and confirmed deadlines without inventing causal links.
+
+
+## 2026-10-17 — Preserve the anchor of duration estimates
+
+Extends “Keep cloud writing and saved-note evidence authoritative.” Compact writers
+must preserve the stated starting point and endpoint of an estimate in
+all item kinds. A total wait that includes prerequisite work cannot be restated as
+an additional wait after that work. Preserve uncertainty and do not invent timing
+or causal links. Version the changed prompt as notes-v35 so exact-input caches and
+automatic publication checks do not confuse it with an older writer.
+
+
+## 2026-10-17 — Do not charge for historical cloud rewrites after configuration changes
+
+Supersedes cloud automatic configuration invalidation in “Bound ChatGPT plan
+consumption and reuse identical work” and “Reuse published notes after enrichment
+and retain action deadlines.” For ChatGPT,
+provider, model, prompt, template, and generation-option changes apply to future
+writing. An automatic request retains valid published notes when their source,
+eligibility, and user-note revisions are unchanged, including notes written by
+Ollama. It does not resume historical secondary work under a different generation
+configuration. Explicit regeneration still uses the current configuration, and
+changed source, eligibility, or user notes still require new generation. Malformed
+notes cannot satisfy this reuse guard. Ollama retains its existing automatic
+configuration-invalidation behavior. Usage admission, reservations, and explicit
+background opt-in are unchanged. Startup recovery of previously failed secondary
+work also stops for ChatGPT, including a provider switch between recovery items;
+Ollama keeps its existing recovery attempts. Cloud secondary work can still run
+with a new meeting or an explicit retry.
+
+## 2026-10-17 — Answer explicit ChatGPT questions from the complete scoped context
+
+ChatGPT Ask Pluto uses its answer provider after retrieval rather than returning
+an assignment-only or temporal extract. Those shortcuts can answer only one part
+of a question that also asks about booking status, dependencies, or uncertainty.
+Keep Ollama's existing extractive behavior. Cloud questions still use one scoped
+answer request under the same usage admission policy; semantic scope resolution
+and its cache remain unchanged.
+
+## 2026-10-17 — Keep legacy identity hints out of authoritative note evidence
+
+Extends “Keep cloud writing and saved-note evidence authoritative.” When valid V3
+notes exist, legacy meeting-intelligence participants, topics, and projects cannot
+expand names or add evidence to those notes. Confirmed speaker projections and
+the saved note text remain available through the canonical note projection.
+Legacy meeting-intelligence-only meetings retain their existing evidence. Bump the
+local evidence revision to rebuild derived indexes without model requests;
+changes to unused legacy metadata no longer change that revision. Retrieval results
+also omit legacy meeting-intelligence metadata when valid V3 notes exist, so
+section-level search cannot reintroduce those hints.
+
+## 2026-10-17 — Resolve unresolved action owners with one bounded semantic check
+
+Supersedes the blanket model-audit prohibition in “Keep cloud writing and saved-note
+evidence authoritative” for unresolved ownership only. Keep one notes writer and
+the existing source/provenance checks. When an accepted source-bound action has no
+owner, review its exact cited passages semantically rather than adding ownership
+grammar rules. Check all unresolved owners together, with at most 16 actions and
+12,000 source-data characters, a 90-second timeout, and the publication reserve.
+Names must occur in the cited passage or match its recorded speaker label; unknown,
+malformed, duplicate, foreign, or source-unanchored results cannot assign an owner.
+Update both canonical action projections without changing text, dates, or citations.
+
+For ChatGPT this is at most one additional `notesAudit` request under the existing
+admission ledger, never a second writer or an automatic retry. Reuse identical
+successful audits for ten minutes with the same account/model/context safeguards.
+Failures and blocked admission retain the useful writer result and unresolved
+ownership. Ollama runs the same check locally. Historical published notes retain
+their existing automatic reuse policy; no paid migration or backfill is introduced.
+
+
+## 2026-10-17 — Render local action answers from canonical fields
+
+Keep Ollama's extractive action answers and render owners, deadlines, and completion
+from the canonical note projection, including user edits. Internal evidence tags
+remain available to reasoning and source checks, while answers show owner,
+follow-up, and timing columns without parsing or rewriting the saved prose.
+Do not infer these fields by parsing generated prose. Legacy records without
+structured actions retain the existing extractive fallback.
+
+
+## 2026-10-17 — Quote only validated evidence in Ask Pluto source disclosures
+
+A synthesized answer's source reference identifies its saved-note context; it is
+not a verified verbatim quote. Keep its meeting link and reference count, but
+show quoted excerpts only when `evidence_valid` is true. This also handles saved
+answers without rewriting their history or stripping internal tags from prose.
+Validated excerpts retain their existing display and navigation.
+
+
+## 2026-10-17 — Prioritize accepted commitments before discussion in compact writing
+
+Extends the notes-v35 duration-anchor guidance. Begin compact writer instructions
+with accepted future commitments, including brief colloquial promises between
+longer discussion. Preserve exact speaker ownership, conditions, uncertainty, and
+prerequisites; requests and tentative plans remain discussion unless accepted.
+Exclude routine farewells without a concrete task or arrangement, while retaining
+promised calls about specific work. Only then summarize other material content.
+Keep the existing schema, source
+checks, provider budgets, and local chunking. Version this instruction order as
+notes-v36 so input revisions and caches distinguish it from the prior writer.
+ChatGPT's historical published-note reuse policy continues to prevent paid backfill.
+
+
+## 2026-10-17 — Replace pattern-based commitment recovery with source-bound semantic review
+
+Supersedes “Resolve unresolved action owners with one bounded semantic check” and
+the language-pattern recovery used by “Reuse published notes after enrichment and
+retain action deadlines.” Restore the existing Ollama grounding checks as the
+conservative fallback. Preserve the original writer claim and exact source spans
+in memory before fallback classification; do not rewrite speech using regular
+expressions or grow English commitment/negation patterns.
+
+On the product's deterministic-only writer path, review actions, decisions, and
+items held for source/prose review in one semantic batch before canonical
+projection. Resolve acceptance, owner, due date, conditions and scope from the
+cited passages. Keep material tentative context as a separate source-bound point
+when narrowing an overbroad action. Review complete cited turns and intervening
+source so omitted negation or acceptance is visible. Carry that complete window into canonical
+provenance. Group only exact contiguous excerpts and keep different speakers
+separate; never reconstruct omitted speech. The existing case-data bound applies
+to the expanded window; omit blank turns. Local checks validate complete
+responses, known unique IDs, original or exactly completed source windows, and
+source-anchored owner/date fields. Calendar formatting can validate an equivalent ISO date only when its
+complete date, including year, occurs in the source.
+
+This is at most one additional `notesAudit` request per new writer result, never
+another writer or per-leaf paid fanout. Keep the 16-item and 90-second/publication
+reserve bounds. Bound case data at 12,000 characters locally and 48,000 for ChatGPT, with corresponding 8k/32k
+review contexts. Hold an oversized case without blocking independent smaller
+cases. Retain existing usage admission and the ten-minute exact-response cache. A failure or blocked admission retains conservative notes
+with a review warning and no automatic retry. Ordinary discussion needs no audit.
+The older Ollama two-stage path keeps its existing independent audit without a
+third review. Historical ChatGPT notes retain their existing reuse policy. Version
+the new publication contract as notes-v37.
+
+Move the recovery use cases from synchronous language-pattern unit tests to
+fictional source-first provider evaluations, while unit tests verify source
+boundaries, validation, projection, cancellation, and usage admission. Provider
+evaluation is explicit and never runs or spends model usage in the unit suite.
+
+
+## 2026-10-17 — Keep derived meeting overviews distinct from action lists
+
+- **Status:** Accepted.
+- **Supersedes:** The fallback-overview preference for a topic's first reviewed outcome in **PR completion hardening (2026-08-27)** under Issue #674. The decisions and next-steps section still leads with reviewed outcomes.
+- **Decision:** When the writer provides no explicit overview, derive a short recap from reviewed discussion, decisions, and questions, preserving exact item wording and source spans. Keep action commands and their owners/deadlines in the action section. For an action-only meeting, report the number of recorded follow-ups rather than converting imperative tasks into owner-prefixed prose.
+- **Consequences:** Explicit reviewed overviews remain unchanged. The shared projection applies to both Ollama and ChatGPT without another model call, language-pattern rewriting, or automatic historical regeneration. Overview provenance follows the selected recap material; action data and user edits retain their existing contract.
+
+
+## 2026-10-18 — Connect ChatGPT with bounded automatic updates
+
+- **Supersedes:** The default-off background requirement in “2026-10-15 - Bound ChatGPT plan consumption and reuse identical work.” All durable accounting, duplicate prevention, explicit retry, and no silent provider substitution requirements remain in force.
+- **Decision:** New usage policies allow automatic People and Project updates, bounded by 20% of both daily admission budgets and at most ten requests. Retain 50 total provider requests and a 200,000-token daily admission budget; background defaults therefore reserve at most ten requests and 40,000 tokens. Preserve all saved policies and opt-outs. A running response can exceed its reservation; stop admitting later work once a budget is exhausted. These are profile-local safeguards, not a measurement of the shared ChatGPT allowance.
+- **Model:** Preserve the Terra preference and account-catalog fallback from “Prefer Terra with local recovered-action cleanup.” Saved comparisons inform the default; no model is promised to fit every workload or plan. Keep account-available alternatives under advanced settings.
+- **Experience:** Preview ChatGPT setup without switching the active provider. Browser sign-in and successful persistence of text-sharing consent precede activation. Confirm plan usage once, remember the provider, and show daily usage before optional technical settings. Keep recording and transcription local.
+- **Privacy:** Recheck the active provider and consent before admission and immediately before network egress. Switching away or revoking consent cancels active and queued ChatGPT inference without disconnecting the account or resetting usage.
+- **Scope:** This rollout excludes unfinished MTP runtime/default changes. Existing Ollama model defaults and custom model settings remain in place.

@@ -235,6 +235,10 @@ export interface LLMProvider {
     options?: {
       signal?: AbortSignal;
       workClass?: import('./llmWorkClass').LLMWorkClass;
+      purpose?: 'meetingScope';
+      responseSchema?: Record<string, unknown>;
+      onStart?: () => void;
+      onProgress?: () => void;
     },
   ): Promise<string>;
   extractEntities(
@@ -260,6 +264,7 @@ export interface LLMSettings {
   ollama_seed?: number;
   gemini_model?: string;
   openai_model?: string;
+  chatgpt_model?: string;
   openrouter_model?: string;
   claude_model?: string;
   cloud_consents?: Partial<

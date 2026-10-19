@@ -581,6 +581,58 @@ describe('Ask Pluto request lifecycle', () => {
     ).toBeNull();
   });
 
+  it('renders stored answer prose without rewriting owner labels or source sentences', async () => {
+    const content =
+      '[Owner: Riley] Send the checklist by Monday.\n\nSource: “Meeting,” October 15, 2026, 3:42 PM.';
+    const messages: AskPlutoMessage[] = [
+      {
+        id: 'stored-answer',
+        role: 'assistant',
+        content,
+        citations: [
+          {
+            claim: 'Send the checklist',
+            meeting_id: 'meeting-1',
+            meeting_title: 'Meeting',
+            evidence_span:
+              '[Named meeting]: Meeting [Analysis]: [Owner: Riley] Send the checklist',
+            evidence_valid: false,
+            trust_status: 'inferred',
+          },
+        ],
+      },
+    ];
+    await act(async () =>
+      root.render(
+        <AskPluto
+          visible
+          onClose={vi.fn()}
+          onOpenMeeting={vi.fn()}
+          messages={messages}
+        />,
+      ),
+    );
+    const answer = container.querySelector(
+      '[data-testid="ask-pluto-answer-content"]',
+    );
+    expect(answer?.textContent).toContain(
+      '[Owner: Riley] Send the checklist by Monday.',
+    );
+    expect(answer?.textContent).toContain(
+      'Source: “Meeting,” October 15, 2026, 3:42 PM.',
+    );
+    expect(messages[0].content).toBe(content);
+    expect(container.querySelector('details')?.textContent).not.toContain(
+      '[Named meeting]',
+    );
+    expect(
+      container.querySelector('details button[aria-label="Open Meeting"]'),
+    ).not.toBeNull();
+    expect(container.querySelector('details summary')?.textContent).toContain(
+      '1 source',
+    );
+  });
+
   it('presents citations as a collapsed source disclosure instead of meeting cards', async () => {
     const onOpenMeeting = vi.fn();
     const invoke = vi.fn((channel: string) => {
@@ -667,10 +719,16 @@ describe('Ask Pluto request lifecycle', () => {
     expect(disclosure?.querySelector('summary')?.textContent).toContain(
       '1 source',
     );
+    expect(disclosure?.querySelector('summary')?.textContent).not.toContain(
+      'reference',
+    );
     expect(container.textContent).not.toContain('Source Log');
     expect(container.textContent).not.toContain('Claim');
     expect(container.textContent).not.toContain('Grounded answer');
-    expect(container.textContent).toContain('2 synthesized note sections');
+    expect(disclosure?.textContent).toContain(
+      'The live transcript should update.',
+    );
+    expect(container.textContent).toContain('2 saved note sections');
     expect(container.textContent).not.toContain('113 meetings searched');
 
     const sourceButton = disclosure?.querySelector(

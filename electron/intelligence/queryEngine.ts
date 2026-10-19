@@ -1,4 +1,5 @@
 import type { AskPlutoActiveMeetingSnapshot } from '../../src/types/askPlutoQuery';
+import { parseAnalysisDocumentV3Json } from '../../src/utils/analysisDocument';
 import {
   searchMeetingContextSectionsFts,
   searchMeetingNotesFts,
@@ -61,7 +62,10 @@ export const buildMeetingRetrievalResult = (
   return {
     meeting_id: String(meeting.id),
     meeting_title: meeting.title || 'Untitled meeting',
-    mid: parseMid(meeting.mid_json),
+    mid: parseAnalysisDocumentV3Json(meeting.analysis_json)
+      ? null
+      : parseMid(meeting.mid_json),
+    ...(document.actions ? { note_actions: document.actions } : {}),
     evidence_text: evidence.join('\n'),
     score: 0,
     score_breakdown: {
@@ -487,6 +491,7 @@ export const parseQuery = async (
   options: {
     signal?: AbortSignal;
     useModelClassification?: boolean;
+    classification?: Pick<ParsedQuery, 'intent' | 'expanded_keywords'>;
     now?: Date;
     disputedEntity?: string;
   } = {},
@@ -730,7 +735,10 @@ export const parseQuery = async (
   let intent: ParsedQuery['intent'] = 'factual';
   let expanded_keywords: string[] = [];
 
-  if (isPlanning) {
+  if (options.classification) {
+    intent = options.classification.intent;
+    expanded_keywords = options.classification.expanded_keywords;
+  } else if (isPlanning) {
     intent = 'factual';
   } else if (options.useModelClassification === false) {
     intent = classifyQueryHeuristically(lowerText);
@@ -3054,6 +3062,26 @@ export const buildExtractiveTemporalSummary = (
   const claims = context.flatMap((source, index) => {
     const title = (source.meeting_title || source.mid?.title || '').trim();
     if (!title || GENERIC_MEETING_TITLE.test(title)) return [];
+    if (field === 'Action items' && source.note_actions) {
+      if (source.note_actions.length === 0) return [];
+      const cell = (value: string) =>
+        value
+          .split('|')
+          .join('\\|')
+          .split('\n')
+          .join(' ')
+          .split('\r')
+          .join(' ');
+      const rows = source.note_actions.map((action) => {
+        const timing = [action.due, action.completed ? 'Completed' : '']
+          .filter(Boolean)
+          .join(' · ');
+        return `| ${cell(action.assignee || 'Not recorded')} | ${cell(action.text)} | ${cell(timing || 'Not stated')} |`;
+      });
+      return [
+        `${title} [Source ${index + 1}]\n\n| Owner | Follow-up | Timing |\n| --- | --- | --- |\n${rows.join('\n')}`,
+      ];
+    }
     const prepared = field
       ? extractPreparedField(source.evidence_text, field)
       : extractPreparedAnalysis(source.evidence_text);

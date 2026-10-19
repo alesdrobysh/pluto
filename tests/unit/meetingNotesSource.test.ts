@@ -1,8 +1,31 @@
 import { expect, it } from 'vitest';
 import {
+  completeCitedSourceWindow,
   createNotesSource,
   resolveSourceSpan,
 } from '../../electron/llm/meetingNotesSource';
+
+it('completes partial turns so a review sees negation and named actors, omitting blank turns', () => {
+  const source = createNotesSource(
+    JSON.stringify([
+      { speaker: 'Me', text: 'I will not book the review.' },
+      { speaker: 'Them', text: ' ' },
+      { speaker: 'Nora', text: 'Riley will send the checklist Monday.' },
+    ]),
+  );
+  const spans = [
+    { segment: 2, start: 6, end: 10 },
+    { segment: 0, start: 11, end: 15 },
+  ];
+  const before = structuredClone(spans);
+  const window = completeCitedSourceWindow(source, spans);
+  expect(window.map((span) => resolveSourceSpan(source, span))).toEqual([
+    'I will not book the review.',
+    'Riley will send the checklist Monday.',
+  ]);
+  expect(spans).toEqual(before);
+  expect(completeCitedSourceWindow(source, [])).toEqual([]);
+});
 
 it('projects confirmed speaker names without mutating canonical input', () => {
   const raw = JSON.stringify({

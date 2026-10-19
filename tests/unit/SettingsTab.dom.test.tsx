@@ -288,6 +288,156 @@ describe('SettingsTab', () => {
     },
   );
 
+  describe('ChatGPT connection preview', () => {
+    async function preview() {
+      let connected = false;
+      const saved: Record<string, string> = {
+        chatgpt_plan_welcome_seen: 'true',
+      };
+      const invoke = vi.fn(async (channel: string, input?: any) => {
+        if (channel === 'GET_SETTING') return saved[input] ?? '';
+        if (channel === 'SET_SETTING') {
+          saved[input.key] = input.value;
+          return;
+        }
+        if (channel === 'CHATGPT_STATUS')
+          return { connected, planEnabled: connected };
+        if (channel === 'CHATGPT_SIGN_IN') {
+          connected = true;
+          saved.chatgpt_model = 'test-terra';
+          return { connected, planEnabled: connected };
+        }
+        if (channel === 'CHATGPT_MODELS')
+          return [{ id: 'test-terra', name: 'Terra' }];
+        return null;
+      });
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: { invoke, on: vi.fn(() => () => {}) },
+      });
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () =>
+        root.render(
+          <SettingsTab {...defaultProps} initialTab="intelligence" />,
+        ),
+      );
+      const click = async (label: string) => {
+        const button = [...container.querySelectorAll('button')].find(
+          (candidate) => candidate.textContent?.trim() === label,
+        )!;
+        expect(button).toBeDefined();
+        await act(async () => button.click());
+      };
+      await click('ChatGPT');
+      return { container, root, invoke, saved, click };
+    }
+
+    it('previews ChatGPT while keeping Ollama active until explicitly connected', async () => {
+      const f = await preview();
+      expect(f.container.textContent).toContain('Continue with ChatGPT');
+      expect(f.invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+      expect(f.saved.llm_provider).toBeUndefined();
+      expect(f.saved.cloud_consent_chatgpt).toBeUndefined();
+      expect(defaultProps.setLlmProvider).not.toHaveBeenCalled();
+      await f.click('Ollama');
+      expect(f.container.querySelector('#ollama-model')).not.toBeNull();
+      expect(defaultProps.setLlmProvider).not.toHaveBeenCalledWith('chatgpt');
+      act(() => f.root.unmount());
+    });
+
+    it('saves consent before activation and waits for persistence before changing provider', async () => {
+      const f = await preview();
+      const original = f.invoke.getMockImplementation()!;
+      let finishProviderSave!: () => void;
+      f.invoke.mockImplementation(async (channel, input) => {
+        if (channel === 'SET_SETTING' && input.key === 'llm_provider')
+          await new Promise<void>((resolve) => {
+            finishProviderSave = resolve;
+          });
+        return original(channel, input);
+      });
+      await f.click('Continue with ChatGPT');
+      expect(f.invoke).toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+      expect(f.invoke).toHaveBeenCalledWith('CHATGPT_MODELS');
+      expect(f.saved.cloud_consent_chatgpt).toBe('1');
+      expect(f.saved.llm_provider).toBeUndefined();
+      expect(defaultProps.setLlmProvider).not.toHaveBeenCalled();
+      await act(async () => finishProviderSave());
+      expect(f.saved.llm_provider).toBe('chatgpt');
+      expect(f.saved.intelligence_setup_complete).toBe('true');
+      expect(defaultProps.setLlmProvider).toHaveBeenCalledWith('chatgpt');
+      const writes = f.invoke.mock.calls
+        .filter(([channel]) => channel === 'SET_SETTING')
+        .map(([, input]) => input.key);
+      expect(writes).toEqual([
+        'cloud_consent_chatgpt',
+        'llm_provider',
+        'intelligence_setup_complete',
+      ]);
+      expect(
+        defaultProps.setLlmProvider.mock.invocationCallOrder[0],
+      ).toBeGreaterThan(
+        f.invoke.mock.invocationCallOrder[
+          f.invoke.mock.calls.findIndex(
+            ([channel, input]) =>
+              channel === 'SET_SETTING' &&
+              input.key === 'intelligence_setup_complete',
+          )
+        ],
+      );
+      act(() => f.root.unmount());
+    });
+
+    it('keeps a newer Ollama choice when the consent save finishes late', async () => {
+      const f = await preview();
+      const original = f.invoke.getMockImplementation()!;
+      let finishConsent!: () => void;
+      f.invoke.mockImplementation(async (channel, input) => {
+        if (channel === 'SET_SETTING' && input.key === 'cloud_consent_chatgpt')
+          await new Promise<void>((resolve) => {
+            finishConsent = resolve;
+          });
+        return original(channel, input);
+      });
+      await f.click('Continue with ChatGPT');
+      expect(finishConsent).toBeDefined();
+      await f.click('Ollama');
+      await act(async () => finishConsent());
+      expect(f.saved.llm_provider).toBe('ollama');
+      expect(defaultProps.setLlmProvider).not.toHaveBeenCalledWith('chatgpt');
+      expect(f.invoke).not.toHaveBeenCalledWith('SET_SETTING', {
+        key: 'llm_provider',
+        value: 'chatgpt',
+      });
+      act(() => f.root.unmount());
+    });
+
+    it('leaves Ollama active when ChatGPT consent cannot be saved', async () => {
+      const f = await preview();
+      const original = f.invoke.getMockImplementation()!;
+      f.invoke.mockImplementation(async (channel, input) => {
+        if (channel === 'SET_SETTING' && input.key === 'cloud_consent_chatgpt')
+          throw new Error('Could not save consent');
+        return original(channel, input);
+      });
+      await f.click('Continue with ChatGPT');
+      expect(f.saved.llm_provider).toBeUndefined();
+      expect(f.saved.cloud_consent_chatgpt).toBeUndefined();
+      expect(f.saved.intelligence_setup_complete).toBeUndefined();
+      expect(defaultProps.setLlmProvider).not.toHaveBeenCalled();
+      expect(
+        f.container.querySelector('[role="alert"]')?.textContent,
+      ).toContain('Could not save consent');
+      expect(f.invoke).not.toHaveBeenCalledWith('SET_SETTING', {
+        key: 'llm_provider',
+        value: 'chatgpt',
+      });
+      act(() => f.root.unmount());
+    });
+  });
+
   it('places cloud consent above the Settings animation and cancels without activating the provider', async () => {
     const container = document.createElement('div');
     container.style.transform = 'translateY(0)';

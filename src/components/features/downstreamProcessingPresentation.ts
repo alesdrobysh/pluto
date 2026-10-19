@@ -117,8 +117,14 @@ export const getDownstreamProcessingPresentation = (
   if (run.notes_status === 'failed' || run.notes_status === 'cancelled')
     return {
       state: 'failed',
-      title: 'Notes need another pass',
-      detail: 'Your transcript is ready. Try again to continue.',
+      title:
+        run.error_code === 'chatgpt_daily_limit'
+          ? 'ChatGPT requests are paused'
+          : 'Notes need another pass',
+      detail:
+        run.error_code === 'chatgpt_daily_limit'
+          ? 'Your transcript is saved. Review Usage protection in Settings → Intelligence, or wait until tomorrow.'
+          : 'Your transcript is ready. Try again to continue.',
       ...(typeof run.error_code === 'string'
         ? { failureCode: run.error_code }
         : {}),

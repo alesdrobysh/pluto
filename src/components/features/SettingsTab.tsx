@@ -43,6 +43,7 @@ import {
 import { PageHeader } from '../ui/PageHeader';
 import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
+import { ChatGPTIntelligenceSettings } from './ChatGPTIntelligenceSettings';
 import { ChatGptConnectionSettings } from './ChatGptConnectionSettings';
 import { IdentitySettings } from './IdentitySettings';
 import { ReportProblemButton } from './ReportProblemButton';
@@ -77,6 +78,7 @@ interface SettingsTabProps {
 
 const providerOptions = [
   { id: 'ollama', name: 'Ollama', detail: 'Local', icon: Cpu },
+  { id: 'chatgpt', name: 'ChatGPT', detail: 'Your plan', icon: Sparkles },
   { id: 'openrouter', name: 'OpenRouter', detail: 'Multi-model', icon: Cloud },
 ] as const;
 
@@ -322,6 +324,9 @@ export const SettingsTab = ({
       setActiveSettingsTab(initialTab);
     }
   }, [initialTab]);
+  const providerSelection = useRef(0);
+  const [chatGPTSetupRequested, setChatGPTSetupRequested] = useState(false);
+  const displayedProvider = chatGPTSetupRequested ? 'chatgpt' : llmProvider;
   const [ollamaFastModel, setOllamaFastModel] = useState('');
   const [credentialDraft, setCredentialDraft] = useState('');
   const [credentialEditing, setCredentialEditing] = useState(false);
@@ -529,9 +534,15 @@ export const SettingsTab = ({
   const activateProvider = (provider: ProviderId) => {
     setLlmProvider(provider);
     persistSetting('llm_provider', provider);
+    persistSetting('intelligence_setup_complete', 'true');
   };
 
   const requestProviderActivation = (provider: ProviderId) => {
+    ++providerSelection.current;
+    setChatGPTSetupRequested(
+      provider === 'chatgpt' && llmProvider !== 'chatgpt',
+    );
+    if (provider === 'chatgpt') return;
     if (provider === 'ollama') return activateProvider(provider);
     void window.ipcRenderer
       .invoke('GET_SETTING', cloudConsentSettingKey(provider))
@@ -1237,19 +1248,20 @@ export const SettingsTab = ({
           <Section title="Analysis">
             <SettingsRow
               label="AI Provider"
-              helper="Used for meeting summaries and knowledge extraction."
-              actionControl={false}
+              helper="Used for notes, Ask Pluto, meeting preparation, and connected knowledge."
+              actionControl
             >
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {providerOptions.map((provider) => {
-                  const active = llmProvider === provider.id;
+                  const active = displayedProvider === provider.id;
                   const Icon = provider.icon;
                   return (
                     <button
                       key={provider.id}
                       type="button"
+                      aria-pressed={active}
                       onClick={() => requestProviderActivation(provider.id)}
-                      className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-all text-left ${
+                      className={`flex min-w-[108px] items-center gap-2 rounded-lg border px-3 py-2 transition-all text-left ${
                         active
                           ? 'border-pro-accent bg-pro-accent/5 text-pro-text-main shadow-sm ring-1 ring-pro-accent/20'
                           : 'border-pro-border/60 bg-pro-bg text-pro-text-muted hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main'
@@ -1267,7 +1279,7 @@ export const SettingsTab = ({
               </div>
             </SettingsRow>
 
-            {llmProvider === 'ollama' ? (
+            {displayedProvider === 'ollama' ? (
               <>
                 <SettingsRow
                   htmlFor="ollama-model"
@@ -1304,6 +1316,35 @@ export const SettingsTab = ({
                   />
                 </SettingsRow>
               </>
+            ) : displayedProvider === 'chatgpt' ? (
+              <div className="p-5">
+                <h4 className="mb-3 text-[14px] font-medium text-pro-text-main">
+                  ChatGPT account
+                </h4>
+                <ChatGPTIntelligenceSettings
+                  activationPending={chatGPTSetupRequested}
+                  onConnected={async () => {
+                    const selection = providerSelection.current;
+                    await window.ipcRenderer.invoke('SET_SETTING', {
+                      key: 'cloud_consent_chatgpt',
+                      value: CLOUD_CONSENT_VERSION,
+                    });
+                    if (selection !== providerSelection.current) return;
+                    await window.ipcRenderer.invoke('SET_SETTING', {
+                      key: 'llm_provider',
+                      value: 'chatgpt',
+                    });
+                    if (selection !== providerSelection.current) return;
+                    await window.ipcRenderer.invoke('SET_SETTING', {
+                      key: 'intelligence_setup_complete',
+                      value: 'true',
+                    });
+                    if (selection !== providerSelection.current) return;
+                    setLlmProvider('chatgpt');
+                    setChatGPTSetupRequested(false);
+                  }}
+                />
+              </div>
             ) : llmProvider === 'openrouter' ? (
               <>
                 <SettingsRow
@@ -1593,13 +1634,18 @@ export const SettingsTab = ({
                   id="cloud-consent-title"
                   className="text-lg font-semibold text-pro-text-main"
                 >
-                  Allow cloud inference with {pendingCloudProvider}?
+                  Allow cloud inference with{' '}
+                  {pendingCloudProvider === 'chatgpt'
+                    ? 'ChatGPT'
+                    : pendingCloudProvider}
+                  ?
                 </h2>
                 <p className="mt-3 text-sm leading-6 text-pro-text-muted">
                   Selected transcript excerpts, notes, questions, and relevant
-                  local context may leave this Mac. Audio never leaves. Requests
-                  are stateless, and Pluto remains the only durable memory
-                  store.
+                  local context may leave this Mac, including for background
+                  People and Project updates. Recording and transcription stay
+                  local. Audio never leaves. Requests are stateless, and Pluto
+                  remains the only durable memory store.
                 </p>
                 <div className="mt-6 flex justify-end gap-2">
                   <button

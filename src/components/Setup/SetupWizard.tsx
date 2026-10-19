@@ -26,6 +26,7 @@ import { Logo } from '../Brand/Logo';
 import { ModelDownloadProgress } from '../ModelDownloadProgress';
 import { IdentityProfileForm } from '../features/IdentityProfileForm';
 import { WindowDragRegion } from '../layout/WindowDragRegion';
+import { IntelligenceSetup } from './IntelligenceSetup';
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -39,7 +40,7 @@ const requirementTone = (ready: boolean, blocked = false) =>
       : 'text-[oklch(0.53_0.12_255)]';
 
 export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 'intelligence'>(1);
   const [setupError, setSetupError] = useState('');
   const [transcriptionFailure, setTranscriptionFailure] = useState(() =>
     describeTranscriptionSetupFailure(),
@@ -121,15 +122,28 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
   useEffect(() => {
     const load = async () => {
-      const [setupComplete, savedStep] = await Promise.all([
-        window.ipcRenderer.invoke('GET_SETTING', 'setup_complete'),
-        window.ipcRenderer.invoke('GET_SETTING', 'setup_step'),
-      ]);
+      const [setupComplete, savedStep, intelligenceComplete] =
+        await Promise.all([
+          window.ipcRenderer.invoke('GET_SETTING', 'setup_complete'),
+          window.ipcRenderer.invoke('GET_SETTING', 'setup_step'),
+          window.ipcRenderer.invoke(
+            'GET_SETTING',
+            'intelligence_setup_complete',
+          ),
+        ]);
       if (setupComplete === 'true') {
         onComplete();
         return;
       }
-      setStep(savedStep === '3' ? 3 : savedStep === '2' ? 2 : 1);
+      setStep(
+        savedStep === '3' || savedStep === 'intelligence'
+          ? intelligenceComplete === 'true'
+            ? 3
+            : 'intelligence'
+          : savedStep === '2'
+            ? 2
+            : 1,
+      );
       setHydrated(true);
     };
     void load();
@@ -209,16 +223,21 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     );
   };
 
-  const continueToProfile = async () => {
+  const continueToIntelligence = async () => {
     if (!readiness.canComplete) return;
     setFinishing(true);
     setSetupError('');
     try {
+      const complete = await window.ipcRenderer.invoke(
+        'GET_SETTING',
+        'intelligence_setup_complete',
+      );
+      const nextStep = complete === 'true' ? 3 : 'intelligence';
       await window.ipcRenderer.invoke('SET_SETTING', {
         key: 'setup_step',
-        value: '3',
+        value: String(nextStep),
       });
-      setStep(3);
+      setStep(nextStep);
     } catch {
       setSetupError('Could not save setup progress. Please try again.');
     } finally {
@@ -286,7 +305,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 </span>
               </h2>
               <p className="mt-2 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
-                One download. Two permissions.
+                Local recording. Your choice of intelligence.
               </p>
 
               <ol className="mt-9 border-y border-[oklch(0.86_0.012_85)]">
@@ -426,7 +445,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
               <button
                 type="button"
-                onClick={() => void continueToProfile()}
+                onClick={() => void continueToIntelligence()}
                 disabled={!readiness.canComplete || finishing}
                 className="mt-8 inline-flex min-h-12 min-w-48 items-center justify-center rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold tracking-[0.01em] text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform,opacity] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)] disabled:cursor-not-allowed disabled:opacity-30"
               >
@@ -438,6 +457,32 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 </p>
               )}
             </div>
+          </section>
+        </div>
+      ) : step === 'intelligence' ? (
+        <div className="grid min-h-screen lg:grid-cols-[0.9fr_1.1fr]">
+          <ObservatoryPanel
+            eyebrow="Intelligence setup"
+            title="Your intelligence, your choice."
+            description="Use local models with Ollama, or connect the ChatGPT plan you already have."
+            footer="Recording and transcription stay on this Mac either way."
+          />
+          <section
+            aria-label="Intelligence setup"
+            className="flex items-center bg-pro-bg px-7 py-12 text-pro-text-main sm:px-12 lg:px-16 xl:px-24"
+            style={
+              {
+                '--pro-bg': '45 25% 96%',
+                '--pro-surface': '45 22% 93%',
+                '--pro-text-main': '220 20% 20%',
+                '--pro-text-muted': '220 10% 40%',
+                '--pro-border': '45 12% 80%',
+                '--pro-accent': '212 80% 42%',
+                colorScheme: 'light',
+              } as CSSProperties
+            }
+          >
+            <IntelligenceSetup onComplete={() => setStep(3)} />
           </section>
         </div>
       ) : (

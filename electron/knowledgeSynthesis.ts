@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { parseAnalysisDocumentV3Json } from '../src/utils/analysisDocument';
 import { applySpeakerDisplayNamesToText } from '../src/utils/meetingNotesDocument';
 import { projectMeetingNotesSpeakerReferences } from '../src/utils/meetingNotesSpeakerReferences';
+import { isChatGPTUsageProtectionError } from './chatgpt/auth';
 import * as db from './db';
 import {
   type AskPlutoClaimCorrection,
@@ -1110,10 +1111,12 @@ const synthesizeStructuredFromPrompt = async (params: {
   scopeTitle: string;
   sourceEvidenceByMeeting: Map<string, string>;
   signal?: AbortSignal;
+  workClass?: import('./llm/llmWorkClass').LLMWorkClass;
 }): Promise<KnowledgeCompiledDocument> => {
   params.signal?.throwIfAborted();
   const raw = await params.provider.synthesizeKnowledgeDocument(params.prompt, {
     signal: params.signal,
+    workClass: params.workClass,
   });
   params.signal?.throwIfAborted();
   const parsed = parseKnowledgeJsonResponse(raw);
@@ -1135,6 +1138,7 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
   sourceEvidenceByMeeting: Map<string, string>;
   claimCorrections: AskPlutoClaimCorrection[];
   signal?: AbortSignal;
+  workClass?: import('./llm/llmWorkClass').LLMWorkClass;
 }): Promise<KnowledgeCompiledDocument[]> => {
   try {
     const structured =
@@ -1150,7 +1154,7 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
                   params.chunk.sourceMeetings,
                   params.claimCorrections,
                 ),
-                { signal: params.signal },
+                { signal: params.signal, workClass: params.workClass },
               ),
             ),
           )
@@ -1167,10 +1171,16 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
             scopeTitle: params.doc.title,
             sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
             signal: params.signal,
+            workClass: params.workClass,
           });
     return hasStructuredContent(structured) ? [structured] : [];
   } catch (error) {
-    if (params.signal?.aborted) throw error;
+    if (
+      params.signal?.aborted ||
+      isChatGPTUsageProtectionError(error) ||
+      params.provider.name === 'ChatGPT'
+    )
+      throw error;
     if (isSerializedTaskPreemption(error)) throw error;
     if (params.chunk.sourceMeetings.length <= MIN_RETRY_CHUNK_SOURCE_MEETINGS) {
       console.warn(
@@ -1204,14 +1214,19 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
   sourceEvidenceByMeeting: Map<string, string>;
   claimCorrections: AskPlutoClaimCorrection[];
   signal?: AbortSignal;
+  workClass?: import('./llm/llmWorkClass').LLMWorkClass;
   onChunkProgress?: (partial: KnowledgeCompiledDocument) => void;
 }): Promise<KnowledgeCompiledDocument> => {
   const chunks = buildKnowledgeSourceChunks(
     params.sourceMeetings,
-    MAX_SOURCE_MEETINGS_PER_SYNTHESIS_CHUNK,
-    params.doc.scope_type === 'person_context'
-      ? 2
+    params.provider.name === 'ChatGPT'
+      ? MAX_SOURCE_MEETINGS
       : MAX_SOURCE_MEETINGS_PER_SYNTHESIS_CHUNK,
+    params.provider.name === 'ChatGPT'
+      ? MAX_SOURCE_MEETINGS
+      : params.doc.scope_type === 'person_context'
+        ? 2
+        : MAX_SOURCE_MEETINGS_PER_SYNTHESIS_CHUNK,
   );
 
   if (chunks.length > 1) {
@@ -1236,6 +1251,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
       sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
       claimCorrections: params.claimCorrections,
       signal: params.signal,
+      workClass: params.workClass,
     });
     if (queuedSynthesisPaused) {
       throw new DOMException('foreground_preempted', 'AbortError');
@@ -1338,7 +1354,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
           profileSources,
           params.claimCorrections,
         ),
-        { signal: params.signal },
+        { signal: params.signal, workClass: params.workClass },
       );
       params.signal?.throwIfAborted();
       const consolidated = compilePersonKnowledgeChunk(
@@ -1444,6 +1460,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
       scopeTitle: params.doc.title,
       sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
       signal: params.signal,
+      workClass: params.workClass,
     });
     return hasStructuredContent(merged)
       ? isKnowledgeV2Document(merged) && isKnowledgeV2Document(usefulFallback)
@@ -1462,7 +1479,8 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
           : usefulFallback
       : usefulFallback;
   } catch (error) {
-    if (params.signal?.aborted) throw error;
+    if (params.signal?.aborted || isChatGPTUsageProtectionError(error))
+      throw error;
     console.warn(
       `[KnowledgeDoc] Merge synthesis failed for ${params.doc.id}; using deterministic chunk merge:`,
       error,
@@ -1781,6 +1799,7 @@ const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
 };
 
 type KnowledgeSynthesisRequest = {
+  userRequested?: boolean;
   key: string;
   inputHash: string;
   doc: db.KnowledgeDoc;
@@ -1824,6 +1843,7 @@ const buildKnowledgeSynthesisRequest = (
     .digest('hex');
   return {
     key: `${docId}:${inputHash}`,
+    userRequested: getState(docId).userRequested,
     inputHash,
     doc,
     corrections,
@@ -1963,6 +1983,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       sourceEvidenceByMeeting,
       claimCorrections,
       signal: request.signal,
+      workClass: request.userRequested ? 'project_review' : 'background',
       // Flush partial content to DB after each chunk so the UI can render
       // real content progressively instead of waiting for the full merge.
       onChunkProgress: (partial) => {
@@ -2230,7 +2251,11 @@ export const refreshKnowledgeDocNow = async (
   }
   const baseRequest = buildKnowledgeSynthesisRequest(docId);
   if (!baseRequest) return undefined;
-  const request = { ...baseRequest, signal: options.signal };
+  const request = {
+    ...baseRequest,
+    signal: options.signal,
+    userRequested: options.userRequested ?? baseRequest.userRequested,
+  };
   const result = await runKnowledgeDocWithGlobalSynthesisGate(
     request.key,
     async () => synthesizeKnowledgeDocNowInternal(request),

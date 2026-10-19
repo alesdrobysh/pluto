@@ -1,9 +1,14 @@
-import type { CloudProviderId, ProviderId } from './inferenceTypes';
+import type {
+  ApiKeyProviderId,
+  CloudProviderId,
+  ProviderId,
+} from './inferenceTypes';
 
 export const CLOUD_CONSENT_VERSION = '1';
 
 export const PROVIDER_DEFAULT_MODELS: Record<ProviderId, string> = {
   ollama: 'phi4-reasoning-plus:latest',
+  chatgpt: '', // The signed-in account supplies its model catalog.
   openai: 'gpt-4o-mini',
   openrouter: 'openai/gpt-4o-mini',
   gemini: 'gemini-3.8-flash',
@@ -20,7 +25,7 @@ export const isCloudProvider = (
   provider: ProviderId,
 ): provider is CloudProviderId => provider !== 'ollama';
 
-export const credentialSettingKey = (provider: CloudProviderId) =>
+export const credentialSettingKey = (provider: ApiKeyProviderId) =>
   `${provider}_api_key` as const;
 
 export const cloudConsentSettingKey = (provider: CloudProviderId) =>

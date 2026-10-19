@@ -1,11 +1,13 @@
 export type ProviderId =
   | 'ollama'
+  | 'chatgpt'
   | 'openai'
   | 'openrouter'
   | 'gemini'
   | 'claude';
 
 export type CloudProviderId = Exclude<ProviderId, 'ollama'>;
+export type ApiKeyProviderId = Exclude<CloudProviderId, 'chatgpt'>;
 
 export interface ContextEvidence {
   sourceId: string;
@@ -24,6 +26,7 @@ export interface ContextBundle {
 
 export interface InferenceRequest {
   task: string;
+  workClass?: import('./llmWorkClass').LLMWorkClass;
   model: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   responseSchema?: Record<string, unknown>;
@@ -55,7 +58,7 @@ export interface InferenceResult {
 }
 
 export interface ProviderCredentialStatus {
-  provider: CloudProviderId;
+  provider: ApiKeyProviderId;
   configured: boolean;
   available: boolean;
   /** Redacted display-only hint. Never contains the complete credential. */

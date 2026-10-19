@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SetupWizard } from '../../src/components/Setup/SetupWizard';
+import { emptyIdentityProfile } from '../../src/types/identity';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,6 +28,8 @@ describe('SetupWizard', () => {
     root = createRoot(container);
     listeners = new Map();
     invoke = vi.fn(async (channel: string, key?: string) => {
+      if (channel === 'GET_IDENTITY_STATE')
+        return { profile: emptyIdentityProfile(), revision: 0, people: [] };
       if (channel === 'GET_SETTING') {
         if (key === 'setup_complete') return null;
         if (key === 'setup_step') return null;
@@ -113,6 +116,54 @@ describe('SetupWizard', () => {
     ).toBe(true);
   });
 
+  it('offers intelligence selection after local recording setup', async () => {
+    const original = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (channel: string, key?: string) =>
+      channel === 'GET_SETTING' && key === 'setup_step'
+        ? '2'
+        : original(channel, key),
+    );
+    await act(async () => root.render(<SetupWizard onComplete={vi.fn()} />));
+    await act(async () =>
+      [...container.querySelectorAll('button')]
+        .find((button) => button.textContent === 'Continue')!
+        .click(),
+    );
+    expect(container.textContent).toContain('Choose your intelligence');
+    expect(invoke).toHaveBeenCalledWith('SET_SETTING', {
+      key: 'setup_step',
+      value: 'intelligence',
+    });
+  });
+
+  it('does not ask completed users to choose a provider again', async () => {
+    invoke.mockImplementation(async (channel: string, key?: string) =>
+      channel === 'GET_SETTING' && key === 'setup_complete' ? 'true' : null,
+    );
+    const complete = vi.fn();
+    await act(async () => root.render(<SetupWizard onComplete={complete} />));
+    expect(complete).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain('Choose your intelligence');
+    expect(invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+  });
+
+  it('resumes past provider choice when installation was interrupted after saving it', async () => {
+    const original = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (channel: string, key?: string) => {
+      if (channel === 'GET_SETTING' && key === 'setup_step')
+        return 'intelligence';
+      if (channel === 'GET_SETTING' && key === 'intelligence_setup_complete')
+        return 'true';
+      return original(channel, key);
+    });
+    await act(async () => root.render(<SetupWizard onComplete={vi.fn()} />));
+    expect(
+      container.querySelector('[aria-label="About you setup"]'),
+    ).toBeTruthy();
+    expect(container.textContent).not.toContain('Choose your intelligence');
+    expect(invoke).not.toHaveBeenCalledWith('CHATGPT_SIGN_IN');
+  });
+
   it('prepares local recording requirements without Python or provider setup', async () => {
     act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
     await flush();
@@ -124,7 +175,9 @@ describe('SetupWizard', () => {
       'notes, decisions, people, and next steps',
     );
     expect(container.textContent).toContain('Ready in three minutes.');
-    expect(container.textContent).toContain('One download. Two permissions.');
+    expect(container.textContent).toContain(
+      'Local recording. Your choice of intelligence.',
+    );
     expect(container.textContent).toContain('Local transcription');
     expect(container.textContent).toContain('Microphone access');
     expect(container.textContent).toContain('System audio access');

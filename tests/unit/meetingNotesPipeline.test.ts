@@ -9,6 +9,7 @@ import {
 import { buildCompactNotesWriterPrompt } from '../../electron/llm/meetingNotesPrompts';
 import {
   MeetingNotesError,
+  NOTES_PROMPT_VERSION,
   type NotesDraft,
   type NotesRequest,
 } from '../../electron/llm/meetingNotesTypes';
@@ -119,7 +120,7 @@ it('uses one writer and one complete-document editor without segmentation or a t
     expect.objectContaining(fixture.expectedAction),
   ]);
   expect(result.generation_metadata).toMatchObject({
-    prompt_version: 'notes-v33',
+    prompt_version: NOTES_PROMPT_VERSION,
     pipeline_version: 'writer-editor-v1',
     audit_status: 'complete',
   });
@@ -718,7 +719,7 @@ it('splits a truncated compact leaf instead of retrying the same packet', async 
       generate,
       provider: 'ollama',
       model: 'gemma4:12b',
-      contextTokens: 8_192,
+      contextTokens: 9_216,
       onRepartition,
     });
 
