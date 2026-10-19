@@ -67,101 +67,136 @@ afterEach(() => {
 });
 
 describe('App final transcription retry boundary', () => {
-  it('refreshes the open meeting after asynchronous integrity rejection', async () => {
-    const meeting = {
-      id: 'retry-meeting',
-      title: 'Recording check',
-      created_at: '2026-09-04T00:00:00Z',
-      transcript_status: 'provisional',
-      finalization_status: 'finalized',
-      capture_journal_generation: 'generation-1',
-      audio_path: '/fixture/mic.wav',
-      system_audio_path: '/fixture/system.wav',
-      mixed_audio_path: '/fixture/mix.wav',
-      transcript_json: JSON.stringify({
-        segments: [{ text: 'retained words', startTime: 0, endTime: 1 }],
-      }),
-      transcript_integrity_json: '{}',
-    };
-    let finishWorker!: () => void;
-    runFinal.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          meeting.transcript_status = 'validating';
-          finishWorker = () => {
-            meeting.transcript_status = 'needs_attention';
-            meeting.finalization_status = 'needs_attention';
-            meeting.transcript_integrity_json = JSON.stringify({
-              finalTranscription: {
-                state: 'needs_attention',
-                failure: 'integrity_rejected',
-              },
-            });
-            resolve({ status: 'needs_attention' });
-          };
+  it.each([false, true])(
+    'refreshes the open meeting after asynchronous integrity rejection (detail IPC fails: %s)',
+    async (detailRefreshFails) => {
+      const refreshError = new Error('meeting detail IPC unavailable');
+      const errors = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      const meeting = {
+        id: 'retry-meeting',
+        title: 'Recording check',
+        created_at: '2026-09-04T00:00:00Z',
+        transcript_status: 'provisional',
+        finalization_status: 'finalized',
+        capture_journal_generation: 'generation-1',
+        audio_path: '/fixture/mic.wav',
+        system_audio_path: '/fixture/system.wav',
+        mixed_audio_path: '/fixture/mix.wav',
+        transcript_json: JSON.stringify({
+          segments: [{ text: 'retained words', startTime: 0, endTime: 1 }],
         }),
-    );
-    window.__PLUTO_BROWSER_PREVIEW__ = false;
-    Object.defineProperty(window, 'ipcRenderer', {
-      configurable: true,
-      value: {
-        invoke: vi.fn(async (channel: string, key?: string) => {
-          if (channel === 'GET_SETTING')
-            return key === 'setup_complete' ? 'true' : null;
-          if (channel === 'GET_MEETINGS') return structuredClone([meeting]);
-          if (channel === 'GET_MEETING') return structuredClone(meeting);
-          if (channel === 'CALENDAR_GET_STATE') return { enabled: false };
-          if (channel === 'BOOT_PROBE_STATUS') return true;
-          if (channel === 'DETECT_ACTIVE_CALL') return { active: false };
-          if (channel === 'RECORDING_READINESS_STATUS')
-            return {
-              details: {
-                parakeetClient: true,
-                parakeetModel: true,
-                parakeetEouReady: true,
-                audiocapExists: true,
-                audiocapExecutable: true,
-              },
+        transcript_integrity_json: '{}',
+      };
+      let finishWorker!: () => void;
+      let detailRefreshRejected = false;
+      runFinal.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            meeting.transcript_status = 'validating';
+            finishWorker = () => {
+              meeting.transcript_status = 'needs_attention';
+              meeting.finalization_status = 'needs_attention';
+              meeting.transcript_integrity_json = JSON.stringify({
+                finalTranscription: {
+                  state: 'needs_attention',
+                  failure: 'integrity_rejected',
+                },
+              });
+              resolve({ status: 'needs_attention' });
             };
-          return null;
-        }),
-        send: vi.fn(),
-        on: vi.fn(() => () => undefined),
-        off: vi.fn(),
-      },
-    });
-    const { default: App } = await import('../../src/App');
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    try {
-      await act(async () => {
-        root.render(<App />);
-        await flush();
+          }),
+      );
+      window.__PLUTO_BROWSER_PREVIEW__ = false;
+      Object.defineProperty(window, 'ipcRenderer', {
+        configurable: true,
+        value: {
+          invoke: vi.fn(async (channel: string, key?: string) => {
+            if (channel === 'GET_SETTING')
+              return key === 'setup_complete' ? 'true' : null;
+            if (channel === 'GET_MEETINGS') return structuredClone([meeting]);
+            if (channel === 'GET_MEETING') {
+              if (
+                detailRefreshFails &&
+                !detailRefreshRejected &&
+                meeting.transcript_status === 'needs_attention'
+              ) {
+                detailRefreshRejected = true;
+                throw refreshError;
+              }
+              return structuredClone(meeting);
+            }
+            if (channel === 'CALENDAR_GET_STATE') return { enabled: false };
+            if (channel === 'BOOT_PROBE_STATUS') return true;
+            if (channel === 'DETECT_ACTIVE_CALL') return { active: false };
+            if (channel === 'RECORDING_READINESS_STATUS')
+              return {
+                details: {
+                  parakeetClient: true,
+                  parakeetModel: true,
+                  parakeetEouReady: true,
+                  audiocapExists: true,
+                  audiocapExecutable: true,
+                },
+              };
+            return null;
+          }),
+          send: vi.fn(),
+          on: vi.fn(() => () => undefined),
+          off: vi.fn(),
+        },
       });
-      expect(runFinal).toHaveBeenCalledOnce();
-      await act(async () => {
-        Array.from(container.querySelectorAll('button'))
-          .find((button) => button.textContent === 'Open retry meeting')
-          ?.click();
-        await flush();
-      });
-      const selectedState = () =>
-        container.querySelector('[data-testid="selected-transcript-state"]')
-          ?.textContent;
-      expect(selectedState()).toContain('validating / finalized');
-      await act(async () => {
-        finishWorker();
-        await flush();
-      });
-      expect(selectedState()).toContain('needs_attention / needs_attention');
-      expect(selectedState()).toContain('integrity_rejected');
-      expect(runFinal).toHaveBeenCalledOnce();
-    } finally {
-      await act(async () => root.unmount());
-      container.remove();
-    }
-  });
+      const { default: App } = await import('../../src/App');
+      const container = document.createElement('div');
+      document.body.append(container);
+      const root = createRoot(container);
+      try {
+        await act(async () => {
+          root.render(<App />);
+          await flush();
+        });
+        expect(runFinal).toHaveBeenCalledOnce();
+        await act(async () => {
+          Array.from(container.querySelectorAll('button'))
+            .find((button) => button.textContent === 'Open retry meeting')
+            ?.click();
+          await flush();
+        });
+        const selectedState = () =>
+          container.querySelector('[data-testid="selected-transcript-state"]')
+            ?.textContent;
+        expect(selectedState()).toContain('validating / finalized');
+        await act(async () => {
+          finishWorker();
+          await flush();
+        });
+        if (detailRefreshFails) {
+          expect(errors).toHaveBeenCalledExactlyOnceWith(
+            '[Pluto] Failed to refresh final transcription state',
+            refreshError,
+          );
+          expect(selectedState()).toContain('validating / finalized');
+        } else {
+          expect(selectedState()).toContain(
+            'needs_attention / needs_attention',
+          );
+          expect(selectedState()).toContain('integrity_rejected');
+          expect(errors).not.toHaveBeenCalled();
+        }
+        expect(meeting.transcript_status).toBe('needs_attention');
+        expect(meeting.finalization_status).toBe('needs_attention');
+        expect(meeting.transcript_integrity_json).toContain(
+          'integrity_rejected',
+        );
+        expect(runFinal).toHaveBeenCalledOnce();
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+        errors.mockRestore();
+      }
+    },
+  );
 
   it.each([
     {
