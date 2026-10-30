@@ -6,7 +6,9 @@ import {
 } from './meetingNotesAudit';
 import { NOTES_EXPERIMENTS_ENABLED } from './meetingNotesExperiments';
 import {
+  isNonEnglishText,
   notesContentGuidance,
+  notesMultilingualGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
@@ -91,6 +93,7 @@ export const buildNotesEditorPrompt = ({
         ]
       : []),
     notesProseGuidance,
+    ...(isNonEnglishText(sourceText) ? [notesMultilingualGuidance] : []),
     notesSourceGuidance,
     getTemplateGuidance(template),
     'Optional terminology: Terminology[]. Omit or use [] when no correction is supported.',

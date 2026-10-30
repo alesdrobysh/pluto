@@ -151,6 +151,10 @@ import {
   refreshRecordingPermissions,
   shouldRunBootPermissionProbe,
 } from './utils/permissions';
+import {
+  type TranscriptionLanguage,
+  resolveTranscriptionLanguage,
+} from './utils/transcriptionSettings';
 
 const previewParam =
   typeof window !== 'undefined'
@@ -410,6 +414,8 @@ function App() {
   const [calendarAutoNameEnabled, setCalendarAutoNameEnabled] = useState(true);
   const [calendarPromptEnabled, setCalendarPromptEnabled] = useState(true);
   const [fasterNotesEnabled, setFasterNotesEnabled] = useState(true);
+  const [transcriptionLanguage, setTranscriptionLanguage] =
+    useState<TranscriptionLanguage>('en');
   const [meetingNotesTemplateSettings, setMeetingNotesTemplateSettings] =
     useState<MeetingNotesTemplateSettingsSnapshot>(() =>
       createMeetingNotesTemplateSettingsSnapshot('auto', {}),
@@ -1037,6 +1043,13 @@ function App() {
         if (val !== null) setFasterNotesEnabled(val !== 'false');
       });
     window.ipcRenderer
+      .invoke('GET_SETTING', 'transcription_language')
+      .then((val) => {
+        if (typeof val === 'string') {
+          setTranscriptionLanguage(resolveTranscriptionLanguage(val));
+        }
+      });
+    window.ipcRenderer
       .invoke('GET_MEETING_NOTES_TEMPLATE_SETTINGS')
       .then((snapshot: MeetingNotesTemplateSettingsSnapshot) => {
         if (snapshot?.defaultTemplateId && Array.isArray(snapshot.templates)) {
@@ -1241,7 +1254,7 @@ function App() {
       const result = await retryMeetingTranscriptValidation(
         meetingId,
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
-        { reason: 'manual' },
+        { reason: 'manual', language: transcriptionLanguage },
       );
       const refreshedMeetings = await fetchMeetings();
       if (result.status !== 'superseded') {
@@ -1820,6 +1833,7 @@ function App() {
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
         {
           signal: controller.signal,
+          language: transcriptionLanguage,
           manualRetry: reason !== 'automatic',
           rebuildSealedAudio:
             reason === 'speaker_labels' ||
@@ -2254,7 +2268,7 @@ function App() {
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
           transcriptionSettings={{
-            language: 'en',
+            language: transcriptionLanguage,
           }}
           onStopSessionRef={stopSessionRef}
           onStartSessionRef={startSessionRef}
@@ -2714,6 +2728,8 @@ function App() {
                 setCalendarPromptEnabled={handleCalendarPromptToggle}
                 fasterNotesEnabled={fasterNotesEnabled}
                 setFasterNotesEnabled={setFasterNotesEnabled}
+                transcriptionLanguage={transcriptionLanguage}
+                setTranscriptionLanguage={setTranscriptionLanguage}
                 meetingNotesTemplateSettings={meetingNotesTemplateSettings}
                 onMeetingNotesTemplateSettingsChange={
                   setMeetingNotesTemplateSettings

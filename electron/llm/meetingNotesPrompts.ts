@@ -1,5 +1,7 @@
 import {
+  isNonEnglishText,
   notesContentGuidance,
+  notesMultilingualGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from './meetingNotesGuidance';
@@ -124,6 +126,7 @@ export const buildNotesWriterPrompt = ({
   [
     notesContentGuidance,
     notesProseGuidance,
+    ...(isNonEnglishText(sourceText) ? [notesMultilingualGuidance] : []),
     'Group useful sections by topic. Put each accepted responsibility in an action item rather than only the overview; code derives document rollups.',
     notesSourceGuidance,
     '',
@@ -148,6 +151,7 @@ export const buildCompactNotesWriterPrompt = ({
   [
     notesContentGuidance,
     notesProseGuidance,
+    ...(isNonEnglishText(sourceText) ? [notesMultilingualGuidance] : []),
     'Group useful sections by topic. Put each accepted responsibility in an action item rather than only the overview.',
     notesSourceGuidance,
     '',

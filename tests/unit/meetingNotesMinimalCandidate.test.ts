@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parseAnalysisDocumentV3 } from '../../electron/llm/analysisDocumentV3';
 import {
+  isNonEnglishText,
   notesContentGuidance,
+  notesMultilingualGuidance,
   notesProseGuidance,
   notesSourceGuidance,
 } from '../../electron/llm/meetingNotesGuidance';
@@ -390,4 +392,64 @@ it('reports every hard prose failure within the same single repair', async () =>
   expect(result.generation_metadata).not.toHaveProperty(
     'source_action_review_version',
   );
+});
+
+it('detects non-English speech and creates grounded notes in the spoken language', async () => {
+  expect(isNonEnglishText('I will send the outline tomorrow.')).toBe(false);
+  expect(
+    isNonEnglishText(
+      'Тебя мама будила утром в 9:30, а будильник стоял на 7:30. Я отправлю расписание завтра.',
+    ),
+  ).toBe(true);
+  expect(
+    isNonEnglishText('Yo enviaré el informe mañana por la mañana para el equipo.'),
+  ).toBe(true);
+
+  const { provider, source, generate } = fixture(
+    'Тебя мама будила утром в 9:30, а будильник стоял на 7:30. Я отправлю расписание завтра.',
+  );
+  const russianResponse = {
+    title: { text: 'Утренний звонок и расписание', sources: ['R0'] },
+    overview: {
+      text: 'Обсудили утренний подъем в 9:30 при будильнике на 7:30, и Milo отправит расписание завтра.',
+      sources: ['R0'],
+    },
+    sections: [
+      {
+        title: 'Утро и расписание',
+        items: [
+          {
+            kind: 'point',
+            text: 'Будильник стоял на 7:30, но подъем был в 9:30.',
+            owner: null,
+            due: null,
+            sources: ['R0'],
+          },
+          {
+            kind: 'action',
+            text: 'Отправить расписание',
+            owner: 'Milo',
+            due: 'завтра',
+            sources: ['R0'],
+          },
+        ],
+      },
+    ],
+  };
+  generate.mockResolvedValueOnce(JSON.stringify(russianResponse));
+
+  const result = await provider.generateStructuredAnalysis('', '', 'auto', {
+    source,
+  });
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(generate.mock.calls[0]![0].prompt).toContain(notesMultilingualGuidance);
+  expect(result.title).toBe('Утренний звонок и расписание');
+  expect(result.overview).toBe(russianResponse.overview.text);
+  expect(result.all_action_items).toEqual([
+    expect.objectContaining({
+      text: 'Отправить расписание',
+      assignee: 'Milo',
+      due: 'завтра',
+    }),
+  ]);
 });

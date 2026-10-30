@@ -19,3 +19,59 @@ export const notesSourceGuidance =
 
 export const notesProseGuidance =
   'Write concise, readable third person notes, naming the relevant speaker when attribution matters. Do not paste raw first-person transcript fragments into finished prose. Repair false starts, repeated words and speech fillers without changing the supported meaning. Each section heading must fit all its items. Avoid repeating the same fact in multiple points.';
+
+export const notesMultilingualGuidance =
+  'Write all note text (title, overview, section titles and item text) in the primary spoken language of SOURCE DATA. Keep JSON keys, kind values and copied source descriptors in their required schema format.';
+
+const COMMON_ENGLISH_WORDS = new Set(
+  'the and that this with from have will would could should about after before until unless because their there where which while what when were been being into through during between under again further then once here they them theirs ourselves yourselves themselves'.split(
+    ' ',
+  ),
+);
+
+const COMMON_NON_ENGLISH_LATIN_WORDS = new Set(
+  'el la los las del una unos unas para por con como pero más esta este estos estas todo toda hacer enviaré mañana qué está están nosotros ustedes también después porque cuando donde quien não uma pelo pela estão amanhã também você vocês então depois quando che non della dello degli delle sono domani farò questo questa anche perché dopo les des dans pour pas sur plus avec cette sont faire demain vais nous vous mais tout tous après avant être avoir très même der die das und ich nicht mit auf für eine einen einem werden wird morgen wir sie aber oder nach noch auch über unter haben sind het een niet van voor naar ook maar worden nie się jest jak czy tego tylko przez żeby jutro będzie bir için olarak değil daha çok yarın'.split(
+    ' ',
+  ),
+);
+
+const extractSpokenText = (raw: string): string =>
+  raw
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(trimmed) as { text?: unknown };
+          if (typeof parsed.text === 'string') return parsed.text;
+        } catch {
+          // Fall back to plain line stripping.
+        }
+      }
+      return trimmed.replace(/^\s*(?:\[[^\]]+\]|[^:\n]{1,60})\s*:\s*/, '');
+    })
+    .join(' ');
+
+export const isNonEnglishText = (raw: string): boolean => {
+  if (!raw || !raw.trim()) return false;
+  const text = extractSpokenText(raw);
+  const letters = text.match(/\p{L}/gu) ?? [];
+  if (letters.length === 0) return false;
+  const nonLatin = text.replace(/\p{Script=Latin}/gu, '').match(/\p{L}/gu) ?? [];
+  if (nonLatin.length / letters.length >= 0.2) return true;
+  const words = (text.toLocaleLowerCase().match(/\p{L}+/gu) ?? []).filter(
+    (word) => word.length >= 2,
+  );
+  if (words.length < 2) return false;
+  const englishHits = words.filter((word) =>
+    COMMON_ENGLISH_WORDS.has(word),
+  ).length;
+  const nonEnglishHits = words.filter((word) =>
+    COMMON_NON_ENGLISH_LATIN_WORDS.has(word),
+  ).length;
+  if (nonEnglishHits >= 2 && nonEnglishHits > englishHits * 2) return true;
+  const accentedWords = words.filter((word) =>
+    /[\u00C0-\u024F\u1E00-\u1EFF]/.test(word),
+  ).length;
+  return accentedWords >= 2 && englishHits === 0;
+};

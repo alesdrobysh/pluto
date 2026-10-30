@@ -15,12 +15,16 @@ describe('transcription settings', () => {
     expect(resolveTranscriptionLanguage('  ')).toBe('en');
   });
 
-  it('normalizes every legacy language value to English', () => {
+  it('normalizes legacy language values to English while preserving auto-detect', () => {
+    expect(resolveTranscriptionLanguage('en')).toBe('en');
+    expect(resolveTranscriptionLanguage(' EN ')).toBe('en');
+    expect(resolveTranscriptionLanguage('auto')).toBe('auto');
+    expect(resolveTranscriptionLanguage(' AUTO ')).toBe('auto');
     expect(resolveTranscriptionLanguage('es')).toBe('en');
     expect(resolveTranscriptionLanguage(' fr ')).toBe('en');
   });
 
-  it('resolves transcription settings with defaults', () => {
+  it('resolves transcription settings with defaults and supports auto language', () => {
     const resolved = resolveTranscriptionSettings({});
     expect(resolved.backend).toBe(DEFAULT_TRANSCRIPTION_SETTINGS.backend);
     expect(resolved.preset).toBe(DEFAULT_TRANSCRIPTION_SETTINGS.preset);
@@ -34,6 +38,9 @@ describe('transcription settings', () => {
     expect(resolved.device).toBe('coreml');
     expect(resolved.liveEngine).toBe('parakeet_eou_320ms');
     expect(resolved.finalEngine).toBe('parakeet_coreml');
+
+    const autoResolved = resolveTranscriptionSettings({ language: 'auto' });
+    expect(autoResolved.language).toBe('auto');
   });
 
   it('normalizes backend and preset values', () => {
