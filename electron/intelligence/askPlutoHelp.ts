@@ -1,5 +1,6 @@
 // Product guidance lives here rather than being invented from meeting notes.
-// Keep connection steps aligned with docs/chatgpt-connection.md and Settings.
+// Keep connection steps aligned with docs/chatgpt-connection.md,
+// docs/claude-connection.md, and Settings.
 export const buildPlutoHelpReply = (query: string): string | null => {
   const text = query.normalize('NFKC').replace(/[’]/g, "'").trim();
   const helpRequest =
@@ -15,6 +16,12 @@ export const buildPlutoHelpReply = (query: string): string | null => {
   )
     return null;
 
+  if (
+    /\bclaude\b/i.test(text) &&
+    /\b(?:connect\w*|setup|set ?up|access|integrat\w*|use)\b/i.test(text)
+  ) {
+    return 'To connect Pluto to Claude on this Mac:\n\n1. Open **Settings → Advanced → Claude connection**. Allow meeting-note access, then click **Connect to Claude**.\n2. Fully quit Claude (⌘Q) and reopen it to load Pluto.\n3. In Claude Settings, open **Developer → Local MCP servers** and check for **pluto-notes** (or **pluto-notes-development** for a development build). Then start a new chat, enable Pluto in **+ → Connectors**, and allow note reads when asked.\n\nPluto is a local connector and won’t appear in the public connector directory. If Claude shows “No servers added,” fully quit it with ⌘Q and reopen it.\n\nKeep Pluto running with access enabled. Retrieved notes are sent to Anthropic; raw transcripts and audio are not shared. ChatGPT access is managed separately.\n\nIf it still fails, tell me the connection status or error shown in Settings.\n\n[Open Claude connection settings](/settings/advanced)';
+  }
   if (
     /\bchat\s*gpt\b/i.test(text) &&
     /\b(?:connect\w*|setup|set ?up|plugin|access|integrat\w*|use)\b/i.test(text)
@@ -32,7 +39,7 @@ export const buildPlutoHelpReply = (query: string): string | null => {
     /\b(?:missing|showing|show up|appear|see|find)\b/i.test(text) &&
     /\b(?:not|aren't|isn't|can't|missing|don't)\b/i.test(text)
   ) {
-    return 'Where are the meetings missing: Pluto’s meeting list or ChatGPT?\n\nIn Pluto, check the meeting list and any active search or filters. In ChatGPT, keep the Pluto installation containing your meetings running with note access enabled, then start a new Work chat and select its Pluto plugin with **@**. Development and release builds have separate plugins.\n\nI can’t determine the cause from this question alone. Tell me which screen is empty and any connection error shown.\n\n[Open ChatGPT connection settings](/settings/advanced)';
+    return 'Where are the meetings missing: Pluto’s meeting list, ChatGPT, or Claude?\n\nIn Pluto, check the meeting list and any active search or filters. In ChatGPT or Claude, keep the Pluto installation containing your meetings running with note access enabled for that app, then start a new Work chat in ChatGPT and select its Pluto plugin with **@**, or enable Pluto in **+ → Connectors** in Claude. Development and release builds have separate connectors.\n\nI can’t determine the cause from this question alone. Tell me which screen is empty and any connection error shown.\n\n[Open connection settings](/settings/advanced)';
   }
   if (
     /\b(?:settings?|permissions?)\b/i.test(text) ||
