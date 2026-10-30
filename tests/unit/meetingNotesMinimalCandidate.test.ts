@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { parseAnalysisDocumentV3 } from '../../electron/llm/analysisDocumentV3';
 import {
-  isNonEnglishText,
   notesContentGuidance,
   notesMultilingualGuidance,
   notesProseGuidance,
@@ -126,6 +125,7 @@ it('retains the existing bounded writer JSON-format repair', async () => {
   for (const guidance of [
     notesContentGuidance,
     notesProseGuidance,
+    notesMultilingualGuidance,
     notesSourceGuidance,
   ]) {
     expect(instructions).toContain(guidance);
@@ -394,40 +394,18 @@ it('reports every hard prose failure within the same single repair', async () =>
   );
 });
 
-it('detects non-English speech and creates grounded notes in the spoken language', async () => {
-  expect(isNonEnglishText('I will send the outline tomorrow.')).toBe(false);
-  expect(
-    isNonEnglishText(
-      'Тебя мама будила утром в 9:30, а будильник стоял на 7:30. Я отправлю расписание завтра.',
-    ),
-  ).toBe(true);
-  expect(
-    isNonEnglishText('Yo enviaré el informe mañana por la mañana para el equipo.'),
-  ).toBe(true);
-
-  const { provider, source, generate } = fixture(
-    'Тебя мама будила утром в 9:30, а будильник стоял на 7:30. Я отправлю расписание завтра.',
-  );
-  const russianResponse = {
-    title: { text: 'Утренний звонок и расписание', sources: ['R0'] },
-    overview: {
-      text: 'Обсудили утренний подъем в 9:30 при будильнике на 7:30, и Milo отправит расписание завтра.',
-      sources: ['R0'],
-    },
+it('preserves multilingual summary guidance without inventing action attribution', async () => {
+  const { provider, source, generate } = fixture('Маша отправит отчет завтра.');
+  const response = {
+    title: { text: 'План отчета', sources: ['R0'] },
+    overview: { text: 'Обсудили отправку отчета.', sources: ['R0'] },
     sections: [
       {
-        title: 'Утро и расписание',
+        title: 'Отчет',
         items: [
           {
-            kind: 'point',
-            text: 'Будильник стоял на 7:30, но подъем был в 9:30.',
-            owner: null,
-            due: null,
-            sources: ['R0'],
-          },
-          {
             kind: 'action',
-            text: 'Отправить расписание',
+            text: 'Отправить отчет',
             owner: 'Milo',
             due: 'завтра',
             sources: ['R0'],
@@ -436,20 +414,46 @@ it('detects non-English speech and creates grounded notes in the spoken language
       },
     ],
   };
-  generate.mockResolvedValueOnce(JSON.stringify(russianResponse));
+  generate.mockResolvedValue(JSON.stringify(response));
+  await expect(
+    provider.generateStructuredAnalysis('', '', 'auto', { source }),
+  ).rejects.toThrow('notes_writer_invalid');
+  expect(generate).toHaveBeenCalledTimes(2);
+  for (const [request] of generate.mock.calls) {
+    expect(request.prompt).toContain(notesMultilingualGuidance);
+  }
+});
 
+it('can publish multilingual discussion without unproved commitment metadata', async () => {
+  const { provider, source, generate } = fixture(
+    'Обсудили план нового отчета.',
+  );
+  generate.mockResolvedValue(
+    JSON.stringify({
+      title: { text: 'План отчета', sources: ['R0'] },
+      overview: { text: 'Обсудили план нового отчета.', sources: ['R0'] },
+      sections: [
+        {
+          title: 'Отчет',
+          items: [
+            {
+              kind: 'point',
+              text: 'Обсудили план нового отчета.',
+              owner: null,
+              due: null,
+              sources: ['R0'],
+            },
+          ],
+        },
+      ],
+    }),
+  );
   const result = await provider.generateStructuredAnalysis('', '', 'auto', {
     source,
   });
-  expect(generate).toHaveBeenCalledTimes(1);
-  expect(generate.mock.calls[0]![0].prompt).toContain(notesMultilingualGuidance);
-  expect(result.title).toBe('Утренний звонок и расписание');
-  expect(result.overview).toBe(russianResponse.overview.text);
-  expect(result.all_action_items).toEqual([
-    expect.objectContaining({
-      text: 'Отправить расписание',
-      assignee: 'Milo',
-      due: 'завтра',
-    }),
-  ]);
+  expect(result.title).toBe('План отчета');
+  expect(result.all_action_items).toEqual([]);
+  expect(generate.mock.calls[0]![0].prompt).toContain(
+    notesMultilingualGuidance,
+  );
 });

@@ -11,7 +11,6 @@ import {
   hasOmittedSubjectCondition,
   hasUnsupportedNotesCondition,
 } from './meetingNotesGuardrails';
-import { isNonEnglishText } from './meetingNotesGuidance';
 import type { CitedSpeakerAlias } from './meetingNotesTypes';
 
 export const normalizeTranscriptEvidence = (value: string): string =>
@@ -1204,56 +1203,6 @@ const sourceReviewedAcceptanceContext = (
   return { disposition, rejectedChoice, evidence, exactDecisionCopy };
 };
 
-const isUnacceptedNonEnglishRequest = (evidence: string): boolean => {
-  const clauses = (evidence.match(/[^.?!;]+[.?!;]?/g) ?? [])
-    .map((clause) => clause.trim())
-    .filter(Boolean);
-  return (
-    clauses.length > 0 && clauses.every((clause) => clause.endsWith('?'))
-  );
-};
-
-const nonEnglishGroundedOwner = (
-  claimedOwner: string | null,
-  resolved: ResolvedTranscriptEvidence,
-): string | null => {
-  if (!claimedOwner) return null;
-  const normalizedClaimed = normalizeTranscriptEvidence(claimedOwner);
-  if (
-    !normalizedClaimed ||
-    /^(?:them|unknown|speaker)$/i.test(claimedOwner.trim())
-  ) {
-    return null;
-  }
-  for (const line of resolved.sourceLines) {
-    const content = transcriptLineContent(line);
-    const hasDeclarativeClause = (content.match(/[^.?!;]+[.?!;]?/g) ?? []).some(
-      (clause) => clause.trim().length > 0 && !clause.trim().endsWith('?'),
-    );
-    if (!hasDeclarativeClause) continue;
-    const speaker = transcriptLineSpeaker(line);
-    if (
-      speaker &&
-      normalizeTranscriptEvidence(speaker) === normalizedClaimed
-    ) {
-      return speaker;
-    }
-    const alias = resolved.speakerAliases?.find(
-      (entry) =>
-        entry.speaker === speaker &&
-        normalizeTranscriptEvidence(entry.name) === normalizedClaimed,
-    );
-    if (alias) return alias.name;
-  }
-  if (
-    !GENERIC_ACTION_ASSIGNEE.test(claimedOwner) &&
-    fieldSupportedBySource(claimedOwner, resolved.sourceLine)
-  ) {
-    return claimedOwner;
-  }
-  return null;
-};
-
 /** Hard acceptance only; semantic review may resolve conservative wording checks. */
 export const hasSourceReviewedAcceptance = (
   item: SourceReviewedClaim,
@@ -1261,7 +1210,6 @@ export const hasSourceReviewedAcceptance = (
 ): boolean => {
   const { disposition, evidence, exactDecisionCopy } =
     sourceReviewedAcceptanceContext(item, resolved);
-  const nonEnglish = isNonEnglishText(evidence);
   const taskAcceptance =
     item.kind === 'action'
       ? sourceReviewedTaskAcceptance(item.text, item.owner, resolved)
@@ -1276,13 +1224,11 @@ export const hasSourceReviewedAcceptance = (
     (item.kind === 'decision' &&
       !disposition &&
       (isUnsettledProposal(evidence) ||
-        (!nonEnglish && /\b(?:no|not|unassigned)\b/i.test(item.text))) &&
+        /\b(?:no|not|unassigned)\b/i.test(item.text)) &&
       !/\b(?:agreed|decided|approved|selected|will use|we will|proceed|the decision is)\b/i.test(
         evidence,
       )) ||
-    (nonEnglish
-      ? isUnacceptedNonEnglishRequest(evidence)
-      : isUnacceptedRequest(evidence)) ||
+    isUnacceptedRequest(evidence) ||
     (item.kind === 'action' &&
       isUnacceptedSourceOffer(item.text, item.owner, resolved)) ||
     (SOURCE_UNCERTAIN_MODAL.test(evidence) &&
@@ -1410,12 +1356,11 @@ export const groundSourceReviewedItem = (
     (conditional.test(taskEvidence) && !conditional.test(item.text))
   )
     return null;
-  const nonEnglish = isNonEnglishText(evidence);
   const ownership =
     item.kind === 'action'
       ? resolveActionAssignee(item.owner ?? undefined, resolved, item.text)
       : null;
-  const englishOwner =
+  const owner =
     item.kind === 'action'
       ? (ownership?.assignee ??
         sourceReviewedOngoingOwner(item.text, item.owner, resolved))
@@ -1426,9 +1371,6 @@ export const groundSourceReviewedItem = (
             : settledFieldSupportedByTurn(item.owner, resolved, 'decision'))
         ? item.owner
         : null;
-  const owner =
-    englishOwner ??
-    (nonEnglish ? nonEnglishGroundedOwner(item.owner, resolved) : null);
   const comparisonDue = normalizeDateOrdinals(item.due ?? '');
   const dueEvidence = normalizeDateOrdinals(evidence);
   const duePattern = comparisonDue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -1437,11 +1379,10 @@ export const groundSourceReviewedItem = (
     isSettledDueValue(item.due) &&
     fieldSupportedBySource(comparisonDue, dueEvidence) &&
     !fieldExplicitlySuperseded(comparisonDue, dueEvidence) &&
-    (nonEnglish ||
-      new RegExp(
-        `\\b(?:by|before|on|due|deadline(?: is)?|no later than)\\s+(?:the\\s+)?(?:(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday),?\\s+)?${duePattern}\\b`,
-        'i',
-      ).test(dueEvidence) ||
+    (new RegExp(
+      `\\b(?:by|before|on|due|deadline(?: is)?|no later than)\\s+(?:the\\s+)?(?:(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday),?\\s+)?${duePattern}\\b`,
+      'i',
+    ).test(dueEvidence) ||
       (item.kind === 'action' &&
         ownership?.assignee &&
         /^(?:(?:this|next)\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)$/i.test(

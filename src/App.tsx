@@ -1254,7 +1254,7 @@ function App() {
       const result = await retryMeetingTranscriptValidation(
         meetingId,
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
-        { reason: 'manual', language: transcriptionLanguage },
+        { reason: 'manual' },
       );
       const refreshedMeetings = await fetchMeetings();
       if (result.status !== 'superseded') {
@@ -1833,7 +1833,6 @@ function App() {
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
         {
           signal: controller.signal,
-          language: transcriptionLanguage,
           manualRetry: reason !== 'automatic',
           rebuildSealedAudio:
             reason === 'speaker_labels' ||

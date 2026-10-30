@@ -1,5 +1,4 @@
 import {
-  isNonEnglishText,
   notesContentGuidance,
   notesMultilingualGuidance,
   notesProseGuidance,
@@ -125,8 +124,8 @@ export const buildNotesWriterPrompt = ({
 }: WriterPromptInput): string =>
   [
     notesContentGuidance,
+    notesMultilingualGuidance,
     notesProseGuidance,
-    ...(isNonEnglishText(sourceText) ? [notesMultilingualGuidance] : []),
     'Group useful sections by topic. Put each accepted responsibility in an action item rather than only the overview; code derives document rollups.',
     notesSourceGuidance,
     '',
@@ -150,8 +149,8 @@ export const buildCompactNotesWriterPrompt = ({
 }: WriterPromptInput): string =>
   [
     notesContentGuidance,
+    notesMultilingualGuidance,
     notesProseGuidance,
-    ...(isNonEnglishText(sourceText) ? [notesMultilingualGuidance] : []),
     'Group useful sections by topic. Put each accepted responsibility in an action item rather than only the overview.',
     notesSourceGuidance,
     '',
@@ -181,6 +180,7 @@ export const buildNotesAuditPrompt = ({
   [
     'Audit the draft against the original source, not against your general knowledge.',
     notesContentGuidance,
+    notesMultilingualGuidance,
     notesAuditCorrectionGuidance,
     'Scan the source for missing commitments even if the draft has zero actions.',
     'First read EVERY source turn independently of the draft. Insert every missed current commitment as an action; overview/point mentions do not count. Then review existing blocks.',
@@ -231,6 +231,7 @@ export const buildNotesMergePrompt = ({
   [
     'Consolidate source-grounded child meeting-note drafts into one compact draft.',
     notesContentGuidance,
+    notesMultilingualGuidance,
     notesSourceGuidance,
     'Child drafts are not evidence. Use the original evidence excerpts to retain, qualify, cancel, or supersede claims.',
     'Do not conflate identical task wording from different speakers or source spans.',

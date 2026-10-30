@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_TRANSCRIPTION_SETTINGS,
+  readConfiguredTranscriptionLanguage,
   resolveTranscriptionBackend,
   resolveTranscriptionLanguage,
   resolveTranscriptionPreset,
@@ -9,6 +10,29 @@ import {
 } from '../../src/utils/transcriptionSettings';
 
 describe('transcription settings', () => {
+  it.each([
+    ['auto', 'en', 'auto'],
+    ['en', 'auto', 'en'],
+    ['invalid', 'auto', 'en'],
+    [null, 'auto', 'auto'],
+    [null, null, 'en'],
+  ])(
+    'reads saved preference %j before stored language %j',
+    async (saved, stored, expected) => {
+      expect(
+        await readConfiguredTranscriptionLanguage(async () => saved, stored),
+      ).toBe(expected);
+    },
+  );
+
+  it('uses the stored language when settings cannot be read', async () => {
+    expect(
+      await readConfiguredTranscriptionLanguage(async () => {
+        throw new Error('unavailable');
+      }, 'auto'),
+    ).toBe('auto');
+  });
+
   it('defaults language to English when unset', () => {
     expect(resolveTranscriptionLanguage(undefined)).toBe('en');
     expect(resolveTranscriptionLanguage('')).toBe('en');

@@ -1,3 +1,11 @@
+## 2026-10-29 - Preserve grounding while enabling final Auto-detect (notes-v100)
+
+- **Supersedes:** The heuristic language detection and non-English commitment exceptions in “Offer Auto-detect for final transcription language”; the prompt/cache identity in “Preserve trusted notes policy during bounded repair (notes-v99)”.
+- **Decision:** Apply primary-spoken-language guidance to every notes writer, editor, audit, merge, reconciliation, and repair stage. Keep the existing ownership and deadline checks for every language. A speaker label or date mention alone cannot prove an accepted responsibility or deadline. Unsupported structured metadata requires bounded repair or refuses publication.
+- **Language selection:** Final workers read the saved preference when they run, rather than receiving the renderer's initial English state before settings load. Explicit service overrides remain available.
+- **Boundary:** Auto-detect enables multilingual final transcription. Multilingual commitment extraction and real-provider note quality are not established by mocked unit tests; live EOU remains English-only.
+- **Validation:** Regression cases cover speaker/actor mismatch, unrelated dates, mixed-language requests, language guidance across writing stages, saved preference resolution, and refusal of unproved multilingual metadata. Prompt/cache identity is `notes-v100`.
+
 ## 2026-10-29 - Offer Auto-detect for final transcription language
 
 - **Source:** [PR #883](https://github.com/metagrover/pluto/pull/883) and its review.
