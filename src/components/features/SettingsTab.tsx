@@ -49,6 +49,7 @@ import { SearchSelect } from '../ui/SearchSelect';
 import { CalendarSettings } from './CalendarSettings';
 import { ChatGPTIntelligenceSettings } from './ChatGPTIntelligenceSettings';
 import { ChatGptConnectionSettings } from './ChatGptConnectionSettings';
+import { ClaudeConnectionSettings } from './ClaudeConnectionSettings';
 import { IdentitySettings } from './IdentitySettings';
 import { OllamaReadinessStatus } from './OllamaReadinessStatus';
 import { ReportProblemButton } from './ReportProblemButton';
@@ -1599,6 +1600,7 @@ export const SettingsTab = ({
           aria-labelledby="settings-tab-advanced"
         >
           <ChatGptConnectionSettings />
+          <ClaudeConnectionSettings />
           <Section title="Local data">
             <SettingsRow
               label="Database encryption"
